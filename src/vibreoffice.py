@@ -1,4 +1,3 @@
-import uno
 import unohelper
 import builtins
 import datetime
@@ -7,7 +6,7 @@ from com.sun.star.awt import XKeyHandler
 from com.sun.star.awt import KeyModifier
 from com.sun.star.document import XEventListener
 
-DEBUG = True
+DEBUG = False
 MAX_HANDLER_REMOVE_ATTEMPTS = 3
 
 
@@ -38,6 +37,7 @@ def _state():
             "active_handler_token": 0,
             "view_event_listener": None,
             "global_event_broadcaster": None,
+            # For debug
             "enable_calls": 0,
             "disable_calls": 0,
             "toggle_calls": 0,
@@ -167,18 +167,6 @@ def _set_raw_status_for_controller(controller, text):
 def _set_mode(mode_name):
     _state()["mode"] = mode_name
     _set_raw_status(mode_name)
-
-
-def _restore_status():
-    controller = _current_controller()
-    if controller is None:
-        return
-    try:
-        layout = controller.getFrame().LayoutManager
-        layout.destroyElement("private:resource/statusbar/statusbar")
-        layout.createElement("private:resource/statusbar/statusbar")
-    except Exception:
-        pass
 
 
 def _restore_status_for_controller(controller):
@@ -454,38 +442,28 @@ def _attach_controller(controller):
         pass
 
 
-def _apply_key_handler_to_controller(controller, attach):
+def _detach_controller(controller):
     state = _state()
     if controller is None or state["key_handler"] is None:
         return
-    if attach:
-        _attach_controller(controller)
-    else:
-        for _ in range(MAX_HANDLER_REMOVE_ATTEMPTS):
-            try:
-                controller.removeKeyHandler(state["key_handler"])
-            except Exception:
-                break
+    for _ in range(MAX_HANDLER_REMOVE_ATTEMPTS):
+        try:
+            controller.removeKeyHandler(state["key_handler"])
+        except Exception:
+            break
 
 
-def _apply_key_handler_to_all_views(attach):
+def _attach_key_handler_to_all_views():
     count = 0
     for controller in _iter_text_document_controllers():
-        _apply_key_handler_to_controller(controller, attach)
+        _attach_controller(controller)
         count += 1
     return count
 
 
-def _start_key_handler():
-    _stop_key_handler()
-    # Do not attach here. The only authoritative attach path is enable(),
-    # which creates a fresh handler generation and attaches it to all views.
-    _state()["key_handler"] = None
-
-
-def _stop_key_handler():
-    _apply_key_handler_to_all_views(False)
-
+def _detach_key_handler_from_all_views():
+    for controller in _iter_text_document_controllers():
+        _detach_controller(controller)
 
 class ViewEventListener(unohelper.Base, XEventListener):
     def notifyEvent(self, event):
@@ -557,7 +535,9 @@ def _activate_for_current_view():
 def _init_vibreoffice():
     state = _state()
     state["started"] = True
-    _start_key_handler()
+    # Detach while handler reference is still available.
+    _detach_key_handler_from_all_views()
+    _state()["key_handler"] = None
     _start_view_event_listener()
     _reinit_vibreoffice()
 
@@ -580,7 +560,7 @@ def _set_vibreoffice_enabled(enable_value):
     if state["enabled"]:
         state["active_handler_token"] += 1
         state["key_handler"] = KeyHandler(state["active_handler_token"])
-        attached = _apply_key_handler_to_all_views(True)
+        attached = _attach_key_handler_to_all_views()
         # Fallback only when enumeration finds no eligible text views.
         if attached == 0:
             _attach_controller(_current_controller())
@@ -589,7 +569,7 @@ def _set_vibreoffice_enabled(enable_value):
         # Invalidate any stale attached handlers immediately, even if LO keeps
         # old registrations around internally.
         state["active_handler_token"] += 1
-        _apply_key_handler_to_all_views(False)
+        _detach_key_handler_from_all_views()
         state["key_handler"] = None
         _restore_status_all_views()
 
