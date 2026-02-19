@@ -350,8 +350,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def keyPressed(self, event):
         state = _state()
-        # Let LibreOffice handle Ctrl/Alt/Meta shortcuts unless explicitly
-        # captured by this extension.
+        # Let LibreOffice handle Ctrl/Alt/Meta shortcuts unless explicitly captured.
         if _has_non_shift_modifier(event):
             return False
         if not self._is_active_instance():
@@ -442,6 +441,11 @@ def _attach_controller(controller):
         pass
 
 
+def _detach_key_handler_from_all_views():
+    for controller in _iter_text_document_controllers():
+        _detach_controller(controller)
+
+
 def _detach_controller(controller):
     state = _state()
     if controller is None or state["key_handler"] is None:
@@ -460,10 +464,6 @@ def _attach_key_handler_to_all_views():
         count += 1
     return count
 
-
-def _detach_key_handler_from_all_views():
-    for controller in _iter_text_document_controllers():
-        _detach_controller(controller)
 
 class ViewEventListener(unohelper.Base, XEventListener):
     def notifyEvent(self, event):
