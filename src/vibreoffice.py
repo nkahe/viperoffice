@@ -4,6 +4,7 @@ import builtins
 import datetime
 
 from com.sun.star.awt import XKeyHandler
+from com.sun.star.awt import KeyModifier
 from com.sun.star.document import XEventListener
 
 DEBUG = True
@@ -296,6 +297,18 @@ def _normalize_key_char(event):
     return ""
 
 
+def _event_modifiers(event):
+    try:
+        return int(event.Modifiers)
+    except Exception:
+        return 0
+
+
+def _has_non_shift_modifier(event):
+    mods = _event_modifiers(event)
+    return bool(mods & (KeyModifier.MOD1 | KeyModifier.MOD2 | KeyModifier.MOD3))
+
+
 def _move_view(key_char):
     view = _view_cursor()
     if view is None:
@@ -349,6 +362,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def keyPressed(self, event):
         state = _state()
+        # Let LibreOffice handle Ctrl/Alt/Meta shortcuts unless explicitly
+        # captured by this extension.
+        if _has_non_shift_modifier(event):
+            return False
         if not self._is_active_instance():
             # Stale handlers can still be called by LO after lifecycle changes.
             # Swallow one duplicate transition callback if needed.
@@ -402,6 +419,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def keyReleased(self, event):
         state = _state()
+        if _has_non_shift_modifier(event):
+            return False
         if not self._is_active_instance():
             return bool(state["enabled"] and state["mode"] == "NORMAL")
         if not state["enabled"]:
