@@ -47,7 +47,6 @@ def _state():
             # One-shot guards for duplicate transition callbacks from stale
             # handlers (Python UNO lifecycle quirk).
             "swallow_once_insert_press": False,
-            "swallow_once_normal_press": False,
         }
         setattr(builtins, key, state)
     return state
@@ -325,6 +324,24 @@ def _is_insert_key(event):
         return False
 
 
+def _is_delete_key(event):
+    try:
+        return _key_code(event) == int(getattr(Key, "DELETE"))
+    except Exception:
+        return False
+
+
+def _is_function_key(event):
+    key_code = _key_code(event)
+    for i in range(1, 13):
+        try:
+            if key_code == int(getattr(Key, f"F{i}")):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _move_view(key_char):
     view = _view_cursor()
     if view is None:
@@ -376,6 +393,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             action()
         return True
 
+    # Return False: event consumed, False: let pass through.
     def keyPressed(self, event):
         state = _state()
         if not state["enabled"]:
@@ -389,10 +407,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if state["mode"] == "INSERT" and state["swallow_once_insert_press"]:
                 state["swallow_once_insert_press"] = False
                 return True
-            if state["mode"] == "NORMAL" and state["swallow_once_normal_press"]:
-                state["swallow_once_normal_press"] = False
-                return True
-            if state["mode"] == "NORMAL" and _is_navigation_key(event):
+            if state["mode"] == "NORMAL" and (
+                _is_navigation_key(event) or _is_function_key(event)
+            ):
                 return False
             return bool(state["mode"] == "NORMAL")
 
@@ -411,14 +428,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if state["mode"] == "INSERT":
             if is_escape:
-                state["swallow_once_normal_press"] = True
                 return self._consume_active_event(lambda: _goto_mode("NORMAL"))
             return False
 
         # NORMAL mode: block input by default.
         if _is_insert_key(event):
             return self._consume_active_event(lambda: _switch_to_insert_with_swallow(state))
-        if _is_navigation_key(event):
+        if _is_delete_key(event):
+            return self._consume_active_event(_delete_char_under_cursor)
+        if _is_navigation_key(event) or _is_function_key(event):
             return False
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
@@ -437,25 +455,24 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_active_event()
 
+    # Return False: event consumed, False: let pass through.
     def keyReleased(self, event):
         state = _state()
         if not state["enabled"]:
             return False
+
         # Keep NORMAL cursor rendering for navigation releases, including
         # Ctrl+Home/Ctrl+End where Ctrl would otherwise short-circuit below.
         if state["mode"] == "NORMAL" and _is_navigation_key(event):
             _show_normal_cursor()
             return False
-        if _has_non_shift_modifier(event):
+        if state["mode"] == "NORMAL" and _is_function_key(event):
             return False
-        if not self._is_active_instance():
-            return bool(state["mode"] == "NORMAL")
+
         if state["mode"] == "NORMAL":
             _show_normal_cursor()
             return True
-        if state["mode"] == "INSERT":
-            _show_insert_cursor()
-            return False
+
         return False
 
     def disposing(self, event):
@@ -598,7 +615,6 @@ def _set_vibreoffice_enabled(enable_value):
         return
     state["enabled"] = enable_value
     state["swallow_once_insert_press"] = False
-    state["swallow_once_normal_press"] = False
     if state["enabled"]:
         state["active_handler_token"] += 1
         state["key_handler"] = KeyHandler(state["active_handler_token"])
