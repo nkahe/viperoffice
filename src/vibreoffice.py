@@ -481,7 +481,11 @@ class ViewEventListener(unohelper.Base, XEventListener):
         if event_name == "OnFocus":
             # Do not reattach on every focus change: in Python UNO this can
             # accumulate duplicate callbacks for the same handler.
-            _activate_for_current_view()
+            _set_raw_status_for_controller(controller, state["mode"])
+            if state["mode"] == "NORMAL":
+                _show_normal_cursor_for_controller(controller)
+            else:
+                _show_insert_cursor_for_controller(controller)
         elif event_name == "OnViewCreated":
             _attach_controller(controller)
 
