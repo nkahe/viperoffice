@@ -4,6 +4,7 @@ import datetime
 
 from com.sun.star.awt import XKeyHandler
 from com.sun.star.awt import KeyModifier
+from com.sun.star.awt import Key
 from com.sun.star.document import XEventListener
 
 DEBUG = False
@@ -317,6 +318,13 @@ def _is_navigation_key(event):
     return _key_code(event) in (1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031)
 
 
+def _is_insert_key(event):
+    try:
+        return _key_code(event) == int(getattr(Key, "INSERT"))
+    except Exception:
+        return False
+
+
 def _move_view(key_char):
     view = _view_cursor()
     if view is None:
@@ -408,6 +416,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
 
         # NORMAL mode: block input by default.
+        if _is_insert_key(event):
+            return self._consume_active_event(lambda: _switch_to_insert_with_swallow(state))
         if _is_navigation_key(event):
             return False
         if is_escape:
