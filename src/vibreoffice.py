@@ -7,28 +7,30 @@ from com.sun.star.awt import KeyModifier
 from com.sun.star.document import XEventListener
 
 DEBUG = False
-MAX_HANDLER_REMOVE_ATTEMPTS = 3
+MAX_HANDLER_REMOVE_ATTEMPTS = 5
 
 
 def _dbg(msg):
     if not DEBUG:
         return
     try:
-        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        ts = datetime.datetime.now().strftime("%m-%d %H:%M:%S.%f")
         with open("/tmp/vibreoffice-python-debug.log", "a", encoding="utf-8") as f:
             f.write(f"{ts} {msg}\n")
     except Exception:
         pass
 
 
+# Global state of extension (in builtin scope).
 def _state():
     key = "_vibreoffice_python_state"
     state = getattr(builtins, key, None)
     if state is None:
         state = {
-            # If extension has been started before.
+            # Has the extension been started. Will only be set to true.
             "started": False,
             "enabled": False,
+            # Current vi input mode. Can be NORMAL or INSERT.
             "mode": "NORMAL",
             "key_handler": None,
             # Python UNO may leave stale key-handler registrations attached even
@@ -57,6 +59,7 @@ def _desktop():
         return None
 
 
+# Components can also be from Calc, Draw etc.
 def _is_text_document(doc):
     if doc is None:
         return False
@@ -297,6 +300,18 @@ def _has_non_shift_modifier(event):
     return bool(mods & (KeyModifier.MOD1 | KeyModifier.MOD2 | KeyModifier.MOD3))
 
 
+def _key_code(event):
+    try:
+        return int(event.KeyCode)
+    except Exception:
+        return -1
+
+
+def _is_navigation_key(event):
+    # LibreOffice key codes: Home/End/Left/Right/Up/Down/PageUp/PageDown.
+    return _key_code(event) in (1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031)
+
+
 def _move_view(key_char):
     view = _view_cursor()
     if view is None:
@@ -350,35 +365,36 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def keyPressed(self, event):
         state = _state()
+        if not state["enabled"]:
+            return False
         # Let LibreOffice handle Ctrl/Alt/Meta shortcuts unless explicitly captured.
         if _has_non_shift_modifier(event):
             return False
         if not self._is_active_instance():
             # Stale handlers can still be called by LO after lifecycle changes.
             # Swallow one duplicate transition callback if needed.
-            if state["enabled"] and state["mode"] == "INSERT" and state["swallow_once_insert_press"]:
+            if state["mode"] == "INSERT" and state["swallow_once_insert_press"]:
                 state["swallow_once_insert_press"] = False
                 return True
-            if state["enabled"] and state["mode"] == "NORMAL" and state["swallow_once_normal_press"]:
+            if state["mode"] == "NORMAL" and state["swallow_once_normal_press"]:
                 state["swallow_once_normal_press"] = False
                 return True
-            return bool(state["enabled"] and state["mode"] == "NORMAL")
-        if not state["enabled"]:
-            return False
+            if state["mode"] == "NORMAL" and _is_navigation_key(event):
+                return False
+            return bool(state["mode"] == "NORMAL")
 
         controller = _current_controller()
+        key_code = _key_code(event)
         key_char = _normalize_key_char(event)
-        if len(key_char) == 1:
-            key_char = key_char.lower()
-        if key_char in ("h", "j", "k", "l", "x", "i") or (event.KeyCode == 1281):
+        if key_char in ("h", "j", "k", "l", "x", "i") or (key_code == 1281):
             _dbg(
-                f"KEY key={key_char!r} code={event.KeyCode} mode={state['mode']} "
+                f"KEY key={key_char!r} code={key_code} mode={state['mode']} "
                 f"enabled={state['enabled']} self={id(self)} "
                 f"controller={id(controller) if controller is not None else 'None'}"
             )
 
         # ESC keycode in LibreOffice
-        is_escape = (event.KeyCode == 1281)
+        is_escape = (key_code == 1281)
 
         if state["mode"] == "INSERT":
             if is_escape:
@@ -387,6 +403,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
 
         # NORMAL mode: block input by default.
+        if _is_navigation_key(event):
+            return False
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
 
@@ -406,13 +424,19 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def keyReleased(self, event):
         state = _state()
+        if not state["enabled"]:
+            return False
         if _has_non_shift_modifier(event):
             return False
         if not self._is_active_instance():
-            return bool(state["enabled"] and state["mode"] == "NORMAL")
-        if not state["enabled"]:
-            return False
+            if state["mode"] == "NORMAL" and _is_navigation_key(event):
+                _show_normal_cursor()
+                return False
+            return bool(state["mode"] == "NORMAL")
         if state["mode"] == "NORMAL":
+            if _is_navigation_key(event):
+                _show_normal_cursor()
+                return False
             _show_normal_cursor()
             return True
         if state["mode"] == "INSERT":
@@ -519,11 +543,6 @@ def _stop_view_event_listener():
     state["view_event_listener"] = None
 
 
-def _reinit_vibreoffice():
-    _set_mode("NORMAL")
-    _show_normal_cursor()
-
-
 def _activate_for_current_view():
     state = _state()
     controller = _current_controller()
@@ -544,6 +563,11 @@ def _init_vibreoffice():
     _state()["key_handler"] = None
     _start_view_event_listener()
     _reinit_vibreoffice()
+
+
+def _reinit_vibreoffice():
+    _set_mode("NORMAL")
+    _show_normal_cursor()
 
 
 def _ensure_initialized():
