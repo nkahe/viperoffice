@@ -279,7 +279,12 @@ def _normalize_key_char(event):
         key_code = int(event.KeyCode)
         # com.sun.star.awt.Key.A..Z are typically 512..537.
         if 512 <= key_code <= 537:
-            return chr(ord("a") + (key_code - 512))
+            # Respect Shift when falling back to key codes, otherwise "HJKLIX"
+            # would be treated as lowercase NORMAL-mode commands.
+            shift_mask = getattr(KeyModifier, "SHIFT", 1)
+            is_shift = bool(_event_modifiers(event) & shift_mask)
+            base = ord("A") if is_shift else ord("a")
+            return chr(base + (key_code - 512))
         if 0 <= key_code <= 255:
             return chr(key_code)
     except Exception:
@@ -426,17 +431,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         state = _state()
         if not state["enabled"]:
             return False
+        # Keep NORMAL cursor rendering for navigation releases, including
+        # Ctrl+Home/Ctrl+End where Ctrl would otherwise short-circuit below.
+        if state["mode"] == "NORMAL" and _is_navigation_key(event):
+            _show_normal_cursor()
+            return False
         if _has_non_shift_modifier(event):
             return False
         if not self._is_active_instance():
-            if state["mode"] == "NORMAL" and _is_navigation_key(event):
-                _show_normal_cursor()
-                return False
             return bool(state["mode"] == "NORMAL")
         if state["mode"] == "NORMAL":
-            if _is_navigation_key(event):
-                _show_normal_cursor()
-                return False
             _show_normal_cursor()
             return True
         if state["mode"] == "INSERT":
