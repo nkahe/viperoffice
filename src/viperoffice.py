@@ -131,7 +131,7 @@ def _current_controller():
         return None
 
 
-def _view_cursor():
+def _get_cursor():
     controller = _current_controller()
     if controller is None:
         return None
@@ -141,8 +141,8 @@ def _view_cursor():
         return None
 
 
-def _text_cursor_from_view():
-    view = _view_cursor()
+def _get_text_cursor():
+    view = _get_cursor()
     if view is None:
         return None
     try:
@@ -198,7 +198,7 @@ def _restore_default_cursor_all_views():
 
 
 def _show_normal_cursor():
-    tc = _text_cursor_from_view()
+    tc = _get_text_cursor()
     controller = _current_controller()
     if tc is None or controller is None:
         return
@@ -228,7 +228,7 @@ def _show_normal_cursor_for_controller(controller):
 
 
 def _show_insert_cursor():
-    tc = _text_cursor_from_view()
+    tc = _get_text_cursor()
     controller = _current_controller()
     if tc is None or controller is None:
         return
@@ -351,26 +351,26 @@ def _is_function_key(event):
     return False
 
 
-def _move_view(key_char):
-    view = _view_cursor()
-    if view is None:
+def _move_cursor(key_char):
+    cursor = _get_cursor()
+    if cursor is None:
         return False
     try:
         if key_char == "h":
-            return bool(view.goLeft(1, False))
+            return bool(cursor.goLeft(1, False))
         if key_char == "l":
-            return bool(view.goRight(1, False))
+            return bool(cursor.goRight(1, False))
         if key_char == "j":
-            return bool(view.goDown(1, False))
+            return bool(cursor.goDown(1, False))
         if key_char == "k":
-            return bool(view.goUp(1, False))
+            return bool(cursor.goUp(1, False))
     except Exception:
         return False
     return False
 
 
 def _delete_char_under_cursor():
-    tc = _text_cursor_from_view()
+    tc = _get_text_cursor()
     if tc is None:
         return False
     try:
@@ -384,11 +384,11 @@ def _delete_char_under_cursor():
 
 
 def _leave_insert_to_normal():
-    cursor = _view_cursor()
+    cursor = _get_cursor()
     if cursor is not None:
         try:
             if not cursor.isAtStartOfLine():
-                _move_view("h")
+                _move_cursor("h")
         except Exception:
             pass
     _goto_mode("NORMAL")
@@ -401,9 +401,9 @@ def _switch_to_insert(state, key_char):
     state["swallow_once_insert_press"] = True
     if key_char is "a":
         try:
-            tc = _text_cursor_from_view()
+            tc = _get_text_cursor()
             if tc is not None and not tc.isEndOfParagraph():
-                _move_view("l")
+                _move_cursor("l")
         except Exception:
             pass
     _goto_mode("INSERT")
@@ -471,10 +471,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         normal_actions = {
             "i": lambda: _switch_to_insert(state, "i"),
             "a": lambda: _switch_to_insert(state, "a"),
-            "h": lambda: _move_view("h"),
-            "j": lambda: _move_view("j"),
-            "k": lambda: _move_view("k"),
-            "l": lambda: _move_view("l"),
+            "h": lambda: _move_cursor("h"),
+            "j": lambda: _move_cursor("j"),
+            "k": lambda: _move_cursor("k"),
+            "l": lambda: _move_cursor("l"),
             "x": _delete_char_under_cursor,
         }
         action = normal_actions.get(key_char)
