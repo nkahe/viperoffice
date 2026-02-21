@@ -27,7 +27,6 @@ def _dbg(msg):
         pass
 
 
-# Global state of extension (in builtin scope).
 def _state():
     key = "_vibreoffice_python_state"
     state = getattr(builtins, key, None)
@@ -379,10 +378,29 @@ def _delete_char_under_cursor():
         return False
 
 
-def _switch_to_insert_with_swallow(state):
-    # Some stale handlers may still receive this same "i" key callback.
-    # Swallow one stale duplicate so "i" does not get inserted as text.
+def _leave_insert_to_normal():
+    cursor = _view_cursor()
+    if cursor is not None:
+        try:
+            if not cursor.isAtStartOfLine():
+                _move_view("h")
+        except Exception:
+            pass
+    _goto_mode("NORMAL")
+
+
+def _switch_to_insert(state, key_char):
+    # Some stale handlers may still receive this same insert-transition key
+    # callback. Swallow one stale duplicate so the transition key does not get
+    # inserted as text.
     state["swallow_once_insert_press"] = True
+    if key_char is "a":
+        try:
+            tc = _text_cursor_from_view()
+            if tc is not None and not tc.isEndOfParagraph():
+                _move_view("l")
+        except Exception:
+            pass
     _goto_mode("INSERT")
 
 
@@ -421,24 +439,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         controller = _current_controller()
         key_code = _key_code(event)
         key_char = _normalize_key_char(event)
-        if key_char in ("h", "j", "k", "l", "x", "i") or (key_code == 1281):
+        is_escape = (key_code == 1281)
+
+        if key_char in ("h", "j", "k", "l", "x", "i", "a") or is_escape:
             _dbg(
                 f"KEY key={key_char!r} code={key_code} mode={state['mode']} "
                 f"enabled={state['enabled']} self={id(self)} "
                 f"controller={id(controller) if controller is not None else 'None'}"
             )
 
-        # ESC keycode in LibreOffice
-        is_escape = (key_code == 1281)
-
         if state["mode"] == "INSERT":
             if is_escape:
-                return self._consume_active_event(lambda: _goto_mode("NORMAL"))
+                return self._consume_active_event(_leave_insert_to_normal)
             return False
 
         # NORMAL mode: block input by default.
         if _is_insert_key(event):
-            return self._consume_active_event(lambda: _switch_to_insert_with_swallow(state))
+            return self._consume_active_event(lambda: _switch_to_insert(state, "i"))
         if _is_delete_key(event):
             return self._consume_active_event(_delete_char_under_cursor)
         if _is_navigation_key(event) or _is_function_key(event):
@@ -447,7 +464,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
 
         normal_actions = {
-            "i": lambda: _switch_to_insert_with_swallow(state),
+            "i": lambda: _switch_to_insert(state, "i"),
+            "a": lambda: _switch_to_insert(state, "a"),
             "h": lambda: _move_view("h"),
             "j": lambda: _move_view("j"),
             "k": lambda: _move_view("k"),

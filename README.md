@@ -26,7 +26,7 @@ This will simply build the extension file from the template files in
 ## Features
 
 vibreoffice currently supports:
-- Insert (`i`) and return to Normal with `Esc`
+- Insert/append (`i`, `a`) and return to Normal with `Esc`
 - Movement keys: `hjkl`
 - Deletion `x`
 
