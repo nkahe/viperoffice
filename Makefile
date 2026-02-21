@@ -1,13 +1,13 @@
-extension: clean src/vibreoffice.py
-	@if [ -z "$$VIBREOFFICE_VERSION" ]; then \
-		echo "VIBREOFFICE_VERSION must be set"; \
+extension: clean src/viperoffice.py
+	@if [ -z "$$VIPEROFFICE_VERSION" ]; then \
+		echo "VIPEROFFICE_VERSION must be set"; \
 		exit 1; \
 	fi
 	@mkdir -p build dist
 	@cp -r extension/template build/template
-	@cp src/vibreoffice.py build/template/Scripts/python/vibreoffice.py
-	@sed -i "s/%VIBREOFFICE_VERSION%/$$VIBREOFFICE_VERSION/g" build/template/description.xml
-	@cd build/template && zip -r "../../dist/vibreoffice-python.oxt" .
+	@cp src/viperoffice.py build/template/Scripts/python/viperoffice.py
+	@sed -i "s/%VIPEROFFICE_VERSION%/$$VIPEROFFICE_VERSION/g" build/template/description.xml
+	@cd build/template && zip -r "../../dist/viperoffice-python.oxt" .
 
 .PHONY: clean extension
 clean:

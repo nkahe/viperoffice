@@ -4,45 +4,45 @@
  oor:name="Addons" oor:package="org.openoffice.Office">
   <node oor:name="AddonUI">
     <node oor:name="AddonMenu">
-      <node oor:name="vibreoffice.N001" oor:op="replace">
+      <node oor:name="viperoffice.N001" oor:op="replace">
         <prop oor:name="Context" oor:type="xs:string">
           <value>com.sun.star.text.TextDocument</value>
         </prop>
         <prop oor:name="Title" oor:type="xs:string">
-          <value xml:lang="en">vibreoffice - enable</value>
+          <value xml:lang="en">ViperOffice - enable</value>
         </prop>
         <prop oor:name="URL" oor:type="xs:string">
-          <value>vnd.sun.star.script:vibreoffice-python.oxt|Scripts|python|vibreoffice.py$enableVibreoffice?language=Python&amp;location=user:uno_packages</value>
+          <value>vnd.sun.star.script:viperoffice-python.oxt|Scripts|python|viperoffice.py$enable_viper_office?language=Python&amp;location=user:uno_packages</value>
         </prop>
         <prop oor:name="Target" oor:type="xs:string">
           <value>_self</value>
         </prop>
       </node>
 
-      <node oor:name="vibreoffice.N002" oor:op="replace">
+      <node oor:name="viperoffice.N002" oor:op="replace">
         <prop oor:name="Context" oor:type="xs:string">
           <value>com.sun.star.text.TextDocument</value>
         </prop>
         <prop oor:name="Title" oor:type="xs:string">
-          <value xml:lang="en">vibreoffice - disable</value>
+          <value xml:lang="en">ViperOffice - disable</value>
         </prop>
         <prop oor:name="URL" oor:type="xs:string">
-          <value>vnd.sun.star.script:vibreoffice-python.oxt|Scripts|python|vibreoffice.py$disableVibreoffice?language=Python&amp;location=user:uno_packages</value>
+          <value>vnd.sun.star.script:viperoffice-python.oxt|Scripts|python|viperoffice.py$disable_viper_office?language=Python&amp;location=user:uno_packages</value>
         </prop>
         <prop oor:name="Target" oor:type="xs:string">
           <value>_self</value>
         </prop>
       </node>
 
-      <node oor:name="vibreoffice.N003" oor:op="replace">
+      <node oor:name="viperoffice.N003" oor:op="replace">
         <prop oor:name="Context" oor:type="xs:string">
           <value>com.sun.star.text.TextDocument</value>
         </prop>
         <prop oor:name="Title" oor:type="xs:string">
-          <value xml:lang="en">vibreoffice - toggle</value>
+          <value xml:lang="en">ViperOffice - toggle</value>
         </prop>
         <prop oor:name="URL" oor:type="xs:string">
-          <value>vnd.sun.star.script:vibreoffice-python.oxt|Scripts|python|vibreoffice.py$toggleVibreoffice?language=Python&amp;location=user:uno_packages</value>
+          <value>vnd.sun.star.script:viperoffice-python.oxt|Scripts|python|viperoffice.py$toggle_viper_office?language=Python&amp;location=user:uno_packages</value>
         </prop>
         <prop oor:name="Target" oor:type="xs:string">
           <value>_self</value>

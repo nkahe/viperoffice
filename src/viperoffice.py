@@ -28,7 +28,7 @@ def _dbg(msg):
 
 
 def _state():
-    key = "_vibreoffice_python_state"
+    key = "_vipereoffice_state"
     state = getattr(builtins, key, None)
     if state is None:
         state = {
@@ -609,17 +609,17 @@ def _activate_for_current_view():
         _show_insert_cursor_for_controller(controller)
 
 
-def _init_vibreoffice():
+def _initialize():
     state = _state()
     state["started"] = True
     # Detach while handler reference is still available.
     _detach_key_handler_from_all_views()
     _state()["key_handler"] = None
     _start_view_event_listener()
-    _reinit_vibreoffice()
+    _reinitialize()
 
 
-def _reinit_vibreoffice():
+def _reinitialize():
     _set_mode("NORMAL")
     _show_normal_cursor()
 
@@ -627,9 +627,9 @@ def _reinit_vibreoffice():
 def _ensure_initialized():
     state = _state()
     if not state["started"]:
-        _init_vibreoffice()
+        _initialize()
     else:
-        _reinit_vibreoffice()
+        _reinitialize()
 
 
 def _set_vibreoffice_enabled(enable_value):
@@ -655,7 +655,7 @@ def _set_vibreoffice_enabled(enable_value):
         _restore_status_all_views()
 
 
-def enableVibreoffice():
+def enable_viper_office():
     state = _state()
     state["enable_calls"] += 1
     _dbg(f"ENABLE call#{state['enable_calls']} state={id(state)}")
@@ -663,14 +663,14 @@ def enableVibreoffice():
     _set_vibreoffice_enabled(True)
 
 
-def disableVibreoffice():
+def disable_viper_office():
     state = _state()
     state["disable_calls"] += 1
     _dbg(f"DISABLE call#{state['disable_calls']} state={id(state)}")
     _set_vibreoffice_enabled(False)
 
 
-def toggleVibreoffice():
+def toggle_viper_office():
     state = _state()
     state["toggle_calls"] += 1
     _dbg(f"TOGGLE call#{state['toggle_calls']} enabled_before={state['enabled']} state={id(state)}")
@@ -678,4 +678,4 @@ def toggleVibreoffice():
     _set_vibreoffice_enabled(not state["enabled"])
 
 
-g_exportedScripts = (toggleVibreoffice, enableVibreoffice, disableVibreoffice)
+g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office)

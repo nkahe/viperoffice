@@ -2,8 +2,8 @@
 <description xmlns="http://openoffice.org/extensions/description/2006"
  xmlns:dep="http://openoffice.org/extensions/description/2006"
  xmlns:xlink="http://www.w3.org/1999/xlink">
-  <identifier value="vibreoffice-python" />
-  <version value="%VIBREOFFICE_VERSION%" />
+  <identifier value="viperoffice" />
+  <version value="%VIPEROFFICE_VERSION%" />
   <extension-description>
     <src xlink:href="Descriptions/descr-en.txt" lang="en"/>
   </extension-description>
@@ -11,9 +11,9 @@
     <OpenOffice.org-minimal-version value="4.0" dep:name="LibreOffice/OpenOffice minimum version" />
   </dependencies>
   <display-name>
-    <name lang="en">Vibreoffice Python</name>
+    <name lang="en">ViperOffice Python</name>
   </display-name>
   <publisher>
-    <name lang="en">vibreoffice</name>
+    <name lang="en">ViperOffice</name>
   </publisher>
 </description>
