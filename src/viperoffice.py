@@ -6,6 +6,7 @@ from typing import Any
 from com.sun.star.awt import XKeyHandler
 from com.sun.star.awt import KeyModifier
 from com.sun.star.awt import Key
+from com.sun.star.awt import Rectangle
 from com.sun.star.document import XEventListener
 
 # Provided by LibreOffice's Python macro runtime.
@@ -394,10 +395,41 @@ def _is_function_key(event):
     return False
 
 
+def _msgbox(text, title="ViperOffice"):
+    try:
+        controller = _current_controller()
+        if controller is None:
+            return
+        parent = controller.getFrame().getContainerWindow()
+        toolkit = parent.getToolkit()
+        try:
+            # Legacy UNO signature used by some versions.
+            box = toolkit.createMessageBox(
+                parent,
+                Rectangle(),
+                "infobox",
+                1,
+                title,
+                str(text),
+            )
+        except Exception:
+            # Newer UNO signature used by some versions.
+            box = toolkit.createMessageBox(
+                parent,
+                1,
+                1,
+                title,
+                str(text),
+            )
+        box.execute()
+    except Exception:
+        pass
+
 def _move_cursor(key_char):
     cursor = _get_cursor()
     if cursor is None:
         return False
+
     try:
         if key_char == "h":
             return bool(cursor.goLeft(1, False))
