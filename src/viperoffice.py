@@ -192,6 +192,11 @@ def _restore_status_all_views():
         _restore_status_for_controller(controller)
 
 
+def _restore_default_cursor_all_views():
+    for controller in _iter_text_document_controllers():
+        _show_insert_cursor_for_controller(controller)
+
+
 def _show_normal_cursor():
     tc = _text_cursor_from_view()
     controller = _current_controller()
@@ -653,6 +658,7 @@ def _set_vibreoffice_enabled(enable_value):
         _detach_key_handler_from_all_views()
         state["key_handler"] = None
         _restore_status_all_views()
+        _restore_default_cursor_all_views()
 
 
 def enable_viper_office():

@@ -9,9 +9,11 @@ The easiest way to install is to download the
 [latest extension file](https://raw.github.com/linuxmage/vibreoffice/master/dist/vibreoffice-1.1.4.oxt)
 and open it with LibreOffice/OpenOffice. LibreOffice/OpenOffice will need to be restarted before this extension can be used.
 
-To enable/disable ViperOffice, simply select Tools -> Add-Ons -> ViperOffice and enable, disable or toggle. [How to make shortcuts for these.](#shortcuts-for-enabling-and-disabling)
+To enable/disable ViperOffice, select Tools -> Add-Ons -> ViperOffice and enable, disable or toggle. [How to make shortcuts for these.](#shortcuts-for-enabling-and-disabling)
+Enabled/disabled state affects all current and new windows. Windows gets updated when
+they gains focus.
 
-If you really want to, you can build the .oxt file yourself by running
+You can build the .oxt file yourself by running
 ```shell
 # replace 0.0.0 with your desired version number
 VIPEROFFICE_VERSION="0.0.0" make extension
@@ -19,7 +21,6 @@ VIPEROFFICE_VERSION="0.0.0" make extension
 This will simply build the extension file from the template files in
 `extension/template`. These template files were auto-generated using
 [Extension Compiler](https://wiki.openoffice.org/wiki/Extensions_Packager#Download).
-
 
 ## Features
 
