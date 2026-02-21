@@ -261,6 +261,22 @@ def _goto_mode(mode_name):
 
 def _normalize_key_char(event):
     k = event.KeyChar
+    key_code = _key_code(event)
+    if DEBUG is True:
+        _msgbox(f"event.KeyChar={k!r}\nkey_code={key_code}")
+
+    # NUM0..NUM9 can represent either digits or symbols depending on layout.
+    # If KeyChar already carries a printable symbol (e.g. AltGr+4 -> "$"),
+    # prefer it over key-code based reconstruction.
+    if 256 <= key_code <= 265:
+        if isinstance(k, str) and len(k) == 1 and ord(k) >= 32:
+            return k
+        shift_mask = getattr(KeyModifier, "SHIFT", 1)
+        is_shift = bool(_event_modifiers(event) & shift_mask)
+        if is_shift:
+            return ")!@#$%^&*("[key_code - 256]
+        return chr(ord("0") + (key_code - 256))
+
     if k is None:
         return ""
 
@@ -269,9 +285,19 @@ def _normalize_key_char(event):
 
     # UNO key chars can arrive as non-str objects. Prefer textual form first.
     try:
+        # Some runtimes expose UNO Char wrappers like "<Char instance $>".
+        for attr in ("value", "Value", "char", "Char"):
+            v = getattr(k, attr, None)
+            if isinstance(v, str) and len(v) == 1:
+                return v
         s = str(k)
         if len(s) == 1:
             return s
+        prefix = "<Char instance "
+        if s.startswith(prefix) and s.endswith(">"):
+            inner = s[len(prefix):-1]
+            if len(inner) == 1:
+                return inner
     except Exception:
         pass
 
@@ -286,9 +312,6 @@ def _normalize_key_char(event):
     # Fallback: some environments deliver characters as key codes.
     try:
         key_code = int(event.KeyCode)
-        # com.sun.star.awt.Key.NUM0..NUM9 are typically 256..265.
-        if 256 <= key_code <= 265:
-            return chr(ord("0") + (key_code - 256))
         # com.sun.star.awt.Key.A..Z are typically 512..537.
         if 512 <= key_code <= 537:
             # Respect Shift when falling back to key codes, otherwise "HJKLIX"
@@ -297,8 +320,11 @@ def _normalize_key_char(event):
             is_shift = bool(_event_modifiers(event) & shift_mask)
             base = ord("A") if is_shift else ord("a")
             return chr(base + (key_code - 512))
-        if 0 <= key_code <= 255:
+
+        # Ignore NUL keycode (0); it is often a non-printable placeholder.
+        if 1 <= key_code <= 255:
             return chr(key_code)
+
     except Exception:
         pass
 
@@ -315,6 +341,20 @@ def _event_modifiers(event):
 def _has_non_shift_modifier(event):
     mods = _event_modifiers(event)
     return bool(mods & (KeyModifier.MOD1 | KeyModifier.MOD2 | KeyModifier.MOD3))
+
+
+def _is_altgr_char_event(event, key_char, key_code):
+    if not (isinstance(key_char, str) and len(key_char) == 1 and ord(key_char) >= 32):
+        return False
+    mods = _event_modifiers(event)
+    mod1 = getattr(KeyModifier, "MOD1", 0)
+    mod2 = getattr(KeyModifier, "MOD2", 0)
+    mod3 = getattr(KeyModifier, "MOD3", 0)
+    # Most platforms report AltGr as Ctrl+Alt.
+    if bool(mods & mod1) and bool(mods & mod2):
+        return True
+    # Some setups report AltGr as Alt-only with key_code=0.
+    return bool(mods & mod2) and not bool(mods & mod3) and key_code == 0
 
 
 def _key_code(event):
@@ -431,8 +471,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         state = _state()
         if not state["enabled"]:
             return False
-        # Let LibreOffice handle Ctrl/Alt/Meta shortcuts unless explicitly captured.
-        if _has_non_shift_modifier(event):
+        key_code = _key_code(event)
+        key_char = _normalize_key_char(event)
+        # Let LibreOffice handle Alt/Ctrl/Meta shortcuts, but keep AltGr text
+        # characters available for NORMAL-mode command matching.
+        if _has_non_shift_modifier(event) and not _is_altgr_char_event(event, key_char, key_code):
             return False
         if not self._is_active_instance():
             # Stale handlers can still be called by LO after lifecycle changes.
@@ -447,11 +490,20 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return bool(state["mode"] == "NORMAL")
 
         controller = _current_controller()
-        key_code = _key_code(event)
-        key_char = _normalize_key_char(event)
         is_escape = (key_code == 1281)
+        normal_actions = {
+            "i": lambda: _switch_to_insert(state, "i"),
+            "a": lambda: _switch_to_insert(state, "a"),
+            "h": lambda: _move_cursor("h"),
+            "j": lambda: _move_cursor("j"),
+            "k": lambda: _move_cursor("k"),
+            "l": lambda: _move_cursor("l"),
+            "0": lambda: _move_cursor("0"),
+            "$": lambda: _move_cursor("$"),
+            "x": _delete_char_under_cursor,
+        }
 
-        if key_char in ("h", "j", "k", "l", "x", "i", "a", "0") or is_escape:
+        if key_char in ("h", "j", "k", "l", "x", "i", "a", "0", "$") or is_escape:
             _dbg(
                 f"KEY key={key_char!r} code={key_code} mode={state['mode']} "
                 f"enabled={state['enabled']} self={id(self)} "
