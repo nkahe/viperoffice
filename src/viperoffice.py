@@ -245,7 +245,6 @@ def _show_insert_cursor_for_controller(controller):
     try:
         cursor = controller.getViewCursor()
         textCursor = cursor.getText().createTextCursorByRange(cursor)
-        textCursor = cursor.getText().createTextCursorByRange(cursor)
         textCursor.gotoRange(textCursor.getStart(), False)
         controller.select(textCursor)
     except Exception:
@@ -284,9 +283,12 @@ def _normalize_key_char(event):
     if 0 <= code <= 255:
         return chr(code)
 
-    # Fallback: some environments deliver letter keys as key codes.
+    # Fallback: some environments deliver characters as key codes.
     try:
         key_code = int(event.KeyCode)
+        # com.sun.star.awt.Key.NUM0..NUM9 are typically 256..265.
+        if 256 <= key_code <= 265:
+            return chr(ord("0") + (key_code - 256))
         # com.sun.star.awt.Key.A..Z are typically 512..537.
         if 512 <= key_code <= 537:
             # Respect Shift when falling back to key codes, otherwise "HJKLIX"
@@ -365,6 +367,8 @@ def _move_cursor(key_char):
             return bool(cursor.goDown(1, False))
         if key_char == "k":
             return bool(cursor.goUp(1, False))
+        if key_char == "0":
+            return bool(cursor.gotoStartOfLine(False))
     except Exception:
         return False
     return False
@@ -447,7 +451,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_char = _normalize_key_char(event)
         is_escape = (key_code == 1281)
 
-        if key_char in ("h", "j", "k", "l", "x", "i", "a") or is_escape:
+        if key_char in ("h", "j", "k", "l", "x", "i", "a", "0") or is_escape:
             _dbg(
                 f"KEY key={key_char!r} code={key_code} mode={state['mode']} "
                 f"enabled={state['enabled']} self={id(self)} "
@@ -476,6 +480,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "j": lambda: _move_cursor("j"),
             "k": lambda: _move_cursor("k"),
             "l": lambda: _move_cursor("l"),
+            "0": lambda: _move_cursor("0"),
             "x": _delete_char_under_cursor,
         }
         action = normal_actions.get(key_char)

@@ -26,7 +26,7 @@ This will simply build the extension file from the template files in
 
 ViperOffice currently supports:
 - Insert/append (`i`, `a`) and return to Normal with `Esc`
-- Movement keys: `hjkl`
+- Movement keys: `hjkl`, `0`
 - Deletion `x`
 
 ## Good to know
