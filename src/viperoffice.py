@@ -142,11 +142,11 @@ def _get_cursor():
 
 
 def _get_text_cursor():
-    view = _get_cursor()
-    if view is None:
+    cursor = _get_cursor()
+    if cursor is None:
         return None
     try:
-        return view.getText().createTextCursorByRange(view)
+        return cursor.getText().createTextCursorByRange(cursor)
     except Exception:
         return None
 
@@ -198,16 +198,16 @@ def _restore_default_cursor_all_views():
 
 
 def _show_normal_cursor():
-    tc = _get_text_cursor()
+    textCursor = _get_text_cursor()
     controller = _current_controller()
-    if tc is None or controller is None:
+    if textCursor is None or controller is None:
         return
     try:
-        tc.gotoRange(tc.getStart(), False)
-        moved = tc.goRight(1, False)
+        textCursor.gotoRange(textCursor.getStart(), False)
+        moved = textCursor.goRight(1, False)
         if moved:
-            tc.goLeft(1, True)
-        controller.select(tc)
+            textCursor.goLeft(1, True)
+        controller.select(textCursor)
     except Exception:
         pass
 
@@ -216,25 +216,25 @@ def _show_normal_cursor_for_controller(controller):
     if controller is None:
         return
     try:
-        view = controller.getViewCursor()
-        tc = view.getText().createTextCursorByRange(view)
-        tc.gotoRange(tc.getStart(), False)
-        moved = tc.goRight(1, False)
+        cursor = controller.getViewCursor()
+        textCursor = cursor.getText().createTextCursorByRange(cursor)
+        textCursor.gotoRange(textCursor.getStart(), False)
+        moved = textCursor.goRight(1, False)
         if moved:
-            tc.goLeft(1, True)
-        controller.select(tc)
+            textCursor.goLeft(1, True)
+        controller.select(textCursor)
     except Exception:
         pass
 
 
 def _show_insert_cursor():
-    tc = _get_text_cursor()
+    textCursor = _get_text_cursor()
     controller = _current_controller()
-    if tc is None or controller is None:
+    if textCursor is None or controller is None:
         return
     try:
-        tc.gotoRange(tc.getStart(), False)
-        controller.select(tc)
+        textCursor.gotoRange(textCursor.getStart(), False)
+        controller.select(textCursor)
     except Exception:
         pass
 
@@ -243,10 +243,11 @@ def _show_insert_cursor_for_controller(controller):
     if controller is None:
         return
     try:
-        view = controller.getViewCursor()
-        tc = view.getText().createTextCursorByRange(view)
-        tc.gotoRange(tc.getStart(), False)
-        controller.select(tc)
+        cursor = controller.getViewCursor()
+        textCursor = cursor.getText().createTextCursorByRange(cursor)
+        textCursor = cursor.getText().createTextCursorByRange(cursor)
+        textCursor.gotoRange(textCursor.getStart(), False)
+        controller.select(textCursor)
     except Exception:
         pass
 
@@ -370,14 +371,14 @@ def _move_cursor(key_char):
 
 
 def _delete_char_under_cursor():
-    tc = _get_text_cursor()
-    if tc is None:
+    textCursor = _get_text_cursor()
+    if textCursor is None:
         return False
     try:
-        tc.gotoRange(tc.getStart(), False)
-        if not tc.goRight(1, True):
+        textCursor.gotoRange(textCursor.getStart(), False)
+        if not textCursor.goRight(1, True):
             return False
-        tc.setString("")
+        textCursor.setString("")
         return True
     except Exception:
         return False
@@ -401,8 +402,8 @@ def _switch_to_insert(state, key_char):
     state["swallow_once_insert_press"] = True
     if key_char is "a":
         try:
-            tc = _get_text_cursor()
-            if tc is not None and not tc.isEndOfParagraph():
+            textCursor = _get_text_cursor()
+            if textCursor is not None and not textCursor.isEndOfParagraph():
                 _move_cursor("l")
         except Exception:
             pass
