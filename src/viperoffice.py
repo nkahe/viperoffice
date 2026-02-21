@@ -441,6 +441,25 @@ def _move_cursor(key_char):
             return bool(cursor.goUp(1, False))
         if key_char == "0":
             return bool(cursor.gotoStartOfLine(False))
+
+        if key_char == "$":
+            old_pos = cursor.getPosition()
+            cursor.gotoEndOfLine(False)
+            new_pos = cursor.getPosition()
+
+            old_y = getattr(old_pos, "Y", None)
+            if callable(old_y):
+                old_y = old_y()
+            new_y = getattr(new_pos, "Y", None)
+            if callable(new_y):
+                new_y = new_y()
+
+            # LibreOffice can place cursor at next line start; move left back
+            # to previous line end unless this was an empty-line no-op.
+            if cursor.isAtStartOfLine() and old_y != new_y:
+                cursor.goLeft(1, False)
+            return True
+
     except Exception:
         return False
     return False
@@ -557,16 +576,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
 
-        normal_actions = {
-            "i": lambda: _switch_to_insert(state, "i"),
-            "a": lambda: _switch_to_insert(state, "a"),
-            "h": lambda: _move_cursor("h"),
-            "j": lambda: _move_cursor("j"),
-            "k": lambda: _move_cursor("k"),
-            "l": lambda: _move_cursor("l"),
-            "0": lambda: _move_cursor("0"),
-            "x": _delete_char_under_cursor,
-        }
         action = normal_actions.get(key_char)
         if action is not None:
             return self._consume_active_event(action)
