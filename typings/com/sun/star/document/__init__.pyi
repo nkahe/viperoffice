@@ -1,0 +1,6 @@
+from typing import Protocol
+
+
+class XEventListener(Protocol):
+    def notifyEvent(self, event): ...
+    def disposing(self, event): ...

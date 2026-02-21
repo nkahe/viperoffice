@@ -1,11 +1,16 @@
-import unohelper
 import builtins
 import datetime
+import unohelper
+from typing import Any
 
 from com.sun.star.awt import XKeyHandler
 from com.sun.star.awt import KeyModifier
 from com.sun.star.awt import Key
 from com.sun.star.document import XEventListener
+
+# Provided by LibreOffice's Python macro runtime.
+if "XSCRIPTCONTEXT" not in globals():
+    XSCRIPTCONTEXT: Any = None
 
 DEBUG = False
 MAX_HANDLER_REMOVE_ATTEMPTS = 5
