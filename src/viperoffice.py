@@ -202,10 +202,90 @@ def _move_cursor(cmd):
             if cursor.isAtStartOfLine() and old_y != new_y:
                 cursor.goLeft(1, False)
             return True
+        if cmd == ")":
+            return _go_to_next_sentence(False)
 
     except Exception:
         return False
     return False
+
+
+def _pos_xy(pos):
+    if pos is None:
+        return (None, None)
+    x = getattr(pos, "X", None)
+    y = getattr(pos, "Y", None)
+    if callable(x):
+        x = x()
+    if callable(y):
+        y = y()
+    return (x, y)
+
+
+def _same_pos(a, b):
+    return _pos_xy(a) == _pos_xy(b)
+
+
+def _is_current_paragraph_empty(text_cursor):
+    if text_cursor is None:
+        return False
+    try:
+        probe = text_cursor.getText().createTextCursorByRange(text_cursor)
+        probe.gotoStartOfParagraph(False)
+        probe.gotoEndOfParagraph(True)
+        return len(probe.getString()) == 0
+    except Exception:
+        return False
+
+
+def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand):
+    edge = text_cursor.getEnd() if expand else text_cursor.getStart()
+    view_cursor.gotoRange(edge, False)
+
+
+def _goto_next_non_empty_paragraph(text_cursor, expand):
+    moved = False
+    while True:
+        if not text_cursor.gotoNextParagraph(expand):
+            break
+        moved = True
+        if not _is_current_paragraph_empty(text_cursor):
+            break
+    return moved
+
+
+def _go_to_next_sentence(expand):
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+
+    try:
+        old_pos = cursor.getPosition()
+
+        # From an empty line, jump directly to the next non-empty paragraph.
+        if _is_current_paragraph_empty(text_cursor):
+            moved = _goto_next_non_empty_paragraph(text_cursor, expand)
+            if moved:
+                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+            return moved
+
+        text_cursor.gotoNextSentence(expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+
+        if _same_pos(old_pos, cursor.getPosition()):
+            if text_cursor.isEndOfParagraph():
+                if _is_current_paragraph_empty(text_cursor):
+                    _goto_next_non_empty_paragraph(text_cursor, expand)
+                else:
+                    text_cursor.gotoNextParagraph(expand)
+            else:
+                text_cursor.goRight(1, expand)
+                text_cursor.gotoNextSentence(expand)
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return True
+    except Exception:
+        return False
 
 
 def _delete_char_under_cursor():
@@ -340,6 +420,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "j": lambda: _move_cursor("j"),
             "k": lambda: _move_cursor("k"),
             "l": lambda: _move_cursor("l"),
+            ")": lambda: _move_cursor(")"),
             "u": lambda: _undo(True),
             "U": lambda: _undo(False),
             "0": lambda: _move_cursor("0"),
