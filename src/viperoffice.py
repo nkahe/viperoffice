@@ -397,13 +397,17 @@ def _go_to_previous_sentence(expand):
         return False
 
 
-def _delete_char_under_cursor():
+def _delete_char(reversed_dir=False):
     textCursor = _get_text_cursor()
     if textCursor is None:
         return False
     try:
         textCursor.gotoRange(textCursor.getStart(), False)
-        if not textCursor.goRight(1, True):
+        if reversed_dir is True:
+            textCursor.collapseToStart()
+            if not textCursor.goLeft(1, True):
+                return False
+        elif not textCursor.goRight(1, True):
             return False
         textCursor.setString("")
         return True
@@ -477,7 +481,8 @@ def _normal_actions(state):
         "(": lambda: _go_to_previous_sentence(False),
         "u": lambda: _undo(True),
         "U": lambda: _undo(False),
-        "x": _delete_char_under_cursor,
+        "x": lambda: _delete_char(),
+        "X": lambda: _delete_char(True),
         "0": lambda: _goto_start_of_line(),
         "^": lambda: _goto_start_of_line(True),
         "$": lambda: _goto_end_of_line(),
@@ -558,7 +563,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_insert_key(event):
             return self._consume_active_event(lambda: _switch_to_insert(state, False))
         if _is_delete_key(event):
-            return self._consume_active_event(_delete_char_under_cursor)
+            return self._consume_active_event(_delete_char)
         if _is_backspace_key(event):
             return self._consume_active_event(lambda: _move_charwise("h"))
         if _is_navigation_key(event) or _is_function_key(event):

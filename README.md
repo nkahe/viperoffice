@@ -26,12 +26,12 @@ This will simply build the extension file from the template files in
 
 Currently supported Normal mode commands:
 - Insert/append: `i` (or `Ins`), `I`, `a`, `A`.
-- Movement keys: `hjkl`, `0`, `^`, `$`. `()`
-- Deletion: `x`.
+- Movement keys: `h` (or `BS`), `j`, `k`, `l`, `0`, `^`, `$`. `()`
+- Deletion: `x`, `X`
 - Undo/redo: `u`, `C-r` (or `U`).
 
 Insert Mode:
-- Switch to Normal mode: `Esc`
+- Switch to Normal mode: `Esc` (or `C-[`)
 
 In normal mode other characters do nothing. All other shortcuts and keys are passed to LibreOffice. 
 
