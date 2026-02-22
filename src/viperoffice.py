@@ -168,11 +168,10 @@ def _goto_mode(mode_name):
         _show_insert_cursor()
 
 
-def _move_cursor(cmd):
+def _move_charwise(cmd):
     cursor = _get_cursor()
     if cursor is None:
         return False
-
     try:
         if cmd == "h":
             return bool(cursor.goLeft(1, False))
@@ -182,6 +181,17 @@ def _move_cursor(cmd):
             return bool(cursor.goDown(1, False))
         if cmd == "k":
             return bool(cursor.goUp(1, False))
+    except Exception:
+        return False
+    return False
+
+
+def _move_linewise(cmd):
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+
+    try:
         if cmd == "0":
             return bool(cursor.gotoStartOfLine(False))
 
@@ -205,7 +215,6 @@ def _move_cursor(cmd):
 
     except Exception:
         return False
-    return False
 
 
 def _pos_xy(pos):
@@ -380,7 +389,7 @@ def _leave_insert_to_normal():
     if cursor is not None:
         try:
             if not cursor.isAtStartOfLine():
-                _move_cursor("h")
+                _move_charwise("h")
         except Exception:
             pass
     _goto_mode("NORMAL")
@@ -395,7 +404,7 @@ def _switch_to_insert(state, key_char):
         try:
             textCursor = _get_text_cursor()
             if textCursor is not None and not textCursor.isEndOfParagraph():
-                _move_cursor("l")
+                _move_charwise("l")
         except Exception:
             pass
     _goto_mode("INSERT")
@@ -425,17 +434,17 @@ def _normal_actions(state):
     return {
         "a": lambda: _switch_to_insert(state, "a"),
         "i": lambda: _switch_to_insert(state, "i"),
-        "h": lambda: _move_cursor("h"),
-        "j": lambda: _move_cursor("j"),
-        "k": lambda: _move_cursor("k"),
-        "l": lambda: _move_cursor("l"),
+        "h": lambda: _move_charwise("h"),
+        "j": lambda: _move_charwise("j"),
+        "k": lambda: _move_charwise("k"),
+        "l": lambda: _move_charwise("l"),
         ")": lambda: _go_to_next_sentence(False),
         "(": lambda: _go_to_previous_sentence(False),
         "u": lambda: _undo(True),
         "U": lambda: _undo(False),
         "x": _delete_char_under_cursor,
-        "0": lambda: _move_cursor("0"),
-        "$": lambda: _move_cursor("$"),
+        "0": lambda: _move_linewise("0"),
+        "$": lambda: _move_linewise("$"),
     }
 
 
