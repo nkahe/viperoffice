@@ -522,7 +522,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_code = _key_code(event)
         key_char = _normalize_key_char(event)
         mods = _event_modifiers(event)
-        is_escape = (key_code == 1281)
+        is_escape = (key_code == 1281) or (
+            key_code == 1315 and _is_ctrl_shortcut_no_alt_meta(mods)  # C-[
+        )
 
         if state["mode"] == "INSERT":
             if is_escape:
@@ -557,6 +559,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_active_event(lambda: _switch_to_insert(state, False))
         if _is_delete_key(event):
             return self._consume_active_event(_delete_char_under_cursor)
+        if _is_backspace_key(event):
+            return self._consume_active_event(lambda: _move_charwise("h"))
         if _is_navigation_key(event) or _is_function_key(event):
             return False
         if is_escape:
@@ -744,6 +748,13 @@ def _is_delete_key(event):
         return _key_code(event) == int(getattr(Key, "DELETE"))
     except Exception:
         return False
+
+
+def _is_backspace_key(event):
+    try:
+        return _key_code(event) == int(getattr(Key, "BACKSPACE"))
+    except Exception:
+        return _key_code(event) == 1283
 
 
 def _is_function_key(event):
