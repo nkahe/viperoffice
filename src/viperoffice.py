@@ -422,16 +422,23 @@ def _leave_insert_to_normal():
     _goto_mode("NORMAL")
 
 
-def _switch_to_insert(state, key_char):
+def _switch_to_insert(state, append, linewise=False):
     # Some stale handlers may still receive this same insert-transition key
     # callback. Swallow one stale duplicate so the transition key does not get
     # inserted as text.
     state["swallow_once_insert_press"] = True
-    if key_char is "a":
+    if append is True:
         try:
             textCursor = _get_text_cursor()
-            if textCursor is not None and not textCursor.isEndOfParagraph():
+            if linewise is True:
+                _goto_end_of_line()
+            elif textCursor is not None and not textCursor.isEndOfParagraph():
                 _move_charwise("l")
+        except Exception:
+            pass
+    elif linewise is True:
+        try:
+            _goto_start_of_line(True)
         except Exception:
             pass
     _goto_mode("INSERT")
@@ -456,11 +463,12 @@ def _undo(isUndo):
 # Input handling
 # --------------
 
-
 def _normal_actions(state):
     return {
-        "a": lambda: _switch_to_insert(state, "a"),
-        "i": lambda: _switch_to_insert(state, "i"),
+        "i": lambda: _switch_to_insert(state, False),
+        "I": lambda: _switch_to_insert(state, False, True),
+        "a": lambda: _switch_to_insert(state, True),
+        "A": lambda: _switch_to_insert(state, True, True),
         "h": lambda: _move_charwise("h"),
         "j": lambda: _move_charwise("j"),
         "k": lambda: _move_charwise("k"),
@@ -546,7 +554,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # NORMAL mode: block input by default.
         if _is_insert_key(event):
-            return self._consume_active_event(lambda: _switch_to_insert(state, "i"))
+            return self._consume_active_event(lambda: _switch_to_insert(state, False))
         if _is_delete_key(event):
             return self._consume_active_event(_delete_char_under_cursor)
         if _is_navigation_key(event) or _is_function_key(event):
