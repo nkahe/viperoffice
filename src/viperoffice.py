@@ -283,6 +283,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         state = _state()
         if not state["enabled"]: return False
 
+        # Don't do anything if textCursor isn't working (as in annotations).
+        textCursor = _get_text_cursor()
+        if textCursor is None:
+            return False
+
         if not self._is_active_instance():
             # Stale handlers can still be called by LO after lifecycle changes.
             # Swallow one duplicate transition callback if needed.
@@ -356,6 +361,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
         return self._consume_active_event()
+
 
     # Return False: event consumed, False: let pass through.
     def keyReleased(self, event):
