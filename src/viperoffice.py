@@ -186,35 +186,62 @@ def _move_charwise(cmd):
     return False
 
 
-def _move_linewise(cmd):
+def _goto_start_of_line(first_non_blank=False):
     cursor = _get_cursor()
     if cursor is None:
         return False
 
     try:
-        if cmd == "0":
+        if not first_non_blank:
             return bool(cursor.gotoStartOfLine(False))
 
-        if cmd == "$":
-            old_pos = cursor.getPosition()
-            cursor.gotoEndOfLine(False)
-            new_pos = cursor.getPosition()
+        _goto_end_of_line()
 
-            old_y = getattr(old_pos, "Y", None)
-            if callable(old_y):
-                old_y = old_y()
-            new_y = getattr(new_pos, "Y", None)
-            if callable(new_y):
-                new_y = new_y()
+        cursor.gotoStartOfLine(True)
+        line_text = cursor.getString()
+        cursor.gotoStartOfLine(False)
 
-            # LibreOffice can place cursor at next line start; move left back
-            # to previous line end unless this was an empty-line no-op.
-            if cursor.isAtStartOfLine() and old_y != new_y:
-                cursor.goLeft(1, False)
-            return True
+        i = 0
+        while i < len(line_text):
+            ch = line_text[i]
+            if ch != " " and ch != "\t":
+                break
+            i += 1
+        if i > 0:
+            cursor.goRight(i, False)
+        return True
 
-    except Exception:
+    except Exception as e:
         return False
+    return False
+
+
+def _goto_end_of_line():
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+
+    try:
+        old_pos = cursor.getPosition()
+        cursor.gotoEndOfLine(False)
+        new_pos = cursor.getPosition()
+
+        old_y = getattr(old_pos, "Y", None)
+        if callable(old_y):
+            old_y = old_y()
+        new_y = getattr(new_pos, "Y", None)
+        if callable(new_y):
+            new_y = new_y()
+
+        # LibreOffice can place cursor at next line start; move left back
+        # to previous line end unless this was an empty-line no-op.
+        if cursor.isAtStartOfLine() and old_y != new_y:
+            cursor.goLeft(1, False)
+        return True
+
+    except Exception as e:
+        return False
+    return False
 
 
 def _pos_xy(pos):
@@ -331,7 +358,7 @@ def _go_to_previous_sentence(expand):
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
             return True
 
-        # Paragraph-boundary behavior matching VBS logic.
+        # Paragraph-boundary behavior matching logic.
         if text_cursor.isStartOfParagraph():
             if _is_current_paragraph_empty(text_cursor):
                 moved = text_cursor.gotoPreviousParagraph(expand)
@@ -443,8 +470,9 @@ def _normal_actions(state):
         "u": lambda: _undo(True),
         "U": lambda: _undo(False),
         "x": _delete_char_under_cursor,
-        "0": lambda: _move_linewise("0"),
-        "$": lambda: _move_linewise("$"),
+        "0": lambda: _goto_start_of_line(),
+        "^": lambda: _goto_start_of_line(True),
+        "$": lambda: _goto_end_of_line(),
     }
 
 
