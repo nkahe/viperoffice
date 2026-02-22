@@ -24,14 +24,12 @@ This will simply build the extension file from the template files in
 
 ## Features
 
-ViperOffice currently supports:
+Currently supported commands:
 - Insert/append (`i`, `a`) and return to Normal with `Esc`
-- Movement keys: `hjkl`, `0`
+- Movement keys: `hjkl`, `0`, `$`
 - Deletion `x`
 
-## Good to know
-
-- Shortcuts and movements keys not used by this extension are passed to LibreOffice. 
+Shortcuts and movements keys not used by ViperOffice are passed to LibreOffice. 
 
 ## Shortcuts for enabling and disabling
 
