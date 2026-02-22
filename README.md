@@ -26,7 +26,7 @@ This will simply build the extension file from the template files in
 
 Currently supported Normal mode commands:
 - Insert/append : `i` (or `Ins`), `a`.
-- Movement keys: `hjkl`, `0`, `$`. `)`
+- Movement keys: `hjkl`, `0`, `$`. `()`
 - Deletion: `x` or `Del`.
 - Undo/redo: `u`, `C-r` (or `U`).
 

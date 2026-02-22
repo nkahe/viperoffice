@@ -202,8 +202,6 @@ def _move_cursor(cmd):
             if cursor.isAtStartOfLine() and old_y != new_y:
                 cursor.goLeft(1, False)
             return True
-        if cmd == ")":
-            return _go_to_next_sentence(False)
 
     except Exception:
         return False
@@ -288,6 +286,81 @@ def _go_to_next_sentence(expand):
         return False
 
 
+def _is_at_sentence_start_heuristic(text_cursor):
+    if text_cursor is None:
+        return False
+    try:
+        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        if probe.isStartOfParagraph():
+            return True
+
+        ch = ""
+        while True:
+            if not probe.goLeft(1, True):
+                break
+            ch = probe.getString()
+            probe.collapseToStart()
+            if ch not in (" ", "\t", "\"", "'", ")", "]"):
+                break
+        return ch in (".", "!", "?")
+    except Exception:
+        return False
+
+
+def _go_to_previous_sentence(expand):
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+
+    try:
+        old_pos = cursor.getPosition()
+
+        # From inside a sentence, first "(" should go to current sentence start.
+        if not _is_at_sentence_start_heuristic(text_cursor):
+            text_cursor.gotoStartOfSentence(expand)
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+            return True
+
+        # Paragraph-boundary behavior matching VBS logic.
+        if text_cursor.isStartOfParagraph():
+            if _is_current_paragraph_empty(text_cursor):
+                moved = text_cursor.gotoPreviousParagraph(expand)
+                if not moved:
+                    return False
+                while _is_current_paragraph_empty(text_cursor):
+                    if not text_cursor.gotoPreviousParagraph(expand):
+                        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                        return True
+                text_cursor.gotoEndOfParagraph(expand)
+                if not text_cursor.isStartOfParagraph():
+                    text_cursor.goLeft(1, expand)
+                text_cursor.gotoStartOfSentence(expand)
+                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                return True
+            else:
+                if text_cursor.gotoPreviousParagraph(expand):
+                    if _is_current_paragraph_empty(text_cursor):
+                        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                        return True
+                    text_cursor.gotoEndOfParagraph(expand)
+                    if not text_cursor.isStartOfParagraph():
+                        text_cursor.goLeft(1, expand)
+                    text_cursor.gotoStartOfSentence(expand)
+                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                    return True
+
+        text_cursor.gotoPreviousSentence(expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        if _same_pos(old_pos, cursor.getPosition()):
+            if text_cursor.goLeft(1, expand):
+                text_cursor.gotoPreviousSentence(expand)
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return True
+    except Exception:
+        return False
+
+
 def _delete_char_under_cursor():
     textCursor = _get_text_cursor()
     if textCursor is None:
@@ -342,9 +415,29 @@ def _undo(isUndo):
         # Non-fatal when no more undo actions exist.
         return False
 
+
 # --------------
 # Input handling
 # --------------
+
+
+def _normal_actions(state):
+    return {
+        "a": lambda: _switch_to_insert(state, "a"),
+        "i": lambda: _switch_to_insert(state, "i"),
+        "h": lambda: _move_cursor("h"),
+        "j": lambda: _move_cursor("j"),
+        "k": lambda: _move_cursor("k"),
+        "l": lambda: _move_cursor("l"),
+        ")": lambda: _go_to_next_sentence(False),
+        "(": lambda: _go_to_previous_sentence(False),
+        "u": lambda: _undo(True),
+        "U": lambda: _undo(False),
+        "x": _delete_char_under_cursor,
+        "0": lambda: _move_cursor("0"),
+        "$": lambda: _move_cursor("$"),
+    }
+
 
 class KeyHandler(unohelper.Base, XKeyHandler):
     def __init__(self, token):
@@ -361,7 +454,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     # Return False: event consumed, False: let pass through.
     def keyPressed(self, event):
         state = _state()
-        if not state["enabled"]: return False
+        if not state["enabled"]:
+            return False
 
         # Don't do anything if textCursor isn't working (as in annotations).
         textCursor = _get_text_cursor()
@@ -383,9 +477,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_code = _key_code(event)
         key_char = _normalize_key_char(event)
         mods = _event_modifiers(event)
-        ctrl_mask = getattr(KeyModifier, "MOD1", 0)
-        alt_mask = getattr(KeyModifier, "MOD2", 0)
-        meta_mask = getattr(KeyModifier, "MOD3", 0)
         is_escape = (key_code == 1281)
 
         if state["mode"] == "INSERT":
@@ -397,8 +488,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         r_code = int(getattr(Key, "R", 529))
 
-        # Ctrl + <char>
-        if bool(mods & ctrl_mask) and not bool(mods & (alt_mask | meta_mask)):
+        if _is_ctrl_shortcut_no_alt_meta(mods):
             if key_code == r_code:
                 return self._consume_active_event(lambda: _undo(False))
             else:
@@ -411,22 +501,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if not (state["mode"] == "NORMAL" and is_altgr_char):
                 return False
 
-        controller = _current_controller()
-
-        normal_actions = {
-            "i": lambda: _switch_to_insert(state, "i"),
-            "a": lambda: _switch_to_insert(state, "a"),
-            "h": lambda: _move_cursor("h"),
-            "j": lambda: _move_cursor("j"),
-            "k": lambda: _move_cursor("k"),
-            "l": lambda: _move_cursor("l"),
-            ")": lambda: _move_cursor(")"),
-            "u": lambda: _undo(True),
-            "U": lambda: _undo(False),
-            "0": lambda: _move_cursor("0"),
-            "$": lambda: _move_cursor("$"),
-            "x": _delete_char_under_cursor,
-        }
+        normal_actions = _normal_actions(state)
 
         action = normal_actions.get(key_char)
         if action is not None:
@@ -502,8 +577,6 @@ def _msgbox(text, title="ViperOffice"):
 def _normalize_key_char(event):
     k = event.KeyChar
     key_code = _key_code(event)
-    if DEBUG is True:
-        _msgbox(f"event.KeyChar={k!r}\nkey_code={key_code}")
 
     # NUM0..NUM9 can represent either digits or symbols depending on layout.
     # If KeyChar already carries a printable symbol (e.g. AltGr+4 -> "$"),
@@ -581,6 +654,13 @@ def _event_modifiers(event):
 def _has_non_shift_modifier(event):
     mods = _event_modifiers(event)
     return bool(mods & (KeyModifier.MOD1 | KeyModifier.MOD2 | KeyModifier.MOD3))
+
+
+def _is_ctrl_shortcut_no_alt_meta(mods):
+    ctrl = getattr(KeyModifier, "MOD1", 0)
+    alt = getattr(KeyModifier, "MOD2", 0)
+    meta = getattr(KeyModifier, "MOD3", 0)
+    return bool(mods & ctrl) and not bool(mods & (alt | meta))
 
 
 def _is_altgr_char_event(event, key_char, key_code):
