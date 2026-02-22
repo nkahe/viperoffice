@@ -24,12 +24,16 @@ This will simply build the extension file from the template files in
 
 ## Features
 
-Currently supported commands:
-- Insert/append (`i`, `a`) and return to Normal with `Esc`
-- Movement keys: `hjkl`, `0`, `$`
-- Deletion `x`
+Currently supported Normal mode commands:
+- Insert/append : `i` (or `Ins`), `a`.
+- Movement keys: `hjkl`, `0`, `$`.
+- Deletion: `x` or `Del`.
+- Undo/redo: `u`, `C-r` (or `U`).
 
-Shortcuts and movements keys not used by ViperOffice are passed to LibreOffice. 
+Insert Mode:
+- `<Esc>` switch to Normal mode.
+
+In normal mode other characters do nothing. All other shortcuts and keys are passed to LibreOffice. 
 
 ## Shortcuts for enabling and disabling
 

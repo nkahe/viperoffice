@@ -55,6 +55,7 @@ def _state():
 # Editor
 # ------------
 
+# Editor - Functions to manipulate view and model (document).
 
 def _dbg(msg):
     if not DEBUG:
@@ -247,6 +248,20 @@ def _switch_to_insert(state, key_char):
     _goto_mode("INSERT")
 
 
+def _undo(isUndo):
+    doc = _current_doc()
+    if doc is None:
+        return False
+    try:
+        if isUndo:
+            doc.getUndoManager().undo()
+        else:
+            doc.getUndoManager().redo()
+        return True
+    except Exception:
+        # Non-fatal when no more undo actions exist.
+        return False
+
 # --------------
 # Input handling
 # --------------
@@ -266,14 +281,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     # Return False: event consumed, False: let pass through.
     def keyPressed(self, event):
         state = _state()
-        if not state["enabled"]:
-            return False
-        key_code = _key_code(event)
-        key_char = _normalize_key_char(event)
-        # Let LibreOffice handle Alt/Ctrl/Meta shortcuts, but keep AltGr text
-        # characters available for NORMAL-mode command matching.
-        if _has_non_shift_modifier(event) and not _is_altgr_char_event(event, key_char, key_code):
-            return False
+        if not state["enabled"]: return False
+
         if not self._is_active_instance():
             # Stale handlers can still be called by LO after lifecycle changes.
             # Swallow one duplicate transition callback if needed.
@@ -286,8 +295,39 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 return False
             return bool(state["mode"] == "NORMAL")
 
-        controller = _current_controller()
+        key_code = _key_code(event)
+        key_char = _normalize_key_char(event)
+        mods = _event_modifiers(event)
+        ctrl_mask = getattr(KeyModifier, "MOD1", 0)
+        alt_mask = getattr(KeyModifier, "MOD2", 0)
+        meta_mask = getattr(KeyModifier, "MOD3", 0)
         is_escape = (key_code == 1281)
+
+        if state["mode"] == "INSERT":
+            if is_escape:
+                return self._consume_active_event(_leave_insert_to_normal)
+            return False
+
+        # ----- Non-insert mode -----
+
+        r_code = int(getattr(Key, "R", 529))
+
+        # Ctrl + <char>
+        if bool(mods & ctrl_mask) and not bool(mods & (alt_mask | meta_mask)):
+            if key_code == r_code:
+                return self._consume_active_event(lambda: _undo(False))
+            else:
+                return False
+
+        is_altgr_char = _is_altgr_char_event(event, key_char, key_code)
+        # Pass modified shortcuts through, except AltGr-only char input in
+        # NORMAL mode, which ViperOffice should keep and interpret.
+        if _has_non_shift_modifier(event):
+            if not (state["mode"] == "NORMAL" and is_altgr_char):
+                return False
+
+        controller = _current_controller()
+
         normal_actions = {
             "i": lambda: _switch_to_insert(state, "i"),
             "a": lambda: _switch_to_insert(state, "a"),
@@ -295,22 +335,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "j": lambda: _move_cursor("j"),
             "k": lambda: _move_cursor("k"),
             "l": lambda: _move_cursor("l"),
+            "u": lambda: _undo(True),
+            "U": lambda: _undo(False),
             "0": lambda: _move_cursor("0"),
             "$": lambda: _move_cursor("$"),
             "x": _delete_char_under_cursor,
         }
 
-        if key_char in ("h", "j", "k", "l", "x", "i", "a", "0", "$") or is_escape:
-            _dbg(
-                f"KEY key={key_char!r} code={key_code} mode={state['mode']} "
-                f"enabled={state['enabled']} self={id(self)} "
-                f"controller={id(controller) if controller is not None else 'None'}"
-            )
-
-        if state["mode"] == "INSERT":
-            if is_escape:
-                return self._consume_active_event(_leave_insert_to_normal)
-            return False
+        action = normal_actions.get(key_char)
+        if action is not None:
+            return self._consume_active_event(action)
 
         # NORMAL mode: block input by default.
         if _is_insert_key(event):
@@ -321,11 +355,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
-
-        action = normal_actions.get(key_char)
-        if action is not None:
-            return self._consume_active_event(action)
-
         return self._consume_active_event()
 
     # Return False: event consumed, False: let pass through.
@@ -471,13 +500,11 @@ def _is_altgr_char_event(event, key_char, key_code):
     if not (isinstance(key_char, str) and len(key_char) == 1 and ord(key_char) >= 32):
         return False
     mods = _event_modifiers(event)
-    mod1 = getattr(KeyModifier, "MOD1", 0)
     mod2 = getattr(KeyModifier, "MOD2", 0)
     mod3 = getattr(KeyModifier, "MOD3", 0)
-    # Most platforms report AltGr as Ctrl+Alt.
-    if bool(mods & mod1) and bool(mods & mod2):
-        return True
-    # Some setups report AltGr as Alt-only with key_code=0.
+    # Treat AltGr as text-producing modified input. In this environment these
+    # events arrive with key_code == 0 (e.g. AltGr+4 -> "$"), while normal
+    # Ctrl/Alt shortcuts have concrete key codes.
     return bool(mods & mod2) and not bool(mods & mod3) and key_code == 0
 
 
