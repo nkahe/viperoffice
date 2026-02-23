@@ -467,6 +467,7 @@ def _undo(isUndo):
 # Input handling
 # --------------
 
+"""Build NORMAL-mode command dispatch map for single-key actions."""
 def _normal_actions(state):
     return {
         "i": lambda: _switch_to_insert(state, False),
@@ -488,7 +489,10 @@ def _normal_actions(state):
         "$": lambda: _goto_end_of_line(),
     }
 
-
+# UNO key handler
+# Return values for keyPressed/keyReleased:
+#   True  -> event is consumed by ViperOffice (LibreOffice should not process it)
+#   False -> event is passed through to LibreOffice default handling
 class KeyHandler(unohelper.Base, XKeyHandler):
     def __init__(self, token):
         self._token = token
@@ -501,7 +505,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             action()
         return True
 
-    # Return False: event consumed, False: let pass through.
     def keyPressed(self, event):
         state = _state()
         if not state["enabled"]:
@@ -527,58 +530,51 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_code = _key_code(event)
         key_char = _normalize_key_char(event)
         mods = _event_modifiers(event)
-        is_escape = (key_code == 1281) or (
-            key_code == 1315 and _is_ctrl_shortcut_no_alt_meta(mods)  # C-[
-        )
+        is_ctrl = _is_ctrl_shortcut_no_alt_meta(mods)
+        is_escape = _is_escape(key_code, is_ctrl)
 
         if state["mode"] == "INSERT":
             if is_escape:
                 return self._consume_active_event(_leave_insert_to_normal)
             return False
 
-        # ----- Non-insert mode -----
+        # ----- Non-Insert mode -----
 
+        is_altgr_char = _is_altgr_char_event(event, key_char, key_code)
         r_code = int(getattr(Key, "R", 529))
 
-        if _is_ctrl_shortcut_no_alt_meta(mods):
+        # Match Normal mode character commands.
+        normal_actions = _normal_actions(state)
+        action = normal_actions.get(key_char)
+        if action is not None:
+            return self._consume_active_event(action)
+
+        if is_ctrl:
             if key_code == r_code:
                 return self._consume_active_event(lambda: _undo(False))
             else:
                 return False
 
-        is_altgr_char = _is_altgr_char_event(event, key_char, key_code)
+        # Match non-characters keys.
+        if is_escape:
+            return self._consume_active_event(lambda: _goto_mode("NORMAL"))
+        if _is_delete_key(event):
+            return self._consume_active_event(_delete_char)
+        if _is_backspace_key(event):
+            return self._consume_active_event(lambda: _move_charwise("h"))
         # Pass modified shortcuts through, except AltGr-only char input in
         # NORMAL mode, which ViperOffice should keep and interpret.
         if _has_non_shift_modifier(event):
             if not (state["mode"] == "NORMAL" and is_altgr_char):
                 return False
-
-        normal_actions = _normal_actions(state)
-
-        action = normal_actions.get(key_char)
-        if action is not None:
-            return self._consume_active_event(action)
-
-        # NORMAL mode: block input by default.
         if _is_insert_key(event):
             return self._consume_active_event(lambda: _switch_to_insert(state, False))
-        if _is_delete_key(event):
-            return self._consume_active_event(_delete_char)
-        if _is_backspace_key(event):
-            return self._consume_active_event(lambda: _move_charwise("h"))
-        if _is_navigation_key(event) or _is_function_key(event):
-            return False
-        if is_escape:
-            return self._consume_active_event(lambda: _goto_mode("NORMAL"))
         return self._consume_active_event()
 
-
-    # Return False: event consumed, False: let pass through.
     def keyReleased(self, event):
         state = _state()
         if not state["enabled"]:
             return False
-
         # Keep NORMAL cursor rendering for navigation releases, including
         # Ctrl+Home/Ctrl+End where Ctrl would otherwise short-circuit below.
         if state["mode"] == "NORMAL" and _is_navigation_key(event):
@@ -586,11 +582,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
         if state["mode"] == "NORMAL" and _is_function_key(event):
             return False
-
         if state["mode"] == "NORMAL":
             _show_normal_cursor()
             return True
-
         return False
 
     def disposing(self, event):
@@ -628,6 +622,8 @@ def _msgbox(text, title="ViperOffice"):
         pass
 
 
+# Normalize UNO key event payload into a single-character command key when possible.
+# Handles runtime-specific KeyChar/KeyCode representations used by LO/UNO.
 def _normalize_key_char(event):
     k = event.KeyChar
     key_code = _key_code(event)
@@ -734,6 +730,13 @@ def _key_code(event):
         return int(event.KeyCode)
     except Exception:
         return -1
+
+
+def _is_escape(key_code, is_ctrl):
+    # Ctrl+[ is interpreted as Esc like in terminal.
+    return (key_code == 1281) or (
+        key_code == 1315 and is_ctrl
+    )
 
 
 def _is_navigation_key(event):
