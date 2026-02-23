@@ -94,6 +94,7 @@ def _get_count():
 def _get_raw_count():
     return _state().get("count", 0)
 
+
 # ------------
 # Editor
 # ------------
@@ -217,19 +218,19 @@ def _goto_mode(mode_name):
         _show_insert_cursor()
 
 
-def _move_charwise(cmd):
+def _move_charwise(cmd, count=1):
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
         if cmd == "h":
-            return bool(cursor.goLeft(1, False))
+            return bool(cursor.goLeft(count, False))
         if cmd == "l":
-            return bool(cursor.goRight(1, False))
+            return bool(cursor.goRight(count, False))
         if cmd == "j":
-            return bool(cursor.goDown(1, False))
+            return bool(cursor.goDown(count, False))
         if cmd == "k":
-            return bool(cursor.goUp(1, False))
+            return bool(cursor.goUp(count, False))
     except Exception:
         return False
     return False
@@ -265,12 +266,14 @@ def _goto_start_of_line(first_non_blank=False):
     return False
 
 
-def _goto_end_of_line():
+def _goto_end_of_line(count = 1):
     cursor = _get_cursor()
     if cursor is None:
         return False
 
     try:
+        if count > 1:
+            _move_charwise("j", count - 1)
         old_pos = cursor.getPosition()
         cursor.gotoEndOfLine(False)
         new_pos = cursor.getPosition()
@@ -446,7 +449,7 @@ def _go_to_previous_sentence(expand):
         return False
 
 
-def _delete_char(reversed_dir=False):
+def _delete_char(reversed_dir=False, count = 1):
     textCursor = _get_text_cursor()
     if textCursor is None:
         return False
@@ -454,9 +457,9 @@ def _delete_char(reversed_dir=False):
         textCursor.gotoRange(textCursor.getStart(), False)
         if reversed_dir is True:
             textCursor.collapseToStart()
-            if not textCursor.goLeft(1, True):
+            if not textCursor.goLeft(count, True):
                 return False
-        elif not textCursor.goRight(1, True):
+        elif not textCursor.goRight(count, True):
             return False
         textCursor.setString("")
         return True
@@ -497,15 +500,17 @@ def _switch_to_insert(state, append, linewise=False):
     _goto_mode("INSERT")
 
 
-def _undo(isUndo):
+def _undo(isUndo, count = 1):
     doc = _current_doc()
     if doc is None:
         return False
     try:
         if isUndo:
-            doc.getUndoManager().undo()
+            for _ in range(count):
+                doc.getUndoManager().undo()
         else:
-            doc.getUndoManager().redo()
+            for _ in range(count):
+                doc.getUndoManager().redo()
         return True
     except Exception:
         # Non-fatal when no more undo actions exist.
@@ -517,24 +522,24 @@ def _undo(isUndo):
 # --------------
 
 """Build NORMAL-mode command dispatch map for single-key actions."""
-def _normal_actions(state):
+def _normal_actions(state, count):
     return {
         "i": lambda: _switch_to_insert(state, False),
         "I": lambda: _switch_to_insert(state, False, True),
         "a": lambda: _switch_to_insert(state, True),
         "A": lambda: _switch_to_insert(state, True, True),
-        "h": lambda: _move_charwise("h"),
-        "j": lambda: _move_charwise("j"),
-        "k": lambda: _move_charwise("k"),
-        "l": lambda: _move_charwise("l"),
+        "h": lambda: _move_charwise("h", count),
+        "j": lambda: _move_charwise("j", count),
+        "k": lambda: _move_charwise("k", count),
+        "l": lambda: _move_charwise("l", count),
         ")": lambda: _go_to_next_sentence(False),
         "(": lambda: _go_to_previous_sentence(False),
-        "u": lambda: _undo(True),
-        "U": lambda: _undo(False),
-        "x": lambda: _delete_char(),
-        "X": lambda: _delete_char(True),
+        "u": lambda: _undo(True, count),
+        "U": lambda: _undo(False, count),
+        "x": lambda: _delete_char(False, count),
+        "X": lambda: _delete_char(True, count),
         "^": lambda: _goto_start_of_line(True),
-        "$": lambda: _goto_end_of_line(),
+        "$": lambda: _goto_end_of_line(count),
     }
 
 # UNO key handler
@@ -560,6 +565,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # Don't do anything if textCursor isn't working (as in annotations).
         textCursor = _get_text_cursor()
+        count = _get_count()
         if textCursor is None:
             return False
 
@@ -607,7 +613,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # ----- Keys without modifiers after this ----
 
         # Match Normal mode character commands.
-        normal_actions = _normal_actions(state)
+        normal_actions = _normal_actions(state, count)
         action = normal_actions.get(key_char)
         if key_char == "0" and _get_raw_count() == 0:
             action = lambda: _goto_start_of_line()
@@ -638,7 +644,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_delete_key(event):
             return self._consume_active_event(_delete_char)
         if _is_backspace_key(event):
-            return self._consume_active_event(lambda: _move_charwise("h"))
+            return self._consume_active_event(lambda: _move_charwise("h", count))
         if _is_insert_key(event):
             return self._consume_active_event(lambda: _switch_to_insert(state, False))
 
