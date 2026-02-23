@@ -26,14 +26,14 @@ This will simply build the extension file from the template files in
 
 Currently supported Normal mode commands:
 - Insert/append: `i`, `I`, `a`, `A`.
-- Movement keys: `hjkl`, `0`, `^`, `$`. `()`
+- Movement keys: `hjkl`, `0`, `^`, `$`, `G`, `()`
 - Deletion: `x`, `X`
 - Undo/redo: `u`, `C-r`.
 
 Insert Mode:
 - Switch to Normal mode: `Esc`
 
-- Commands that support count: `hjkl`, `$`, `x`, `X`, `u`, `C-r`, `()`
+- Commands that support count: `hjkl`, `G`,  `()`, `$`, `x`, `X`, `u`, `C-r`,
 - Aliases: `Ins`: i, `U`: C-r, `BS`: h, `C-[`: Esc
 
 

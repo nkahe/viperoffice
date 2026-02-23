@@ -295,6 +295,24 @@ def _goto_end_of_line(count = 1):
         return False
     return False
 
+# 'G': Go to line motion. count None -> last line, count n -> line n.
+def _goto_line(expand, count=None):
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    try:
+        if count is None:
+            cursor.gotoEnd(False)
+            return True
+        line_number = max(1, int(count))
+        cursor.gotoStart(expand)
+        if line_number > 1:
+            cursor.goDown(line_number - 1, expand)
+        return True
+    except Exception:
+        return False
+
+# def _move_words_forward(expand, count)
 
 def _pos_xy(pos):
     if pos is None:
@@ -477,7 +495,7 @@ def _goto_sentences_backwards(expand, count=2):
         return False
 
 
-def _delete_char(reversed_dir=False, count = 1):
+def _delete_characters(reversed_dir=False, count = 1):
     textCursor = _get_text_cursor()
     if textCursor is None:
         return False
@@ -528,7 +546,7 @@ def _switch_to_insert(state, append, linewise=False):
     _goto_mode("INSERT")
 
 
-def _undo(isUndo, count = 1):
+def _undo_changes(isUndo, count = 1):
     doc = _current_doc()
     if doc is None:
         return False
@@ -556,16 +574,17 @@ def _normal_actions(state, count):
         "I": lambda: _switch_to_insert(state, False, True),
         "a": lambda: _switch_to_insert(state, True),
         "A": lambda: _switch_to_insert(state, True, True),
+        "G": lambda: _goto_line(False, count),
         "h": lambda: _move_charwise("h", count),
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
-        "u": lambda: _undo(True, count),
-        "U": lambda: _undo(False, count),
-        "x": lambda: _delete_char(False, count),
-        "X": lambda: _delete_char(True, count),
+        "u": lambda: _undo_changes(True, count),
+        "U": lambda: _undo_changes(False, count),
+        "x": lambda: _delete_characters(False, count),
+        "X": lambda: _delete_characters(True, count),
         "^": lambda: _goto_start_of_line(True),
         "$": lambda: _goto_end_of_line(count),
     }
@@ -628,7 +647,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if is_ctrl:
             if key_code == r_code:
                 _reset_count()
-                return self._consume_active_event(lambda: _undo(False))
+                return self._consume_active_event(lambda: _undo_changes(False))
             else:
                 return False
 
@@ -670,7 +689,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
         if _is_delete_key(event):
-            return self._consume_active_event(_delete_char)
+            return self._consume_active_event(_delete_characters)
         if _is_backspace_key(event):
             return self._consume_active_event(lambda: _move_charwise("h", count))
         if _is_insert_key(event):
