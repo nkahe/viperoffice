@@ -340,36 +340,45 @@ def _goto_next_non_empty_paragraph(text_cursor, expand):
     return moved
 
 
-def _go_to_next_sentence(expand):
+def _go_to_next_sentence_once(text_cursor, cursor, expand):
+    old_pos = cursor.getPosition()
+
+    # From an empty line, jump directly to the next non-empty paragraph.
+    if _is_current_paragraph_empty(text_cursor):
+        moved = _goto_next_non_empty_paragraph(text_cursor, expand)
+        if moved:
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return moved
+
+    text_cursor.gotoNextSentence(expand)
+    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+
+    if _same_pos(old_pos, cursor.getPosition()):
+        if text_cursor.isEndOfParagraph():
+            if _is_current_paragraph_empty(text_cursor):
+                _goto_next_non_empty_paragraph(text_cursor, expand)
+            else:
+                text_cursor.gotoNextParagraph(expand)
+        else:
+            text_cursor.goRight(1, expand)
+            text_cursor.gotoNextSentence(expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+    return True
+
+
+def _go_to_next_sentence(expand, count = 1):
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
         return False
-
     try:
-        old_pos = cursor.getPosition()
-
-        # From an empty line, jump directly to the next non-empty paragraph.
-        if _is_current_paragraph_empty(text_cursor):
-            moved = _goto_next_non_empty_paragraph(text_cursor, expand)
-            if moved:
-                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-            return moved
-
-        text_cursor.gotoNextSentence(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-
-        if _same_pos(old_pos, cursor.getPosition()):
-            if text_cursor.isEndOfParagraph():
-                if _is_current_paragraph_empty(text_cursor):
-                    _goto_next_non_empty_paragraph(text_cursor, expand)
-                else:
-                    text_cursor.gotoNextParagraph(expand)
-            else:
-                text_cursor.goRight(1, expand)
-                text_cursor.gotoNextSentence(expand)
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-        return True
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if not _go_to_next_sentence_once(text_cursor, cursor, expand):
+                break
+            moved_any = True
+        return moved_any
     except Exception:
         return False
 
@@ -532,7 +541,7 @@ def _normal_actions(state, count):
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
-        ")": lambda: _go_to_next_sentence(False),
+        ")": lambda: _go_to_next_sentence(False, count),
         "(": lambda: _go_to_previous_sentence(False),
         "u": lambda: _undo(True, count),
         "U": lambda: _undo(False, count),
