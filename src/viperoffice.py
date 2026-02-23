@@ -198,18 +198,6 @@ def _show_insert_cursor():
         pass
 
 
-def _show_insert_cursor_for_controller(controller):
-    if controller is None:
-        return
-    try:
-        cursor = controller.getViewCursor()
-        textCursor = cursor.getText().createTextCursorByRange(cursor)
-        textCursor.gotoRange(textCursor.getStart(), False)
-        controller.select(textCursor)
-    except Exception:
-        pass
-
-
 def _goto_mode(mode_name):
     _set_mode(mode_name)
     if mode_name == "NORMAL":
@@ -218,6 +206,7 @@ def _goto_mode(mode_name):
         _show_insert_cursor()
 
 
+# Motions [count]'h', 'j', 'k', 'l'.
 def _move_charwise(cmd, count=1):
     cursor = _get_cursor()
     if cursor is None:
@@ -236,6 +225,7 @@ def _move_charwise(cmd, count=1):
     return False
 
 
+# Motions '0','^',
 def _goto_start_of_line(first_non_blank=False):
     cursor = _get_cursor()
     if cursor is None:
@@ -266,7 +256,8 @@ def _goto_start_of_line(first_non_blank=False):
     return False
 
 
-def _goto_end_of_line(count = 1):
+# Motion [count]'$'.
+def _goto_end_of_line(count=1):
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -295,7 +286,8 @@ def _goto_end_of_line(count = 1):
         return False
     return False
 
-# 'G': Go to line motion. count None -> last line, count n -> line n.
+
+# [count]'G': Go to line motion. count None -> last line, count n -> line n.
 def _goto_line(expand, count=None):
     cursor = _get_cursor()
     if cursor is None:
@@ -391,6 +383,7 @@ def _goto_next_sentence(text_cursor, cursor, expand):
     return True
 
 
+# Motion [count]')'
 def _goto_sentences_forward(expand, count = 1):
     # Repeats ")" motion by count times.
     text_cursor = _get_text_cursor()
@@ -476,7 +469,7 @@ def _goto_previous_sentence(text_cursor, cursor, expand):
         _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
     return True
 
-
+# Motion [count]'('.
 def _goto_sentences_backwards(expand, count=2):
     # Repeats "(" motion by count times.
     text_cursor = _get_text_cursor()
@@ -495,24 +488,31 @@ def _goto_sentences_backwards(expand, count=2):
         return False
 
 
-def _delete_characters(reversed_dir=False, count = 1):
+# Motions [count]'x','X' and's'.
+def _delete_characters(reverse=False, substitute=False, count=1):
     textCursor = _get_text_cursor()
     if textCursor is None:
         return False
     try:
         textCursor.gotoRange(textCursor.getStart(), False)
-        if reversed_dir is True:
+        if reverse is True:
             textCursor.collapseToStart()
+            # At start of line
             if not textCursor.goLeft(count, True):
                 return False
+        # At end of line
         elif not textCursor.goRight(count, True):
             return False
         textCursor.setString("")
+        if substitute:
+            state = _state()
+            _switch_to_insert(state, False)
         return True
     except Exception:
         return False
 
 
+# Commmand 'Esc',
 def _leave_insert_to_normal():
     cursor = _get_cursor()
     if cursor is not None:
@@ -524,6 +524,7 @@ def _leave_insert_to_normal():
     _goto_mode("NORMAL")
 
 
+# Commands 'i', 'a', 'I', 'A'.
 def _switch_to_insert(state, append, linewise=False):
     # Some stale handlers may still receive this same insert-transition key
     # callback. Swallow one stale duplicate so the transition key does not get
@@ -546,6 +547,7 @@ def _switch_to_insert(state, append, linewise=False):
     _goto_mode("INSERT")
 
 
+# Commands 'u', 'C-r'.
 def _undo_changes(isUndo, count = 1):
     doc = _current_doc()
     if doc is None:
@@ -583,6 +585,7 @@ def _normal_actions(state, count):
         "(": lambda: _goto_sentences_backwards(False, count),
         "u": lambda: _undo_changes(True, count),
         "U": lambda: _undo_changes(False, count),
+        "s": lambda: _delete_characters(False, True, count),
         "x": lambda: _delete_characters(False, count),
         "X": lambda: _delete_characters(True, count),
         "^": lambda: _goto_start_of_line(True),
@@ -1022,6 +1025,18 @@ def _show_normal_cursor_for_controller(controller):
         moved = textCursor.goRight(1, False)
         if moved:
             textCursor.goLeft(1, True)
+        controller.select(textCursor)
+    except Exception:
+        pass
+
+
+def _show_insert_cursor_for_controller(controller):
+    if controller is None:
+        return
+    try:
+        cursor = controller.getViewCursor()
+        textCursor = cursor.getText().createTextCursorByRange(cursor)
+        textCursor.gotoRange(textCursor.getStart(), False)
         controller.select(textCursor)
     except Exception:
         pass
