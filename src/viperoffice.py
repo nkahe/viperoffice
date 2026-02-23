@@ -30,8 +30,11 @@ def _state():
             # Has the extension been started. Will only be set to true.
             "started": False,
             "enabled": False,
-            # Current vi input mode. Can be NORMAL or INSERT.
+            # Current vi input mode. Can be "NORMAL" or "INSERT".
             "mode": "NORMAL",
+            # An optional number that may precede the command to multiply
+            # or iterate the command.
+            "count": 0,
             "key_handler": None,
             # Python UNO may leave stale key-handler registrations attached even
             # after removeKeyHandler(); token guards ensure only the latest
@@ -50,6 +53,46 @@ def _state():
         setattr(builtins, key, state)
     return state
 
+
+def _set_count(n):
+    try:
+        value = int(n)
+    except Exception:
+        return False
+    if value < 0:
+        value = 0
+    if value > 999:
+        value = 999
+    _state()["count"] = value
+    _update_statusline()
+    return True
+
+def _reset_count():
+    _state()["count"] = 0
+    _update_statusline()
+
+def _add_to_count(n):
+    try:
+        digit = int(n)
+    except Exception:
+        return False
+    if digit < 0:
+        return False
+    state = _state()
+    if state["count"] <= 1000:
+        new_count = int(f"{state['count']}{digit}")
+        _update_statusline()
+        return _set_count(new_count)
+    return False
+
+def _get_count():
+    count = _state().get("count", 0)
+    if count == 0:
+        return 1
+    return count
+
+def _get_raw_count():
+    return _state().get("count", 0)
 
 # ------------
 # Editor
@@ -105,20 +148,26 @@ def _get_text_cursor():
         return None
 
 
-def _set_raw_status(text):
-    controller = _current_controller()
+def _update_statusline(controller=None):
+    if controller is None:
+        controller = _current_controller()
     if controller is None:
         return
     try:
+        state = _state()
+        mode_name = state["mode"]
+        text = mode_name
+        if _get_raw_count() != 0:
+            count_text = _get_count()
+            text += f"  {count_text}"
         controller.StatusIndicator.start(text, 0)
     except Exception:
-        # Non-fatal for phase 0.
+        # Non-fatal for status update.
         pass
-
 
 def _set_mode(mode_name):
     _state()["mode"] = mode_name
-    _set_raw_status(mode_name)
+    _update_statusline()
 
 
 def _show_normal_cursor():
@@ -484,7 +533,6 @@ def _normal_actions(state):
         "U": lambda: _undo(False),
         "x": lambda: _delete_char(),
         "X": lambda: _delete_char(True),
-        "0": lambda: _goto_start_of_line(),
         "^": lambda: _goto_start_of_line(True),
         "$": lambda: _goto_end_of_line(),
     }
@@ -538,37 +586,62 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 return self._consume_active_event(_leave_insert_to_normal)
             return False
 
-        # ----- Non-Insert mode -----
+        # ----- Non-Insert mode after this -----
 
         is_altgr_char = _is_altgr_char_event(event, key_char, key_code)
         r_code = int(getattr(Key, "R", 529))
 
-        # Match Normal mode character commands.
-        normal_actions = _normal_actions(state)
-        action = normal_actions.get(key_char)
-        if action is not None:
-            return self._consume_active_event(action)
-
         if is_ctrl:
             if key_code == r_code:
+                _reset_count()
                 return self._consume_active_event(lambda: _undo(False))
             else:
                 return False
 
-        # Match non-characters keys.
+        # Pass modified shortcuts through, except AltGr-only char input in
+        # NORMAL mode, which ViperOffice should keep and interpret.
+        if _has_non_shift_modifier(event):
+            if not (state["mode"] == "NORMAL" and is_altgr_char):
+                return False
+
+        # ----- Keys without modifiers after this ----
+
+        # Match Normal mode character commands.
+        normal_actions = _normal_actions(state)
+        action = normal_actions.get(key_char)
+        if key_char == "0" and _get_raw_count() == 0:
+            action = lambda: _goto_start_of_line()
+        if action is not None:
+            _reset_count()
+            return self._consume_active_event(action)
+
+        # Count parsing
+        # - 1..9 always extend count
+        # - 0 extends count only after count has started
+        if _is_digit_char(key_char):
+            if key_char != "0" or _get_raw_count() > 0:
+                _add_to_count(int(key_char))
+                # _msgbox(f"count {int(key_char)}")
+                return self._consume_active_event()
+
+        # ----- Non-character keys -----
+
+        if _is_function_key(event):
+            return False
+
+        _reset_count()
+
+        if _is_navigation_key(event):
+            return False
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("NORMAL"))
         if _is_delete_key(event):
             return self._consume_active_event(_delete_char)
         if _is_backspace_key(event):
             return self._consume_active_event(lambda: _move_charwise("h"))
-        # Pass modified shortcuts through, except AltGr-only char input in
-        # NORMAL mode, which ViperOffice should keep and interpret.
-        if _has_non_shift_modifier(event):
-            if not (state["mode"] == "NORMAL" and is_altgr_char):
-                return False
         if _is_insert_key(event):
             return self._consume_active_event(lambda: _switch_to_insert(state, False))
+
         return self._consume_active_event()
 
     def keyReleased(self, event):
@@ -704,6 +777,10 @@ def _event_modifiers(event):
 def _has_non_shift_modifier(event):
     mods = _event_modifiers(event)
     return bool(mods & (KeyModifier.MOD1 | KeyModifier.MOD2 | KeyModifier.MOD3))
+
+
+def _is_digit_char(ch):
+    return isinstance(ch, str) and len(ch) == 1 and "0" <= ch <= "9"
 
 
 def _is_ctrl_shortcut_no_alt_meta(mods):
@@ -858,11 +935,11 @@ def _detach_controller(controller):
 
 
 def _attach_key_handler_to_all_views():
-    count = 0
+    controller_count = 0
     for controller in _iter_text_document_controllers():
         _attach_controller(controller)
-        count += 1
-    return count
+        controller_count += 1
+    return controller_count
 
 
 def _attach_controller(controller):
@@ -878,15 +955,6 @@ def _attach_controller(controller):
             break
     try:
         controller.addKeyHandler(state["key_handler"])
-    except Exception:
-        pass
-
-
-def _set_raw_status_for_controller(controller, text):
-    if controller is None:
-        return
-    try:
-        controller.StatusIndicator.start(text, 0)
     except Exception:
         pass
 
@@ -922,7 +990,7 @@ class ViewEventListener(unohelper.Base, XEventListener):
         if event_name == "OnFocus":
             # Do not reattach on every focus change: in Python UNO this can
             # accumulate duplicate callbacks for the same handler.
-            _set_raw_status_for_controller(controller, state["mode"])
+            _update_statusline(controller)
             if state["mode"] == "NORMAL":
                 _show_normal_cursor_for_controller(controller)
             else:
@@ -965,7 +1033,7 @@ def _activate_for_current_view():
     controller = _current_controller()
     if controller is None:
         return
-    _set_raw_status_for_controller(controller, state["mode"])
+    _update_statusline(controller)
     if state["mode"] == "NORMAL":
         _show_normal_cursor_for_controller(controller)
     else:
