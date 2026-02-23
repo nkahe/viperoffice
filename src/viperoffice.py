@@ -340,7 +340,7 @@ def _goto_next_non_empty_paragraph(text_cursor, expand):
     return moved
 
 
-def _go_to_next_sentence_once(text_cursor, cursor, expand):
+def _goto_next_sentence(text_cursor, cursor, expand):
     # Implements one ")" motion with paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -373,7 +373,7 @@ def _go_to_next_sentence_once(text_cursor, cursor, expand):
     return True
 
 
-def _go_to_next_sentence(expand, count = 1):
+def _goto_sentences_forward(expand, count = 1):
     # Repeats ")" motion by count times.
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -383,7 +383,7 @@ def _go_to_next_sentence(expand, count = 1):
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _go_to_next_sentence_once(text_cursor, cursor, expand):
+            if not _goto_next_sentence(text_cursor, cursor, expand):
                 break
             moved_any = True
         return moved_any
@@ -412,7 +412,7 @@ def _is_at_sentence_start_heuristic(text_cursor):
         return False
 
 
-def _go_to_previous_sentence_once(text_cursor, cursor, expand):
+def _goto_previous_sentence(text_cursor, cursor, expand):
     # Implements one "(" motion with sentence-start/paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -459,7 +459,7 @@ def _go_to_previous_sentence_once(text_cursor, cursor, expand):
     return True
 
 
-def _go_to_previous_sentence(expand, count=1):
+def _goto_sentences_backwards(expand, count=2):
     # Repeats "(" motion by count times.
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -469,7 +469,7 @@ def _go_to_previous_sentence(expand, count=1):
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _go_to_previous_sentence_once(text_cursor, cursor, expand):
+            if not _goto_previous_sentence(text_cursor, cursor, expand):
                 break
             moved_any = True
         return moved_any
@@ -560,8 +560,8 @@ def _normal_actions(state, count):
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
-        ")": lambda: _go_to_next_sentence(False, count),
-        "(": lambda: _go_to_previous_sentence(False, count),
+        ")": lambda: _goto_sentences_forward(False, count),
+        "(": lambda: _goto_sentences_backwards(False, count),
         "u": lambda: _undo(True, count),
         "U": lambda: _undo(False, count),
         "x": lambda: _delete_char(False, count),

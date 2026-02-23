@@ -30,11 +30,12 @@ Currently supported Normal mode commands:
 - Deletion: `x`, `X`
 - Undo/redo: `u`, `C-r`.
 
-- Commands that support count: `hjkl`, `$`, `x`, `X`, `u`, `C-r`, `()`
-- Aliases: `Ins`: i, `U`: C-r, `BS`: h
-
 Insert Mode:
-- Switch to Normal mode: `Esc` (or `C-[`)
+- Switch to Normal mode: `Esc`
+
+- Commands that support count: `hjkl`, `$`, `x`, `X`, `u`, `C-r`, `()`
+- Aliases: `Ins`: i, `U`: C-r, `BS`: h, `C-[`: Esc
+
 
 In normal mode other characters do nothing. All other shortcuts and keys are passed to LibreOffice. 
 
