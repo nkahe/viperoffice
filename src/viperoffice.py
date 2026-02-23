@@ -341,6 +341,7 @@ def _goto_next_non_empty_paragraph(text_cursor, expand):
 
 
 def _go_to_next_sentence_once(text_cursor, cursor, expand):
+    # Implements one ")" motion with paragraph-edge handling.
     old_pos = cursor.getPosition()
 
     # From an empty line, jump directly to the next non-empty paragraph.
@@ -352,6 +353,12 @@ def _go_to_next_sentence_once(text_cursor, cursor, expand):
 
     text_cursor.gotoNextSentence(expand)
     _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+
+    # Some backends land on the paragraph end marker first; skip that stop.
+    if text_cursor.isEndOfParagraph() and not _is_current_paragraph_empty(text_cursor):
+        text_cursor.gotoNextParagraph(expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return True
 
     if _same_pos(old_pos, cursor.getPosition()):
         if text_cursor.isEndOfParagraph():
@@ -367,6 +374,7 @@ def _go_to_next_sentence_once(text_cursor, cursor, expand):
 
 
 def _go_to_next_sentence(expand, count = 1):
+    # Repeats ")" motion by count times.
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -404,56 +412,67 @@ def _is_at_sentence_start_heuristic(text_cursor):
         return False
 
 
-def _go_to_previous_sentence(expand):
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
-        return False
+def _go_to_previous_sentence_once(text_cursor, cursor, expand):
+    # Implements one "(" motion with sentence-start/paragraph-edge handling.
+    old_pos = cursor.getPosition()
 
-    try:
-        old_pos = cursor.getPosition()
+    # From inside a sentence, first "(" should go to current sentence start.
+    if not _is_at_sentence_start_heuristic(text_cursor):
+        text_cursor.gotoStartOfSentence(expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return True
 
-        # From inside a sentence, first "(" should go to current sentence start.
-        if not _is_at_sentence_start_heuristic(text_cursor):
+    # Paragraph-boundary behavior matching logic.
+    if text_cursor.isStartOfParagraph():
+        if _is_current_paragraph_empty(text_cursor):
+            moved = text_cursor.gotoPreviousParagraph(expand)
+            if not moved:
+                return False
+            while _is_current_paragraph_empty(text_cursor):
+                if not text_cursor.gotoPreviousParagraph(expand):
+                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                    return True
+            text_cursor.gotoEndOfParagraph(expand)
+            if not text_cursor.isStartOfParagraph():
+                text_cursor.goLeft(1, expand)
             text_cursor.gotoStartOfSentence(expand)
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
             return True
-
-        # Paragraph-boundary behavior matching logic.
-        if text_cursor.isStartOfParagraph():
-            if _is_current_paragraph_empty(text_cursor):
-                moved = text_cursor.gotoPreviousParagraph(expand)
-                if not moved:
-                    return False
-                while _is_current_paragraph_empty(text_cursor):
-                    if not text_cursor.gotoPreviousParagraph(expand):
-                        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-                        return True
+        else:
+            if text_cursor.gotoPreviousParagraph(expand):
+                if _is_current_paragraph_empty(text_cursor):
+                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                    return True
                 text_cursor.gotoEndOfParagraph(expand)
                 if not text_cursor.isStartOfParagraph():
                     text_cursor.goLeft(1, expand)
                 text_cursor.gotoStartOfSentence(expand)
                 _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
                 return True
-            else:
-                if text_cursor.gotoPreviousParagraph(expand):
-                    if _is_current_paragraph_empty(text_cursor):
-                        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-                        return True
-                    text_cursor.gotoEndOfParagraph(expand)
-                    if not text_cursor.isStartOfParagraph():
-                        text_cursor.goLeft(1, expand)
-                    text_cursor.gotoStartOfSentence(expand)
-                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-                    return True
 
-        text_cursor.gotoPreviousSentence(expand)
+    text_cursor.gotoPreviousSentence(expand)
+    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+    if _same_pos(old_pos, cursor.getPosition()):
+        if text_cursor.goLeft(1, expand):
+            text_cursor.gotoPreviousSentence(expand)
         _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-        if _same_pos(old_pos, cursor.getPosition()):
-            if text_cursor.goLeft(1, expand):
-                text_cursor.gotoPreviousSentence(expand)
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-        return True
+    return True
+
+
+def _go_to_previous_sentence(expand, count=1):
+    # Repeats "(" motion by count times.
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+    try:
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if not _go_to_previous_sentence_once(text_cursor, cursor, expand):
+                break
+            moved_any = True
+        return moved_any
     except Exception:
         return False
 
@@ -542,7 +561,7 @@ def _normal_actions(state, count):
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
         ")": lambda: _go_to_next_sentence(False, count),
-        "(": lambda: _go_to_previous_sentence(False),
+        "(": lambda: _go_to_previous_sentence(False, count),
         "u": lambda: _undo(True, count),
         "U": lambda: _undo(False, count),
         "x": lambda: _delete_char(False, count),

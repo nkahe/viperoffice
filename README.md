@@ -30,7 +30,7 @@ Currently supported Normal mode commands:
 - Deletion: `x`, `X`
 - Undo/redo: `u`, `C-r`.
 
-- Commands that support count: `hjkl`, `$`, `x`, `X`, `u`, `C-r`, `)`
+- Commands that support count: `hjkl`, `$`, `x`, `X`, `u`, `C-r`, `()`
 - Aliases: `Ins`: i, `U`: C-r, `BS`: h
 
 Insert Mode:
