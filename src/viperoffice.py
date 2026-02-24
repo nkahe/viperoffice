@@ -104,6 +104,7 @@ def _get_count():
     return count
 
 
+# When need to know if count has been deliberately set.
 def _get_raw_count():
     return _state().get("count", 0)
 
@@ -222,7 +223,7 @@ def _goto_mode(mode_name):
         _show_insert_cursor()
 
 
-# Motions [count]'h', 'j', 'k', 'l'.
+# Commands 'h', 'j', 'k', 'l'.
 def _move_charwise(cmd, count=1):
     cursor = _get_cursor()
     if cursor is None:
@@ -241,7 +242,7 @@ def _move_charwise(cmd, count=1):
     return False
 
 
-# Motions '0','^',
+# Commands '0' and '^',
 def _goto_start_of_line(first_non_blank=False):
     cursor = _get_cursor()
     if cursor is None:
@@ -272,7 +273,7 @@ def _goto_start_of_line(first_non_blank=False):
     return False
 
 
-# Motion [count]'$'.
+# Motion '$'.
 def _goto_end_of_line(count=1):
     cursor = _get_cursor()
     if cursor is None:
@@ -374,6 +375,7 @@ def _word_char_class(ch, is_keyword_char, big_word: bool = False):
         return "keyword"
     return "other"
 
+
 # Offset means cursor position relative to start of paragraph.
 def _current_paragraph_text_and_offset(text_cursor):
     text_obj = text_cursor.getText()
@@ -419,6 +421,13 @@ _WORD_MOTION_E = {
     "direction": WORD_DIRECTION_FORWARD,
     "target": WORD_TARGET_END,
     "big_word": False,
+    "cross_empty": False,
+    "inclusive": True,
+}
+_WORD_MOTION_BIG_E = {
+    "direction": WORD_DIRECTION_FORWARD,
+    "target": WORD_TARGET_END,
+    "big_word": True,
     "cross_empty": False,
     "inclusive": True,
 }
@@ -588,7 +597,10 @@ def _scan_forward_word_target(paragraph_text, offset, is_keyword_char, spec):
         return i
 
     if target == WORD_TARGET_END:
-        # For "e": skip blanks first, then land on last char of the next word.
+        # For "e": if on non-blank, advance once so repeated `e` progresses.
+        if classify(paragraph_text[i], is_keyword_char, big_word) != "blank":
+            i += 1
+        # Then skip blanks and land on last char of the next word.
         while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
             i += 1
         if i >= length:
@@ -710,24 +722,32 @@ def _word_motion_once(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
     return False
 
 
-def _words_forward_motion(expand: bool,  count, operator: str | None) -> bool:
-    """`w`: Perform operation to [count] words forward.
+def _run_word_motion_command(
+    spec,
+    expand: bool,
+    count: int = 1,
+    operator: str | None = None,
+) -> bool:
+    """Run a word-motion command (e.g. `w`) and optionally apply an operator.
 
     Args:
+        spec: Word motion specification (direction/target/big_word/etc.).
         expand: If True, keeps selection expanded while moving.
         count: Number of word motions to perform (minimum 1).
-        operator: Operation to perform to motion.
+        operator: Pending operator, or None for plain cursor motion.
 
     Returns:
         True if cursor moved at least once, otherwise False.
     """
     try:
+        if not _validate_word_motion_spec(spec):
+            return False
         if expand:
             # Keep selection behavior by applying one step at a time.
             steps = max(1, int(count))
             moved_any = False
             for _ in range(steps):
-                result = _query_word_motion(_WORD_MOTION_W, 1, expand=True)
+                result = _query_word_motion(spec, 1, expand=True)
                 if not result.get("moved", False):
                     break
                 if not _apply_motion_result(result, expand, operator):
@@ -735,7 +755,7 @@ def _words_forward_motion(expand: bool,  count, operator: str | None) -> bool:
                 moved_any = True
             return moved_any
 
-        result = _query_word_motion(_WORD_MOTION_W, count, expand=False)
+        result = _query_word_motion(spec, count, expand=False)
         if not result.get("moved", False):
             return False
 
@@ -1019,7 +1039,12 @@ def _normal_actions(state, count, operator):
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
-        "w": lambda: _words_forward_motion(False, count, operator),
+        "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, operator),
+        "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, operator),
+        "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, operator),
+        "E": lambda: _run_word_motion_command(_WORD_MOTION_BIG_E, False, count, operator),
+        "b": lambda: _run_word_motion_command(_WORD_MOTION_B, False, count, operator),
+        "B": lambda: _run_word_motion_command(_WORD_MOTION_BIG_B, False, count, operator),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
         "u": lambda: _undo_changes(True, count),
