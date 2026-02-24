@@ -25,9 +25,9 @@ This will simply build the extension file from the template files in
 ## Features
 
 Currently supported Normal mode commands:
-- Insert/append (don't take count): `i`, `I`, `a`, `A`. 
-- Movement keys: `hjkl`, `w`, `W`, `b`, `B`, `e`, `E`, `0`, `^`, `$`, `G`, `()`
-- Deletion: `x`, `X`, `s`
+- Insert/append (don't take count): `i`, `I`, `a`, `A`, `o`, `O`.
+- Movement keys: `hjkl`, `w`, `W`, `b`, `B`, `e`, `E`, `0`, `^`, `$`, `G`, `()`.
+- Deletion: `x`, `X`, `s`.
 - Undo/redo: `u`, `C-r`.
 
 Insert Mode:

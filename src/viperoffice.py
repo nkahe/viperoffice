@@ -305,7 +305,7 @@ def _goto_end_of_line(count=1):
 
 
 # [count]'G': Go to line motion. count None -> last line, count n -> line n.
-def _goto_line(expand, count=1):
+def _goto_line(expand: bool, count=1):
     raw_count = _get_raw_count()
     cursor = _get_cursor()
     if cursor is None:
@@ -792,12 +792,12 @@ def _is_current_paragraph_empty(text_cursor):
         return False
 
 
-def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand):
+def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool):
     edge = text_cursor.getEnd() if expand else text_cursor.getStart()
     view_cursor.gotoRange(edge, False)
 
 
-def _goto_next_non_empty_paragraph(text_cursor, expand):
+def _goto_next_non_empty_paragraph(text_cursor, expand: bool):
     moved = False
     while True:
         if not text_cursor.gotoNextParagraph(expand):
@@ -808,7 +808,7 @@ def _goto_next_non_empty_paragraph(text_cursor, expand):
     return moved
 
 
-def _goto_next_sentence(text_cursor, cursor, expand):
+def _goto_next_sentence(text_cursor, cursor, expand: bool):
     # Implements one ")" motion with paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -842,7 +842,7 @@ def _goto_next_sentence(text_cursor, cursor, expand):
 
 
 # Repeats ")" motion by count times.
-def _goto_sentences_forward(expand, count = 1):
+def _goto_sentences_forward(expand: bool, count = 1):
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -880,7 +880,7 @@ def _is_at_sentence_start_heuristic(text_cursor):
         return False
 
 
-def _goto_previous_sentence(text_cursor, cursor, expand):
+def _goto_previous_sentence(text_cursor, cursor, expand: bool):
     # Implements one "(" motion with sentence-start/paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -928,7 +928,7 @@ def _goto_previous_sentence(text_cursor, cursor, expand):
 
 
 # Repeats "(" motion by count times.
-def _goto_sentences_backwards(expand, count=2):
+def _goto_sentences_backwards(expand: bool, count=2):
     # Repeats "(" motion by count times.
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -982,31 +982,48 @@ def _leave_insert_to_normal():
     _goto_mode("NORMAL")
 
 
-# Commands 'i', 'a', 'I', 'A'.
-def _switch_to_insert(state, append, linewise=False):
+# Commands 'a', 'I', 'A', 'o' and 'O'.
+def _switch_to_insert(state, cmd: str):
     # Some stale handlers may still receive this same insert-transition key
     # callback. Swallow one stale duplicate so the transition key does not get
     # inserted as text.
     state["swallow_once_insert_press"] = True
-    if append is True:
-        try:
+    try:
+        if cmd == "a" or cmd == "A":
             textCursor = _get_text_cursor()
-            if linewise is True:
+            if cmd == "A":
                 _goto_end_of_line()
             elif textCursor is not None and not textCursor.isEndOfParagraph():
                 _move_charwise("l")
-        except Exception:
-            pass
-    elif linewise is True:
-        try:
+
+        elif cmd == "I":
             _goto_start_of_line(True)
-        except Exception:
-            pass
+
+        elif cmd == "o":
+            cursor = _get_cursor()
+            _goto_end_of_line()
+            _move_charwise("l")
+            cursor.setString(chr(13))  # CR
+            if not cursor.isAtStartOfLine():
+                cursor.setString(chr(13) + chr(13))
+                _move_charwise("l")
+
+        elif cmd == "O":
+            _goto_start_of_line()
+            cursor = _get_cursor()
+            cursor.setString(chr(13))
+            if not cursor.isAtStartOfLine():
+                _move_charwise("h")
+                cursor.setString(chr(13) + chr(13))
+                _move_charwise("l")
+
+    except Exception:
+        pass
     _goto_mode("INSERT")
 
 
 # Commands 'u', 'C-r'.
-def _undo_changes(isUndo, count = 1):
+def _undo_changes(isUndo: bool, count = 1):
     doc = _current_doc()
     if doc is None:
         return False
@@ -1028,12 +1045,14 @@ def _undo_changes(isUndo, count = 1):
 # --------------
 
 """Build NORMAL-mode command dispatch map for single-key actions."""
-def _normal_actions(state, count, operator):
+def _normal_actions(state, count: int, operator: str):
     return {
-        "i": lambda: _switch_to_insert(state, False),
-        "I": lambda: _switch_to_insert(state, False, True),
-        "a": lambda: _switch_to_insert(state, True),
-        "A": lambda: _switch_to_insert(state, True, True),
+        "i": lambda: _switch_to_insert(state, "i"),
+        "I": lambda: _switch_to_insert(state, "I"),
+        "a": lambda: _switch_to_insert(state, "a"),
+        "A": lambda: _switch_to_insert(state, "A"),
+        "o": lambda: _switch_to_insert(state, "o"),
+        "O": lambda: _switch_to_insert(state, "O"),
         "G": lambda: _goto_line(False, count),
         "h": lambda: _move_charwise("h", count),
         "j": lambda: _move_charwise("j", count),
