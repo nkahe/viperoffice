@@ -1,7 +1,8 @@
 import builtins
 import datetime
 import unohelper
-from typing import Any
+from functools import lru_cache
+from typing import Any, Final
 
 from com.sun.star.awt import XKeyHandler
 from com.sun.star.awt import KeyModifier
@@ -18,9 +19,16 @@ from com.sun.star.document import XEventListener
 if "XSCRIPTCONTEXT" not in globals():
     XSCRIPTCONTEXT: Any = None
 
-DEBUG = False
-MAX_HANDLER_REMOVE_ATTEMPTS = 6
+# Constants
 
+DEBUG = False
+
+# Keywords are used in searching and recognizing with many commands like "w".
+# For more info see Vim's help for 'iskeyword'.
+ISKEYWORD: Final[str] = "@,48-57,_,192-255"
+
+# Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
+MAX_HANDLER_REMOVE_ATTEMPTS = 6
 
 def _state():
     key = "_vipereoffice_state"
@@ -35,6 +43,7 @@ def _state():
             # An optional number that may precede the command to multiply
             # or iterate the command.
             "count": 0,
+            "operator_pending": None,
             "key_handler": None,
             # Python UNO may leave stale key-handler registrations attached even
             # after removeKeyHandler(); token guards ensure only the latest
@@ -67,9 +76,11 @@ def _set_count(n):
     _update_statusline()
     return True
 
+
 def _reset_count():
     _state()["count"] = 0
     _update_statusline()
+
 
 def _add_to_count(n):
     try:
@@ -85,15 +96,20 @@ def _add_to_count(n):
         return _set_count(new_count)
     return False
 
+
 def _get_count():
     count = _state().get("count", 0)
     if count == 0:
         return 1
     return count
 
+
 def _get_raw_count():
     return _state().get("count", 0)
 
+
+def _get_operator():
+    return _state().get("operator_pending", 0)
 
 # ------------
 # Editor
@@ -305,7 +321,428 @@ def _goto_line(expand, count=1):
     except Exception:
         return False
 
-# def _move_words_forward(expand, count)
+
+# ISKEYWORD is constant, so compile checker once and reuse for word motions.
+@lru_cache(maxsize=1)
+def _compile_iskeyword_checker():
+    spec = ISKEYWORD
+    ranges = []
+    singles = set()
+    include_alpha = False
+
+    try:
+        tokens = [token.strip() for token in str(spec).split(",") if token.strip()]
+        for token in tokens:
+            if token == "@":
+                include_alpha = True
+                continue
+            if "-" in token and token.count("-") == 1:
+                start_s, end_s = token.split("-", 1)
+                start_i = int(start_s)
+                end_i = int(end_s)
+                if start_i > end_i:
+                    start_i, end_i = end_i, start_i
+                ranges.append((start_i, end_i))
+                continue
+            if len(token) == 1:
+                singles.add(token)
+    except Exception:
+        include_alpha = True
+        ranges = [(48, 57), (192, 255)]
+        singles = {"_"}
+
+    def _is_keyword_char(ch):
+        if ch in singles:
+            return True
+        if include_alpha and ch.isalpha():
+            return True
+        o = ord(ch)
+        for start_i, end_i in ranges:
+            if start_i <= o <= end_i:
+                return True
+        return False
+
+    return _is_keyword_char
+
+
+def _word_char_class(ch, is_keyword_char, big_word: bool = False):
+    if ch == " " or ch == "\t" or ch == "\n":
+        return "blank"
+    if big_word:
+        return "other"
+    if is_keyword_char(ch):
+        return "keyword"
+    return "other"
+
+# Offset means cursor position relative to start of paragraph.
+def _current_paragraph_text_and_offset(text_cursor):
+    text_obj = text_cursor.getText()
+    para = text_obj.createTextCursorByRange(text_cursor.getStart())
+    para.gotoStartOfParagraph(False)
+    para.gotoEndOfParagraph(True)
+    paragraph_text = para.getString()
+
+    offset_cursor = text_obj.createTextCursorByRange(text_cursor.getStart())
+    offset_cursor.gotoStartOfParagraph(True)
+    offset = len(offset_cursor.getString())
+    return paragraph_text, offset
+
+
+# Word motion specs.
+WORD_DIRECTION_FORWARD = "forward"
+WORD_DIRECTION_BACKWARD = "backward"
+WORD_TARGET_START = "start"
+WORD_TARGET_END = "end"
+
+_WORD_MOTION_W = {
+    "direction": WORD_DIRECTION_FORWARD,
+    "target": WORD_TARGET_START,
+    "big_word": False,
+    "cross_empty": True,
+    "inclusive": False,
+}
+_WORD_MOTION_B = {
+    "direction": WORD_DIRECTION_BACKWARD,
+    "target": WORD_TARGET_START,
+    "big_word": False,
+    "cross_empty": True,
+    "inclusive": False,
+}
+_WORD_MOTION_BIG_B = {
+    "direction": WORD_DIRECTION_BACKWARD,
+    "target": WORD_TARGET_START,
+    "big_word": True,
+    "cross_empty": True,
+    "inclusive": False,
+}
+_WORD_MOTION_E = {
+    "direction": WORD_DIRECTION_FORWARD,
+    "target": WORD_TARGET_END,
+    "big_word": False,
+    "cross_empty": False,
+    "inclusive": True,
+}
+_WORD_MOTION_GE = {
+    "direction": WORD_DIRECTION_BACKWARD,
+    "target": WORD_TARGET_END,
+    "big_word": False,
+    "cross_empty": True,
+    "inclusive": True,
+}
+_WORD_MOTION_G_BIG_E = {
+    "direction": WORD_DIRECTION_BACKWARD,
+    "target": WORD_TARGET_END,
+    "big_word": True,
+    "cross_empty": True,
+    "inclusive": True,
+}
+_WORD_MOTION_BIG_W = {
+    "direction": WORD_DIRECTION_FORWARD,
+    "target": WORD_TARGET_START,
+    "big_word": True,
+    "cross_empty": True,
+    "inclusive": False,
+}
+
+
+def _validate_word_motion_spec(spec) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    required = ("direction", "target", "big_word", "cross_empty", "inclusive")
+    for key in required:
+        if key not in spec:
+            return False
+    if spec["direction"] not in (WORD_DIRECTION_FORWARD, WORD_DIRECTION_BACKWARD):
+        return False
+    if spec["target"] not in (WORD_TARGET_START, WORD_TARGET_END):
+        return False
+    return True
+
+
+def _cursor_xy(cursor):
+    if cursor is None:
+        return (None, None)
+    try:
+        return _pos_xy(cursor.getPosition())
+    except Exception:
+        return (None, None)
+
+
+def _normalize_motion_range(result, for_operator: bool = False):
+    if not isinstance(result, dict):
+        return {"moved": False}
+    normalized = dict(result)
+    normalized["operator_inclusive"] = bool(for_operator and normalized.get("inclusive", False))
+    normalized["operator_exclusive"] = bool(for_operator and not normalized.get("inclusive", False))
+    return normalized
+
+
+def _clone_text_range(text_cursor):
+    try:
+        text_obj = text_cursor.getText()
+        return text_obj.createTextCursorByRange(text_cursor.getStart()).getStart()
+    except Exception:
+        return None
+
+
+def _range_xy(rng):
+    return _pos_xy(rng)
+
+
+def _query_word_motion(spec, count: int, expand: bool = False):
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None or not _validate_word_motion_spec(spec):
+        return _normalize_motion_range({"moved": False})
+
+    steps = max(1, int(count))
+    is_keyword_char = _compile_iskeyword_checker()
+    start_range = _clone_text_range(text_cursor)
+    moved_any = False
+    steps_done = 0
+
+    for _ in range(steps):
+        if not expand:
+            # Normal mode motions must operate on a collapsed caret.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+        if not _word_motion_once(
+            text_cursor,
+            expand,
+            is_keyword_char,
+            spec,
+        ):
+            break
+        moved_any = True
+        steps_done += 1
+
+    end_range = _clone_text_range(text_cursor)
+
+    result = {
+        "moved": moved_any,
+        "steps_done": steps_done,
+        "start_pos": _range_xy(start_range),
+        "end_pos": _range_xy(end_range),
+        "start_range": start_range,
+        "end_range": end_range,
+        "direction": spec.get("direction"),
+        "inclusive": bool(spec.get("inclusive", False)),
+    }
+    return _normalize_motion_range(result)
+
+
+def _apply_motion_result(result, expand: bool, operator: str | None) -> bool:
+    if not isinstance(result, dict) or not result.get("moved", False):
+        return False
+    end_range = result.get("end_range")
+    cursor = _get_cursor()
+    if cursor is None or end_range is None:
+        return False
+    try:
+        if operator is None:
+            cursor.gotoRange(end_range, expand)
+        return True
+    except Exception:
+        return False
+
+
+def _goto_next_paragraph_with_policy(text_cursor, expand: bool, cross_empty: bool) -> bool:
+    if not text_cursor.gotoNextParagraph(expand):
+        return False
+    if not cross_empty:
+        while _is_current_paragraph_empty(text_cursor):
+            if not text_cursor.gotoNextParagraph(expand):
+                break
+    return True
+
+
+def _goto_previous_paragraph_with_policy(text_cursor, expand: bool, cross_empty: bool) -> bool:
+    if not text_cursor.gotoPreviousParagraph(expand):
+        return False
+    if not cross_empty:
+        while _is_current_paragraph_empty(text_cursor):
+            if not text_cursor.gotoPreviousParagraph(expand):
+                break
+    return True
+
+
+def _scan_forward_word_target(paragraph_text, offset, is_keyword_char, spec):
+    length = len(paragraph_text)
+    if offset >= length:
+        return None
+
+    classify = _word_char_class
+    big_word = bool(spec.get("big_word", False))
+    target = spec.get("target", WORD_TARGET_START)
+    i = offset
+
+    if target == WORD_TARGET_START:
+        cls = classify(paragraph_text[i], is_keyword_char, big_word)
+        if cls == "blank":
+            while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+                i += 1
+            return i
+        while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == cls:
+            i += 1
+        while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+            i += 1
+        return i
+
+    if target == WORD_TARGET_END:
+        # For "e": skip blanks first, then land on last char of the next word.
+        while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+            i += 1
+        if i >= length:
+            return None
+        cls = classify(paragraph_text[i], is_keyword_char, big_word)
+        while i + 1 < length and classify(paragraph_text[i + 1], is_keyword_char, big_word) == cls:
+            i += 1
+        return i
+
+    return None
+
+
+def _scan_backward_word_target(paragraph_text, offset, is_keyword_char, spec):
+    length = len(paragraph_text)
+    if length == 0 or offset <= 0:
+        return None
+
+    classify = _word_char_class
+    big_word = bool(spec.get("big_word", False))
+    target = spec.get("target", WORD_TARGET_START)
+    i = min(offset - 1, length - 1)
+
+    # Skip trailing blanks when scanning backward.
+    while i >= 0 and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+        i -= 1
+    if i < 0:
+        return None
+
+    if target == WORD_TARGET_END:
+        return i
+
+    if target == WORD_TARGET_START:
+        cls = classify(paragraph_text[i], is_keyword_char, big_word)
+        while i - 1 >= 0 and classify(paragraph_text[i - 1], is_keyword_char, big_word) == cls:
+            i -= 1
+        return i
+
+    return None
+
+
+def _word_motion_once_forward(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
+    cross_empty = bool(spec.get("cross_empty", True))
+    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+    length = len(paragraph_text)
+
+    if length == 0:
+        return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
+
+    if offset >= length:
+        return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
+
+    next_offset = _scan_forward_word_target(paragraph_text, offset, is_keyword_char, spec)
+
+    if next_offset is not None and next_offset < length:
+        text_cursor.gotoStartOfParagraph(False)
+        if next_offset > 0:
+            text_cursor.goRight(next_offset, expand)
+        return True
+
+    return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
+
+
+def _word_motion_once_backward(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
+    cross_empty = bool(spec.get("cross_empty", True))
+    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+    length = len(paragraph_text)
+
+    if length == 0 or offset <= 0:
+        if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty):
+            return False
+        paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+        length = len(paragraph_text)
+
+        # Empty paragraph is a valid word-step stop when crossing is allowed.
+        if length == 0:
+            return True
+        offset = length
+
+    prev_offset = _scan_backward_word_target(paragraph_text, offset, is_keyword_char, spec)
+    if prev_offset is not None and 0 <= prev_offset < length:
+        text_cursor.gotoStartOfParagraph(False)
+        if prev_offset > 0:
+            text_cursor.goRight(prev_offset, expand)
+        return True
+
+    if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty):
+        return False
+    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+    length = len(paragraph_text)
+    if length == 0:
+        return True
+    prev_offset = _scan_backward_word_target(paragraph_text, length, is_keyword_char, spec)
+    if prev_offset is None:
+        return False
+    text_cursor.gotoStartOfParagraph(False)
+    if prev_offset > 0:
+        text_cursor.goRight(prev_offset, expand)
+    return True
+
+
+def _word_motion_once(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
+    """Execute one step for a configured word motion.
+
+    Args:
+        text_cursor: Model text cursor used for paragraph and offset operations.
+        cursor: View cursor that must be synchronized after movement.
+        expand: If True, keeps selection expanded while moving.
+        is_keyword_char: Predicate that classifies chars as keyword chars.
+        spec: Motion config (direction/target/big_word/empty-line policy).
+
+    Returns:
+        True if cursor advanced, otherwise False.
+    """
+    direction = spec.get("direction", WORD_DIRECTION_FORWARD)
+    if direction == WORD_DIRECTION_FORWARD:
+        return _word_motion_once_forward(text_cursor, expand, is_keyword_char, spec)
+    if direction == WORD_DIRECTION_BACKWARD:
+        return _word_motion_once_backward(text_cursor, expand, is_keyword_char, spec)
+    return False
+
+
+def _words_forward_motion(expand: bool,  count, operator: str | None) -> bool:
+    """`w`: Perform operation to [count] words forward.
+
+    Args:
+        expand: If True, keeps selection expanded while moving.
+        count: Number of word motions to perform (minimum 1).
+        operator: Operation to perform to motion.
+
+    Returns:
+        True if cursor moved at least once, otherwise False.
+    """
+    try:
+        if expand:
+            # Keep selection behavior by applying one step at a time.
+            steps = max(1, int(count))
+            moved_any = False
+            for _ in range(steps):
+                result = _query_word_motion(_WORD_MOTION_W, 1, expand=True)
+                if not result.get("moved", False):
+                    break
+                if not _apply_motion_result(result, expand, operator):
+                    break
+                moved_any = True
+            return moved_any
+
+        result = _query_word_motion(_WORD_MOTION_W, count, expand=False)
+        if not result.get("moved", False):
+            return False
+
+        return _apply_motion_result(result, expand, operator)
+    except Exception:
+        return False
+
 
 def _pos_xy(pos):
     if pos is None:
@@ -384,9 +821,8 @@ def _goto_next_sentence(text_cursor, cursor, expand):
     return True
 
 
-# Motion [count]')'
+# Repeats ")" motion by count times.
 def _goto_sentences_forward(expand, count = 1):
-    # Repeats ")" motion by count times.
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -470,7 +906,8 @@ def _goto_previous_sentence(text_cursor, cursor, expand):
         _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
     return True
 
-# Motion [count]'('.
+
+# Repeats "(" motion by count times.
 def _goto_sentences_backwards(expand, count=2):
     # Repeats "(" motion by count times.
     text_cursor = _get_text_cursor()
@@ -489,7 +926,7 @@ def _goto_sentences_backwards(expand, count=2):
         return False
 
 
-# Motions [count]'x','X' and's'.
+# For commands 'x','X' and 's'.
 def _delete_characters(count=1, reverse=False, substitute=False):
     textCursor = _get_text_cursor()
     if textCursor is None:
@@ -571,7 +1008,7 @@ def _undo_changes(isUndo, count = 1):
 # --------------
 
 """Build NORMAL-mode command dispatch map for single-key actions."""
-def _normal_actions(state, count):
+def _normal_actions(state, count, operator):
     return {
         "i": lambda: _switch_to_insert(state, False),
         "I": lambda: _switch_to_insert(state, False, True),
@@ -582,6 +1019,7 @@ def _normal_actions(state, count):
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
+        "w": lambda: _words_forward_motion(False, count, operator),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
         "u": lambda: _undo_changes(True, count),
@@ -618,6 +1056,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Don't do anything if textCursor isn't working (as in annotations).
         textCursor = _get_text_cursor()
         count = _get_count()
+        operator = _get_operator()
+
         if textCursor is None:
             return False
 
@@ -665,7 +1105,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # ----- Keys without modifiers after this ----
 
         # Match Normal mode character commands.
-        normal_actions = _normal_actions(state, count)
+        normal_actions = _normal_actions(state, count, operator)
         action = normal_actions.get(key_char)
         if key_char == "0" and _get_raw_count() == 0:
             action = lambda: _goto_start_of_line()
