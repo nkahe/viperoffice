@@ -19,8 +19,6 @@ from com.sun.star.document import XEventListener
 if "XSCRIPTCONTEXT" not in globals():
     XSCRIPTCONTEXT: Any = None
 
-# Constants
-
 DEBUG = False
 
 # Keywords are used in searching and recognizing with many commands like "w".
@@ -63,7 +61,7 @@ def _state():
     return state
 
 
-def _set_count(n):
+def _set_count(n: int):
     try:
         value = int(n)
     except Exception:
@@ -82,7 +80,7 @@ def _reset_count():
     _update_statusline()
 
 
-def _add_to_count(n):
+def _add_to_count(n: int):
     try:
         digit = int(n)
     except Exception:
@@ -97,19 +95,23 @@ def _add_to_count(n):
     return False
 
 
-def _get_count():
+def _get_count() -> int:
     count = _state().get("count", 0)
     if count == 0:
         return 1
     return count
 
 
-# When need to know if count has been deliberately set.
-def _get_raw_count():
+def _get_raw_count() -> int:
     return _state().get("count", 0)
 
 
-def _get_operator():
+def _is_count_set() -> bool:
+    count = _state().get("count", 0)
+    return bool(count != 0)
+
+
+def _get_operator() -> None | str:
     return _state().get("operator_pending", 0)
 
 # ------------
@@ -304,9 +306,8 @@ def _goto_end_of_line(count=1):
     return False
 
 
-# [count]'G': Go to line motion. count None -> last line, count n -> line n.
-def _goto_line(expand: bool, count=1):
-    raw_count = _get_raw_count()
+# 'G': Go to line [count] motion. 0 = last line.
+def _goto_line(expand: bool, raw_count: int) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -314,7 +315,7 @@ def _goto_line(expand: bool, count=1):
         if raw_count == 0:
             cursor.gotoEnd(False)
             return True
-        line_number = max(1, int(count))
+        line_number = max(1, int(raw_count))
         cursor.gotoStart(expand)
         if line_number > 1:
             cursor.goDown(line_number - 1, expand)
@@ -1023,17 +1024,17 @@ def _switch_to_insert(state, cmd: str):
 
 
 # Commands 'u', 'C-r'.
-def _undo_changes(isUndo: bool, count = 1):
+def _undo_changes(count = 1, redo=False):
     doc = _current_doc()
     if doc is None:
         return False
     try:
-        if isUndo:
-            for _ in range(count):
-                doc.getUndoManager().undo()
-        else:
+        if redo:
             for _ in range(count):
                 doc.getUndoManager().redo()
+        else:
+            for _ in range(count):
+                doc.getUndoManager().undo()
         return True
     except Exception:
         # Non-fatal when no more undo actions exist.
@@ -1045,7 +1046,7 @@ def _undo_changes(isUndo: bool, count = 1):
 # --------------
 
 """Build NORMAL-mode command dispatch map for single-key actions."""
-def _normal_actions(state, count: int, operator: str):
+def _normal_actions(state, count: int, raw_count: int, operator: str):
     return {
         "i": lambda: _switch_to_insert(state, "i"),
         "I": lambda: _switch_to_insert(state, "I"),
@@ -1053,7 +1054,7 @@ def _normal_actions(state, count: int, operator: str):
         "A": lambda: _switch_to_insert(state, "A"),
         "o": lambda: _switch_to_insert(state, "o"),
         "O": lambda: _switch_to_insert(state, "O"),
-        "G": lambda: _goto_line(False, count),
+        "G": lambda: _goto_line(False, raw_count),
         "h": lambda: _move_charwise("h", count),
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
@@ -1066,8 +1067,8 @@ def _normal_actions(state, count: int, operator: str):
         "B": lambda: _run_word_motion_command(_WORD_MOTION_BIG_B, False, count, operator),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
-        "u": lambda: _undo_changes(True, count),
-        "U": lambda: _undo_changes(False, count),
+        "u": lambda: _undo_changes(count),
+        "U": lambda: _undo_changes(count, True),
         "s": lambda: _delete_characters(count, False, True),
         "x": lambda: _delete_characters(count, False),
         "X": lambda: _delete_characters(count, True),
@@ -1100,6 +1101,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Don't do anything if textCursor isn't working (as in annotations).
         textCursor = _get_text_cursor()
         count = _get_count()
+        raw_count = _get_raw_count()
         operator = _get_operator()
 
         if textCursor is None:
@@ -1136,7 +1138,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if is_ctrl:
             if key_code == r_code:
                 _reset_count()
-                return self._consume_active_event(lambda: _undo_changes(False))
+                return self._consume_active_event(lambda: _undo_changes(count, True))
             else:
                 return False
 
@@ -1149,9 +1151,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # ----- Keys without modifiers after this ----
 
         # Match Normal mode character commands.
-        normal_actions = _normal_actions(state, count, operator)
+        normal_actions = _normal_actions(state, count, raw_count, operator)
         action = normal_actions.get(key_char)
-        if key_char == "0" and _get_raw_count() == 0:
+        if key_char == "0" and raw_count == 0:
             action = lambda: _goto_start_of_line()
         if action is not None:
             return self._consume_active_event(action)

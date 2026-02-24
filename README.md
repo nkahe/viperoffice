@@ -25,7 +25,7 @@ This will simply build the extension file from the template files in
 ## Features
 
 Currently supported Normal mode commands:
-- Insert/append (don't take count): `i`, `I`, `a`, `A`, `o`, `O`.
+- Insert/append: `i`, `I`, `a`, `A`, `o`, `O`.
 - Movement keys: `hjkl`, `w`, `W`, `b`, `B`, `e`, `E`, `0`, `^`, `$`, `G`, `()`.
 - Deletion: `x`, `X`, `s`.
 - Undo/redo: `u`, `C-r`.
@@ -47,6 +47,11 @@ enable_viper_office, disable_viper_office, toggle_viper_office
 Select function, in `Shortcut keys` select key for it and click `Assign`. Click `Save` to save settings and `OK` to finish.
 
 
-## Known differences
+## Known differences to Vi/Vim
+
+- `j` and `k` works similar to `gj` and `gk` in Vi/Vim.
+- Movement keys will wrap to the next line
+- `G` without count moves cursor to end of current or next *text container*, which is not necessarily at end of document. Container can be for example a text frame. Same as with default Ctrl + End shortcut.
+- Insert/append commands don't take count.
 
 ## Known issues
