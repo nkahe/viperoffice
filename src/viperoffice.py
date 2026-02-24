@@ -19,7 +19,7 @@ if "XSCRIPTCONTEXT" not in globals():
     XSCRIPTCONTEXT: Any = None
 
 DEBUG = False
-MAX_HANDLER_REMOVE_ATTEMPTS = 5
+MAX_HANDLER_REMOVE_ATTEMPTS = 6
 
 
 def _state():
@@ -288,12 +288,13 @@ def _goto_end_of_line(count=1):
 
 
 # [count]'G': Go to line motion. count None -> last line, count n -> line n.
-def _goto_line(expand, count=None):
+def _goto_line(expand, count=1):
+    raw_count = _get_raw_count()
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
-        if count is None:
+        if raw_count == 0:
             cursor.gotoEnd(False)
             return True
         line_number = max(1, int(count))
@@ -489,7 +490,7 @@ def _goto_sentences_backwards(expand, count=2):
 
 
 # Motions [count]'x','X' and's'.
-def _delete_characters(reverse=False, substitute=False, count=1):
+def _delete_characters(count=1, reverse=False, substitute=False):
     textCursor = _get_text_cursor()
     if textCursor is None:
         return False
@@ -585,9 +586,9 @@ def _normal_actions(state, count):
         "(": lambda: _goto_sentences_backwards(False, count),
         "u": lambda: _undo_changes(True, count),
         "U": lambda: _undo_changes(False, count),
-        "s": lambda: _delete_characters(False, True, count),
-        "x": lambda: _delete_characters(False, count),
-        "X": lambda: _delete_characters(True, count),
+        "s": lambda: _delete_characters(count, False, True),
+        "x": lambda: _delete_characters(count, False),
+        "X": lambda: _delete_characters(count, True),
         "^": lambda: _goto_start_of_line(True),
         "$": lambda: _goto_end_of_line(count),
     }
@@ -606,6 +607,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _consume_active_event(self, action=None):
         if action is not None:
             action()
+            _reset_count()
         return True
 
     def keyPressed(self, event):
@@ -668,7 +670,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key_char == "0" and _get_raw_count() == 0:
             action = lambda: _goto_start_of_line()
         if action is not None:
-            _reset_count()
             return self._consume_active_event(action)
 
         # Count parsing
