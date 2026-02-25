@@ -1024,7 +1024,7 @@ def _switch_to_insert(state, cmd: str):
 
 
 # Commands 'u', 'C-r'.
-def _undo_changes(count = 1, redo=False):
+def _undo_changes(count=1, redo=False):
     doc = _current_doc()
     if doc is None:
         return False
@@ -1074,6 +1074,7 @@ def _normal_actions(state, count: int, raw_count: int, operator: str):
         "X": lambda: _delete_characters(count, True),
         "^": lambda: _goto_start_of_line(True),
         "$": lambda: _goto_end_of_line(count),
+        "/": _show_search_bar,
     }
 
 # UNO key handler
@@ -1122,8 +1123,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_code = _key_code(event)
         key_char = _normalize_key_char(event)
         mods = _event_modifiers(event)
-        is_ctrl = _is_ctrl_shortcut_no_alt_meta(mods)
+        is_ctrl = _is_only_ctrl(mods)
         is_escape = _is_escape(key_code, is_ctrl)
+
 
         if state["mode"] == "INSERT":
             if is_escape:
@@ -1238,6 +1240,24 @@ def _msgbox(text, title="ViperOffice"):
         pass
 
 
+def _show_search_bar() -> bool:
+    controller = _current_controller()
+    if controller is None:
+        return False
+    try:
+        frame = controller.getFrame()
+        ctx = XSCRIPTCONTEXT.getComponentContext()
+        smgr = ctx.getServiceManager()
+        dispatcher = smgr.createInstanceWithContext("com.sun.star.frame.DispatchHelper", ctx)
+        try:
+            dispatcher.executeDispatch(frame, "vnd.sun.star.findbar:FocusToFindbar", "", 0, ())
+        except Exception:
+            dispatcher.executeDispatch(frame, ".uno:SearchDialog", "", 0, ())
+        return True
+    except Exception:
+        return False
+
+
 # Normalize UNO key event payload into a single-character command key when possible.
 # Handles runtime-specific KeyChar/KeyCode representations used by LO/UNO.
 def _normalize_key_char(event):
@@ -1326,13 +1346,25 @@ def _is_digit_char(ch):
     return isinstance(ch, str) and len(ch) == 1 and "0" <= ch <= "9"
 
 
-def _is_ctrl_shortcut_no_alt_meta(mods):
+def _is_only_ctrl(mods):
     ctrl = getattr(KeyModifier, "MOD1", 0)
     alt = getattr(KeyModifier, "MOD2", 0)
     meta = getattr(KeyModifier, "MOD3", 0)
     return bool(mods & ctrl) and not bool(mods & (alt | meta))
 
 
+def _is_ctrl_shift(mods):
+    shift = getattr(KeyModifier, "SHIFT", 1)
+    ctrl = getattr(KeyModifier, "MOD1", 0)
+    meta = getattr(KeyModifier, "MOD3", 0)
+    return (
+        bool(mods & ctrl) and
+        bool(mods & shift) and
+        not bool(mods & (meta | alt))
+    )
+
+
+# NOTE: Not used currently.
 def _is_altgr_char_event(event, key_char, key_code):
     if not (isinstance(key_char, str) and len(key_char) == 1 and ord(key_char) >= 32):
         return False

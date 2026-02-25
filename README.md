@@ -33,7 +33,7 @@ Currently supported Normal mode commands:
 Insert Mode:
 - Switch to Normal mode: `Esc`
 
-- Aliases: `Ins`: i, `U`: C-r, `BS`: h, `C-[`: Esc
+- Aliases: `/`: default search bar, `Ins`: i, `U`: C-r, `BS`: h, `C-[`: Esc
 
 In normal mode other characters do nothing. All other shortcuts and keys are passed to LibreOffice. 
 
