@@ -114,6 +114,7 @@ def _is_count_set() -> bool:
 def _get_operator() -> None | str:
     return _state().get("operator_pending", 0)
 
+
 # ------------
 # Editor
 # ------------
@@ -143,6 +144,27 @@ def _current_controller():
         return None
     try:
         return doc.getCurrentController()
+    except Exception:
+        return None
+
+
+def _get_dispatcher():
+    try:
+        ctx = XSCRIPTCONTEXT.getComponentContext()
+        smgr = ctx.getServiceManager()
+        dispatcher = smgr.createInstanceWithContext("com.sun.star.frame.DispatchHelper", ctx)
+        return dispatcher
+    except Exception:
+        return None
+
+
+def _get_frame():
+    try:
+        controller = _current_controller()
+        if controller is None:
+            return None
+        frame = controller.getFrame()
+        return frame
     except Exception:
         return None
 
@@ -1025,7 +1047,7 @@ def _switch_to_insert(state, cmd: str):
 
 
 # Commands 'u', 'C-r'.
-def _undo_changes(count=1, redo=False):
+def _undo_changes(count=1, redo=False) -> bool:
     doc = _current_doc()
     if doc is None:
         return False
@@ -1041,6 +1063,33 @@ def _undo_changes(count=1, redo=False):
         # Non-fatal when no more undo actions exist.
         return False
 
+
+def _scroll_window(expand: bool, forward, halfpage=False) -> bool:
+    """Scroll window by one page. Commands 'C-f' (forward) and 'C-b' (backward).
+    """
+    try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        if forward:
+            return cursor.screenDown()
+        else:
+            return cursor.screenUp()
+    except Exception:
+        return False
+
+
+def _jump_to_page(expand: bool, target: str, operator: str | None):
+    try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        if target is "start":
+            return bool(cursor.jumpToStartOfPage())
+        else:
+            return False
+    except Exception:
+        return False
 
 # --------------
 # Input handling
@@ -1060,6 +1109,7 @@ def _normal_actions(state, key_char, count: int, raw_count: int, operator: str |
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
+        "H": lambda: _jump_to_page(False, "start", operator),
         "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, operator),
         "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, operator),
         "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, operator),
@@ -1075,10 +1125,26 @@ def _normal_actions(state, key_char, count: int, raw_count: int, operator: str |
         "X": lambda: _delete_characters(count, True),
         "^": lambda: _goto_start_of_line(True),
         "$": lambda: _goto_end_of_line(count),
-        "/": _show_search_bar,
+        "/": _focus_findbar,
     }
     if key_char == "0" and raw_count == 0:
         actions["0"] = lambda: _goto_start_of_line()
+    return actions
+
+
+def _normal_ctrl_actions(count):
+    r_code = int(getattr(Key, "R", 529))
+    # d_code = int(getattr(Key, "D", 514))
+    # u_code = int(getattr(Key, "U", 530))
+    f_code = int(getattr(Key, "F", 517))
+    b_code = int(getattr(Key, "B", 512))
+
+    actions = {
+        r_code: lambda: _undo_changes(count, False),
+        f_code: lambda: _scroll_window(False, True),
+        b_code: lambda: _scroll_window(False, False)
+    }
+
     return actions
 
 
@@ -1142,9 +1208,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         is_altgr_char = _is_altgr_char_event(event, key_char, key_code)
 
+        # _msgbox(f"mods: {mods}\nkey_char: {key_char}\nkey_code: {key_code} \n"
+        #     f"is_only_ctrl: {is_only_ctrl}")
+
         if is_only_ctrl:
             actions = _normal_ctrl_actions(count)
             action = actions.get(key_code)
+
             if action is not None:
                 return self._consume_active_event(action)
             else:
@@ -1214,20 +1284,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return None
 
 
-def _normal_ctrl_actions(count):
-    r_code = int(getattr(Key, "R", 529))
-    # d_code = int(getattr(Key, "D", 514))
-    # u_code = int(getattr(Key, "U", 530))
-    # f_code = int(getattr(Key, "F", 517))
-    # b_code = int(getattr(Key, "B", 512))
-
-    actions = {
-        r_code: lambda: _undo_changes(count, False),
-    }
-
-    return actions
-
-
 # For debugging if needed.
 def _msgbox(text, title="ViperOffice"):
     try:
@@ -1251,21 +1307,18 @@ def _msgbox(text, title="ViperOffice"):
         pass
 
 
-def _show_search_bar() -> bool:
-    controller = _current_controller()
-    if controller is None:
-        return False
+def _focus_findbar() -> bool:
+    """Show default LibreOffice find bar. Command '/'.
+    """
     try:
-        frame = controller.getFrame()
-        ctx = XSCRIPTCONTEXT.getComponentContext()
-        smgr = ctx.getServiceManager()
-        dispatcher = smgr.createInstanceWithContext("com.sun.star.frame.DispatchHelper", ctx)
-        try:
-            dispatcher.executeDispatch(frame, "vnd.sun.star.findbar:FocusToFindbar", "", 0, ())
-        except Exception:
-            dispatcher.executeDispatch(frame, ".uno:SearchDialog", "", 0, ())
+        dispatcher = _get_dispatcher()
+        frame = _get_frame()
+        if dispatcher is None or frame is None:
+            return False
+        dispatcher.executeDispatch(frame, "vnd.sun.star.findbar:FocusToFindbar", "", 0, ())
         return True
     except Exception:
+        # dispatcher.executeDispatch(frame, ".uno:SearchDialog", "", 0, ())
         return False
 
 

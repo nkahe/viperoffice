@@ -40,7 +40,8 @@ they are similar in functionality.
 
 Currently supported Normal mode commands:
 - Insert/append: `i`, `I`, `a`, `A`, `o`, `O`.
-- Movement keys: `hjkl`, `w`, `W`, `b`, `B`, `e`, `E`, `0`, `^`, `$`, `G`, `()`.
+- Motions: `hjkl`, `w`, `W`, `b`, `B`, `e`, `E`, `0`, `^`, `$`, `G`, `()`.
+- Movement: `C-f`, `C-b`, `H`.
 - Deletion: `x`, `X`, `s`.
 - Undo/redo: `u`, `C-r`.
 
