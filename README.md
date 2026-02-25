@@ -1,7 +1,18 @@
 # ViperOffice
 
-ViperOffice is an extension for LibreOffice and OpenOffice that brings subset of Vi/Vim 
+ViperOffice is an extension for LibreOffice and OpenOffice that brings subset of Vi/(Neo)Vim
 key bindings for navigation and editing text. It is written in Python. It currently supports only Writer.
+
+This is a new project under development and in it's early stages. There isn't enough
+supported features yet to be really useful and breakage can happen. Code hasn't been
+refined.
+
+Some of the of code is partially based on LibreOffice extensions
+- [jmagers/vibreoffice](https://github.com/jmagers/vibreoffice) and [fedorov-ao/vibreoffice](https://github.com/fedorov-ao/vibreoffice)
+which are written in LibreOffice Basic. They are reference and inspiration for
+the project. However, this isn't a direct port and many areas like word based
+motions are completely different.
+
 
 ## Installation/Usage
 
@@ -24,6 +35,9 @@ This will simply build the extension file from the template files in
 
 ## Features
 
+- For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
+they are similar in functionality.
+
 Currently supported Normal mode commands:
 - Insert/append: `i`, `I`, `a`, `A`, `o`, `O`.
 - Movement keys: `hjkl`, `w`, `W`, `b`, `B`, `e`, `E`, `0`, `^`, `$`, `G`, `()`.
@@ -34,7 +48,6 @@ Currently supported Normal mode commands:
 
 Insert Mode:
 - Switch to Normal mode: `Esc` aliases: `C-[`, `C-c`
-
 
 Other shortcuts and keys are passed to LibreOffice. 
 
@@ -48,14 +61,15 @@ enable_viper_office, disable_viper_office, toggle_viper_office
 Select function, in `Shortcut keys` select key for it and click `Assign`. Click `Save` to save settings and `OK` to finish.
 
 
-## Known differences to Vi/Vim
+## Known differences to Vi/(Neo)vim
 
-- For commands line means *visual line*.
+- Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
 - `G` without count moves cursor to end of current or next *text container*, which is not necessarily at end of document. Container can be for example a text frame. It's same as with default Ctrl + End shortcut.
 
 ## Known issues / missing features
 
-- Insert/append commands don't take count.
+For implemented features:
 
+- Insert/append commands don't take count.
 
