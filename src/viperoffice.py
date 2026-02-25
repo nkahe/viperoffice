@@ -964,7 +964,7 @@ def _delete_characters(count=1, reverse=False, substitute=False):
         textCursor.setString("")
         if substitute:
             state = _state()
-            _switch_to_insert(state, False)
+            _switch_to_insert(state, "i")
         return True
     except Exception:
         return False
@@ -1001,21 +1001,23 @@ def _switch_to_insert(state, cmd: str):
 
         elif cmd == "o":
             cursor = _get_cursor()
-            _goto_end_of_line()
-            _move_charwise("l")
-            cursor.setString(chr(13))  # CR
-            if not cursor.isAtStartOfLine():
-                cursor.setString(chr(13) + chr(13))
+            if cursor is not None:
+                _goto_end_of_line()
                 _move_charwise("l")
+                cursor.setString(chr(13))  # CR
+                if not cursor.isAtStartOfLine():
+                    cursor.setString(chr(13) + chr(13))
+                    _move_charwise("l")
 
         elif cmd == "O":
             _goto_start_of_line()
             cursor = _get_cursor()
-            cursor.setString(chr(13))
-            if not cursor.isAtStartOfLine():
-                _move_charwise("h")
-                cursor.setString(chr(13) + chr(13))
-                _move_charwise("l")
+            if cursor is not None:
+                cursor.setString(chr(13))
+                if not cursor.isAtStartOfLine():
+                    _move_charwise("h")
+                    cursor.setString(chr(13) + chr(13))
+                    _move_charwise("l")
 
     except Exception:
         pass
@@ -1045,7 +1047,7 @@ def _undo_changes(count=1, redo=False):
 # --------------
 
 """Build NORMAL-mode command dispatch map for character actions."""
-def _normal_actions(state, key_char, count: int, raw_count: int, operator: str):
+def _normal_actions(state, key_char, count: int, raw_count: int, operator: str | None):
     actions = {
         "i": lambda: _switch_to_insert(state, "i"),
         "I": lambda: _switch_to_insert(state, "I"),
@@ -1078,6 +1080,7 @@ def _normal_actions(state, key_char, count: int, raw_count: int, operator: str):
     if key_char == "0" and raw_count == 0:
         actions["0"] = lambda: _goto_start_of_line()
     return actions
+
 
 # UNO key handler
 # Return values for keyPressed/keyReleased:
@@ -1147,7 +1150,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             else:
                 return False
 
-        # Pass modified shortcuts through, except AltGr-only char input.
+        # Pass other non-shift modified shortcuts through, except characters
+        # made with AltGr.
         if _has_non_shift_modifier(event):
             if not is_altgr_char:
                 return False
@@ -1186,7 +1190,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_backspace_key(event):
             return self._consume_active_event(lambda: _move_charwise("h", count))
         if _is_insert_key(event):
-            return self._consume_active_event(lambda: _switch_to_insert(state, False))
+            return self._consume_active_event(lambda: _switch_to_insert(state, "i"))
 
         return self._consume_active_event()
 
@@ -1224,6 +1228,7 @@ def _normal_ctrl_actions(count):
     return actions
 
 
+# For debugging if needed.
 def _msgbox(text, title="ViperOffice"):
     try:
         controller = _current_controller()
@@ -1234,21 +1239,12 @@ def _msgbox(text, title="ViperOffice"):
         try:
             # Legacy UNO signature used by some versions.
             box = toolkit.createMessageBox(
-                parent,
-                Rectangle(),
-                "infobox",
-                1,
-                title,
-                str(text),
+                parent, Rectangle(), "infobox", 1, title, str(text),
             )
         except Exception:
             # Newer UNO signature used by some versions.
             box = toolkit.createMessageBox(
-                parent,
-                1,
-                1,
-                title,
-                str(text),
+                parent, 1, 1, title, str(text),
             )
         box.execute()
     except Exception:
@@ -1372,6 +1368,7 @@ def _is_only_ctrl(mods):
 def _is_ctrl_shift(mods):
     shift = getattr(KeyModifier, "SHIFT", 1)
     ctrl = getattr(KeyModifier, "MOD1", 0)
+    alt = getattr(KeyModifier, "MOD2", 0)
     meta = getattr(KeyModifier, "MOD3", 0)
     return (
         bool(mods & ctrl) and
@@ -1586,7 +1583,10 @@ class ViewEventListener(unohelper.Base, XEventListener):
             return
         event_name = getattr(event, "EventName", "")
         try:
-            controller = source.getCurrentController()
+            if source is None:
+                controller = None
+            else:
+                controller = source.getCurrentController()
         except Exception:
             controller = None
         if event_name == "OnFocus":
