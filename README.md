@@ -30,12 +30,13 @@ Currently supported Normal mode commands:
 - Deletion: `x`, `X`, `s`.
 - Undo/redo: `u`, `C-r`.
 
+- Aliases: `/`: default search bar, `Ins`: i, `U`: C-r, `BS`: h 
+
 Insert Mode:
-- Switch to Normal mode: `Esc`
+- Switch to Normal mode: `Esc` aliases: `C-[`, `C-c`
 
-- Aliases: `/`: default search bar, `Ins`: i, `U`: C-r, `BS`: h, `C-[`: Esc
 
-In normal mode other characters do nothing. All other shortcuts and keys are passed to LibreOffice. 
+Other shortcuts and keys are passed to LibreOffice. 
 
 ## Shortcuts for enabling and disabling
 
@@ -49,9 +50,12 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 
 ## Known differences to Vi/Vim
 
-- `j` and `k` works similar to `gj` and `gk` in Vi/Vim.
-- Movement keys will wrap to the next line
-- `G` without count moves cursor to end of current or next *text container*, which is not necessarily at end of document. Container can be for example a text frame. Same as with default Ctrl + End shortcut.
+- For commands line means *visual line*.
+- Movement keys will wrap to the next line.
+- `G` without count moves cursor to end of current or next *text container*, which is not necessarily at end of document. Container can be for example a text frame. It's same as with default Ctrl + End shortcut.
+
+## Known issues / missing features
+
 - Insert/append commands don't take count.
 
-## Known issues
+

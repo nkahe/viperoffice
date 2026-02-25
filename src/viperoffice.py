@@ -130,7 +130,6 @@ def _dbg(msg):
     except Exception:
         pass
 
-
 def _current_doc():
     try:
         return XSCRIPTCONTEXT.getDocument()
@@ -1045,9 +1044,9 @@ def _undo_changes(count=1, redo=False):
 # Input handling
 # --------------
 
-"""Build NORMAL-mode command dispatch map for single-key actions."""
-def _normal_actions(state, count: int, raw_count: int, operator: str):
-    return {
+"""Build NORMAL-mode command dispatch map for character actions."""
+def _normal_actions(state, key_char, count: int, raw_count: int, operator: str):
+    actions = {
         "i": lambda: _switch_to_insert(state, "i"),
         "I": lambda: _switch_to_insert(state, "I"),
         "a": lambda: _switch_to_insert(state, "a"),
@@ -1076,6 +1075,9 @@ def _normal_actions(state, count: int, raw_count: int, operator: str):
         "$": lambda: _goto_end_of_line(count),
         "/": _show_search_bar,
     }
+    if key_char == "0" and raw_count == 0:
+        actions["0"] = lambda: _goto_start_of_line()
+    return actions
 
 # UNO key handler
 # Return values for keyPressed/keyReleased:
@@ -1123,40 +1125,38 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_code = _key_code(event)
         key_char = _normalize_key_char(event)
         mods = _event_modifiers(event)
-        is_ctrl = _is_only_ctrl(mods)
-        is_escape = _is_escape(key_code, is_ctrl)
+        is_only_ctrl = _is_only_ctrl(mods)
+        is_escape = _is_escape(key_code, is_only_ctrl)
 
+        # _msgbox(f"mods: {mods}, key_char: {key_char} key_code: {key_code}")
 
         if state["mode"] == "INSERT":
-            if is_escape:
+            if is_escape or (is_only_ctrl and key_code == 514):  # C-c
                 return self._consume_active_event(_leave_insert_to_normal)
             return False
 
         # ----- Non-Insert mode after this -----
 
         is_altgr_char = _is_altgr_char_event(event, key_char, key_code)
-        r_code = int(getattr(Key, "R", 529))
 
-        if is_ctrl:
-            if key_code == r_code:
-                _reset_count()
-                return self._consume_active_event(lambda: _undo_changes(count, True))
+        if is_only_ctrl:
+            actions = _normal_ctrl_actions(count)
+            action = actions.get(key_code)
+            if action is not None:
+                return self._consume_active_event(action)
             else:
                 return False
 
-        # Pass modified shortcuts through, except AltGr-only char input in
-        # NORMAL mode, which ViperOffice should keep and interpret.
+        # Pass modified shortcuts through, except AltGr-only char input.
         if _has_non_shift_modifier(event):
-            if not (state["mode"] == "NORMAL" and is_altgr_char):
+            if not is_altgr_char:
                 return False
 
         # ----- Keys without modifiers after this ----
 
         # Match Normal mode character commands.
-        normal_actions = _normal_actions(state, count, raw_count, operator)
+        normal_actions = _normal_actions(state, key_char, count, raw_count, operator)
         action = normal_actions.get(key_char)
-        if key_char == "0" and raw_count == 0:
-            action = lambda: _goto_start_of_line()
         if action is not None:
             return self._consume_active_event(action)
 
@@ -1176,6 +1176,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         _reset_count()
 
+        # TODO: bind navigation keys to movement functions so count can be used.
         if _is_navigation_key(event):
             return False
         if is_escape:
@@ -1207,6 +1208,20 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def disposing(self, event):
         return None
+
+
+def _normal_ctrl_actions(count):
+    r_code = int(getattr(Key, "R", 529))
+    # d_code = int(getattr(Key, "D", 514))
+    # u_code = int(getattr(Key, "U", 530))
+    # f_code = int(getattr(Key, "F", 517))
+    # b_code = int(getattr(Key, "B", 512))
+
+    actions = {
+        r_code: lambda: _undo_changes(count, False),
+    }
+
+    return actions
 
 
 def _msgbox(text, title="ViperOffice"):
@@ -1353,6 +1368,7 @@ def _is_only_ctrl(mods):
     return bool(mods & ctrl) and not bool(mods & (alt | meta))
 
 
+# NOTE: Not used currently.
 def _is_ctrl_shift(mods):
     shift = getattr(KeyModifier, "SHIFT", 1)
     ctrl = getattr(KeyModifier, "MOD1", 0)
@@ -1364,7 +1380,6 @@ def _is_ctrl_shift(mods):
     )
 
 
-# NOTE: Not used currently.
 def _is_altgr_char_event(event, key_char, key_code):
     if not (isinstance(key_char, str) and len(key_char) == 1 and ord(key_char) >= 32):
         return False
