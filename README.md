@@ -1,8 +1,7 @@
 # ViperOffice
 
-ViperOffice is an extension for LibreOffice and OpenOffice Writer that brings subset of
-Vi/(Neo)Vim text editor's text editing and navigation capabilities to word processing.
-It is written in Python.
+ViperOffice is an extension for LibreOffice and OpenOffice that brings subset of Vi/(Neo)Vim
+Vi/(Neo)Vim text editors text editing and navigation capabilities to word processing.
 
 This is a new project under development and in it's early stages. There isn't enough
 supported features yet to be really useful and breakage can happen. Code hasn't been
@@ -41,8 +40,10 @@ they are similar in functionality.
 
 Currently supported Normal mode commands:
 - Insert/append: `i`, `I`, `a`, `A`, `o`, `O`.
-- Motions: `hjkl`, `w`, `W`, `b`, `B`, `e`, `E`, `0`, `^`, `$`, `G`, `()`.
-- Movement: `C-f`, `C-b`, `H`.
+- Motions: `hjkl`, `0`, `^`, `$`, `gg`, `G`, `()` ,`H`
+- Motions supported by operators: `w`, `W`, `b`, `B`, `e`, `E`, 
+- Scrolling: `C-f`, `C-b`, 
+- Operators: `d`
 - Deletion: `x`, `X`, `s`.
 - Undo/redo: `u`, `C-r`.
 
@@ -73,5 +74,5 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 
 For implemented features:
 
-- Insert/append commands don't take count.
+- Insert/append commands currently don't take count.
 

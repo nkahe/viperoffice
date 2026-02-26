@@ -36,7 +36,7 @@ def _state():
             # Has the extension been started. Will only be set to true.
             "started": False,
             "enabled": False,
-            # Current vi input mode. Can be "normal" or "insert".
+            # Current vi input mode. Can be "normal", "insert" or "pending".
             "mode": "normal",
             "view_cursor": None,
             # An optional number that may precede the command to multiply
@@ -54,6 +54,18 @@ def _state():
         setattr(builtins, key, state)
     return state
 
+
+def _set_mode(new_mode: str) -> bool:
+    # Pending mode is by _add_pending_key(),
+    if new_mode == "normal" or new_mode == "insert":
+        _state()["mode"] = new_mode
+        _update_statusline()
+        return True
+    else:
+        return False
+
+def _get_mode() -> str:
+    return _state()["mode"]
 
 def _set_count(n: int):
     try:
@@ -111,14 +123,18 @@ def _get_pending_keys() -> None | str:
 
 def _add_pending_key(key: str) -> bool:
     pending_keys = _state()["pending_keys"]
-    if key == "g":
+    if key == "g" or key == "d":
         if pending_keys is not None:
             return False
-        _state()["pending_keys"] = "g"
+        _state()["pending_keys"] = key
+        # Operator pending mode only for operator commands.
+        if key == "d":
+            _state()["mode"] = "pending"
     else:
         return False
     _update_statusline()
     return True
+
 
 def _reset_pending_keys():
     _state()["pending_keys"] = None
@@ -200,22 +216,23 @@ def _update_statusline(controller=None):
         return
     try:
         state = _state()
-        mode_name = state["mode"]
+        padding = "   "
+        if state["mode"] == "pending":
+            mode_name = "o-pending"
+        else:
+            mode_name = state["mode"]
         text = mode_name.upper()
         if _get_raw_count() != 0:
             count_text = _get_count()
-            text += f"  {count_text}"
+            text += f"{padding}{count_text}"
         pendings_keys = _get_pending_keys()
         if pendings_keys is not None:
-            text += f"  {pendings_keys}"
+            text += f"{padding}{pendings_keys}"
         controller.StatusIndicator.start(text, 0)
     except Exception:
         # Non-fatal for status update.
         pass
 
-def _set_mode(mode_name):
-    _state()["mode"] = mode_name
-    _update_statusline()
 
 
 def _show_normal_cursor():
@@ -576,11 +593,27 @@ def _apply_motion_result(result, expand: bool, operator: str | None) -> bool:
     if cursor is None or end_range is None:
         return False
     try:
+        # Move cursor by default.
         if operator is None:
             cursor.gotoRange(end_range, expand)
-        return True
+
+        # Deletion
+        if operator == "d":
+            start_range = result.get("start_range")
+            if start_range is None:
+                return False
+            text = cursor.getText()
+            tc = text.createTextCursorByRange(start_range)
+            tc.gotoRange(end_range, True)
+            tc.setString("")
+            cursor.gotoRange(tc.getStart(), False)
+            _reset_pending_keys()
+            _set_mode("normal")
+        else:
+            return False
     except Exception:
         return False
+    return True
 
 
 def _goto_next_paragraph_with_policy(text_cursor, expand: bool, cross_empty: bool) -> bool:
@@ -1073,19 +1106,19 @@ def _undo_changes(count=1, redo=False) -> bool:
 def _scroll_window(expand: bool, forward, halfpage=False) -> bool:
     """Scroll window by one page. Commands 'C-f' (forward) and 'C-b' (backward).
     """
-    # try:
-    cursor = _get_cursor()
-    if cursor is None:
-        return False
-    if halfpage:
-        pass
-    else:
-        if forward:
-            return cursor.screenDown()
+    try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        if halfpage:
+            pass
         else:
-            return cursor.screenUp()
-    # except Exception:
-    return False
+            if forward:
+                return cursor.screenDown()
+            else:
+                return cursor.screenUp()
+    except Exception:
+        return False
 
 
 def _jump_to_page(expand: bool, target: str, operator: str | None):
@@ -1118,6 +1151,19 @@ def _g_command(expand: bool, raw_count: int, pending_keys: str | None, key_char:
     # Unknown g+key: cancel silently.
     return False
 
+
+def _delete_operation(pending_keys: str | None, key_char : str) -> bool:
+    if pending_keys is None:
+        _add_pending_key("d")
+        return True
+
+    _reset_pending_keys()
+    if key_char == "d" :  # 'dd'
+        _msgbox("dd pressed!")
+        return True
+
+    return False
+
 # --------------
 # Input handling
 # --------------
@@ -1131,6 +1177,7 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
         "A": lambda: _switch_to_insert(state, "A"),
         "o": lambda: _switch_to_insert(state, "o"),
         "O": lambda: _switch_to_insert(state, "O"),
+        "d": lambda: _delete_operation(pending_keys, key_char),
         "g": lambda: _g_command(False, raw_count, pending_keys),
         "G": lambda: _goto_line(False, raw_count),
         "h": lambda: _move_charwise("h", count),
@@ -1138,12 +1185,6 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
         "H": lambda: _jump_to_page(False, "start", pending_keys),
-        "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, pending_keys),
-        "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, pending_keys),
-        "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, pending_keys),
-        "E": lambda: _run_word_motion_command(_WORD_MOTION_BIG_E, False, count, pending_keys),
-        "b": lambda: _run_word_motion_command(_WORD_MOTION_B, False, count, pending_keys),
-        "B": lambda: _run_word_motion_command(_WORD_MOTION_BIG_B, False, count, pending_keys),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
         "u": lambda: _undo_changes(count),
@@ -1155,9 +1196,20 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
         "$": lambda: _goto_end_of_line(count),
         "/": _focus_findbar,
     }
+
     if key_char == "0" and raw_count == 0:
         actions["0"] = lambda: _goto_start_of_line()
-    return actions
+
+    # Motions that currently support operators like "d".
+    motions = {
+        "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, pending_keys),
+        "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, pending_keys),
+        "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, pending_keys),
+        "E": lambda: _run_word_motion_command(_WORD_MOTION_BIG_E, False, count, pending_keys),
+        "b": lambda: _run_word_motion_command(_WORD_MOTION_B, False, count, pending_keys),
+        "B": lambda: _run_word_motion_command(_WORD_MOTION_BIG_B, False, count, pending_keys),
+    }
+    return actions, motions
 
 
 def _normal_ctrl_actions(count):
@@ -1182,7 +1234,7 @@ def _normal_ctrl_actions(count):
 
 # UNO key handler
 # Return values for keyPressed/keyReleased:
-#   True  -> event is consumed by ViperOffice (LibreOffice should not process it)
+#   True  -> event is swallowed (LibreOffice should not process it)
 #   False -> event is passed through to LibreOffice default handling
 class KeyHandler(unohelper.Base, XKeyHandler):
     def __init__(self, token):
@@ -1254,8 +1306,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # ----- Keys without modifiers after this ----
 
         # Match Normal mode character commands.
-        normal_actions = _normal_actions(state, key_char, count, raw_count, pending_keys)
+        normal_actions, motions = _normal_actions(state, key_char, count, raw_count, pending_keys)
+
+        motion = motions.get(key_char)
+        if motion is not None:
+            return self._consume_active_event(motion)
+
         action = normal_actions.get(key_char)
+        if action is not None:
+            if pending_keys == "d":
+                if pending_keys == key_char:   # dd
+                    return self._consume_active_event(action)
+                # If non-d command given, return to Normal mode.
+                _reset_pending_keys()
+                _set_mode("normal")
+                return True
+
+        action = normal_actions.get(key_char) or motions.get(key_char)
         if action is not None:
             return self._consume_active_event(action)
 
@@ -1275,8 +1342,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         _reset_count()
 
+        if pending_keys:  # Cancel since no match.
+            _reset_pending_keys()
+            _set_mode("normal")
+            return True
+
         # TODO: bind navigation keys to movement functions so count can be used.
         if _is_navigation_key(event):
+            if pending_keys:
+                _reset_pending_keys()
+                _set_mode("normal")
             return False
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("normal"))
@@ -1288,6 +1363,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_active_event(lambda: _switch_to_insert(state, "i"))
 
         return self._consume_active_event()
+
+    # -------------------------------------------------------------------------
 
     def keyReleased(self, event):
         state = _state()
