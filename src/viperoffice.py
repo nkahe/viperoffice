@@ -38,6 +38,7 @@ def _state():
             "enabled": False,
             # Current vi input mode. Can be "NORMAL" or "INSERT".
             "mode": "NORMAL",
+            "view_cursor": None,
             # An optional number that may precede the command to multiply
             # or iterate the command.
             "count": 0,
@@ -187,14 +188,7 @@ def _get_frame():
 
 
 def _get_cursor():
-    controller = _current_controller()
-    if controller is None:
-        return None
-    try:
-        return controller.getViewCursor()
-    except Exception:
-        return None
-
+   return _state()["view_cursor"]
 
 def _get_text_cursor():
     cursor = _get_cursor()
@@ -1696,7 +1690,10 @@ class ViewEventListener(unohelper.Base, XEventListener):
         if event_name == "OnFocus":
             # Do not reattach on every focus change: in Python UNO this can
             # accumulate duplicate callbacks for the same handler.
+            if controller is not None:
+                _state()["view_cursor"] = controller.getViewCursor()
             _update_statusline(controller)
+            _reset_count()
             if state["mode"] == "NORMAL":
                 _show_normal_cursor_for_controller(controller)
             else:
@@ -1739,6 +1736,7 @@ def _activate_for_current_view():
     controller = _current_controller()
     if controller is None:
         return
+    _state()["view_cursor"] = controller.getViewCursor()
     _update_statusline(controller)
     if state["mode"] == "NORMAL":
         _show_normal_cursor_for_controller(controller)
@@ -1778,6 +1776,8 @@ def _initialize():
 
 
 def _reinitialize():
+    state = _state()
+    state["view_cursor"] = _current_controller().getViewCursor()
     _set_mode("NORMAL")
     _show_normal_cursor()
 
