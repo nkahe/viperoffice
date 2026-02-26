@@ -36,8 +36,8 @@ def _state():
             # Has the extension been started. Will only be set to true.
             "started": False,
             "enabled": False,
-            # Current vi input mode. Can be "NORMAL" or "INSERT".
-            "mode": "NORMAL",
+            # Current vi input mode. Can be "normal" or "insert".
+            "mode": "normal",
             "view_cursor": None,
             # An optional number that may precede the command to multiply
             # or iterate the command.
@@ -201,7 +201,7 @@ def _update_statusline(controller=None):
     try:
         state = _state()
         mode_name = state["mode"]
-        text = mode_name
+        text = mode_name.upper()
         if _get_raw_count() != 0:
             count_text = _get_count()
             text += f"  {count_text}"
@@ -247,9 +247,9 @@ def _show_insert_cursor():
 
 def _goto_mode(mode_name):
     _set_mode(mode_name)
-    if mode_name == "NORMAL":
+    if mode_name == "normal":
         _show_normal_cursor()
-    elif mode_name == "INSERT":
+    elif mode_name == "insert":
         _show_insert_cursor()
 
 
@@ -1008,7 +1008,7 @@ def _leave_insert_to_normal():
                 _move_charwise("h")
         except Exception:
             pass
-    _goto_mode("NORMAL")
+    _goto_mode("normal")
 
 
 # Commands 'a', 'I', 'A', 'o' and 'O'.
@@ -1049,7 +1049,7 @@ def _switch_to_insert(state, cmd: str):
 
     except Exception:
         pass
-    _goto_mode("INSERT")
+    _goto_mode("insert")
 
 
 # Commands 'u', 'C-r'.
@@ -1122,7 +1122,7 @@ def _g_command(expand: bool, raw_count: int, pending_keys: str | None, key_char:
 # Input handling
 # --------------
 
-"""Build NORMAL-mode command dispatch map for character actions."""
+"""Build Normal-mode command dispatch map for character actions."""
 def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: str | None):
     actions = {
         "i": lambda: _switch_to_insert(state, "i"),
@@ -1224,7 +1224,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if pending_keys == "g":
             return self._consume_active_event(lambda: _g_command(False, raw_count, pending_keys, key_char))
 
-        if state["mode"] == "INSERT":
+        if state["mode"] == "insert":
             if is_escape or (is_only_ctrl and key_code == 514):  # C-c
                 return self._consume_active_event(_leave_insert_to_normal)
             return False
@@ -1279,7 +1279,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_navigation_key(event):
             return False
         if is_escape:
-            return self._consume_active_event(lambda: _goto_mode("NORMAL"))
+            return self._consume_active_event(lambda: _goto_mode("normal"))
         if _is_delete_key(event):
             return self._consume_active_event(_delete_characters)
         if _is_backspace_key(event):
@@ -1293,14 +1293,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         state = _state()
         if not state["enabled"]:
             return False
-        # Keep NORMAL cursor rendering for navigation releases, including
+        # Keep normal cursor rendering for navigation releases, including
         # Ctrl+Home/Ctrl+End where Ctrl would otherwise short-circuit below.
-        if state["mode"] == "NORMAL" and _is_navigation_key(event):
+        if state["mode"] == "normal" and _is_navigation_key(event):
             _show_normal_cursor()
             return False
-        if state["mode"] == "NORMAL" and _is_function_key(event):
+        if state["mode"] == "normal" and _is_function_key(event):
             return False
-        if state["mode"] == "NORMAL":
+        if state["mode"] == "normal":
             _show_normal_cursor()
             return True
         return False
@@ -1404,7 +1404,7 @@ def _normalize_key_char(event):
         # com.sun.star.awt.Key.A..Z are typically 512..537.
         if 512 <= key_code <= 537:
             # Respect Shift when falling back to key codes, otherwise "HJKLIX"
-            # would be treated as lowercase NORMAL-mode commands.
+            # would be treated as lowercase normal-mode commands.
             shift_mask = getattr(KeyModifier, "SHIFT", 1)
             is_shift = bool(_event_modifiers(event) & shift_mask)
             base = ord("A") if is_shift else ord("a")
@@ -1668,7 +1668,7 @@ class ViewEventListener(unohelper.Base, XEventListener):
                 _state()["view_cursor"] = controller.getViewCursor()
             _update_statusline(controller)
             _reset_count()
-            if state["mode"] == "NORMAL":
+            if state["mode"] == "normal":
                 _show_normal_cursor_for_controller(controller)
             else:
                 _show_insert_cursor_for_controller(controller)
@@ -1712,7 +1712,7 @@ def _activate_for_current_view():
         return
     _state()["view_cursor"] = controller.getViewCursor()
     _update_statusline(controller)
-    if state["mode"] == "NORMAL":
+    if state["mode"] == "normal":
         _show_normal_cursor_for_controller(controller)
     else:
         _show_insert_cursor_for_controller(controller)
@@ -1759,7 +1759,7 @@ def enable_viper_office():
     controller = _current_controller()
     if controller is not None:
         state["view_cursor"] = controller.getViewCursor()
-    _set_mode("NORMAL")
+    _set_mode("normal")
     _show_normal_cursor()
 
 
