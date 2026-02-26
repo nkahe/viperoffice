@@ -271,19 +271,19 @@ def _goto_mode(mode_name):
 
 
 # Commands 'h', 'j', 'k', 'l'.
-def _move_charwise(cmd, count=1):
+def _move_charwise(cmd, count, expand, pending_keys=None):
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
         if cmd == "h":
-            return bool(cursor.goLeft(count, False))
+            return bool(cursor.goLeft(count, expand))
         if cmd == "l":
-            return bool(cursor.goRight(count, False))
+            return bool(cursor.goRight(count, expand))
         if cmd == "j":
-            return bool(cursor.goDown(count, False))
+            return bool(cursor.goDown(count, expand))
         if cmd == "k":
-            return bool(cursor.goUp(count, False))
+            return bool(cursor.goUp(count, expand))
     except Exception:
         return False
     return False
@@ -328,7 +328,7 @@ def _goto_end_of_line(count=1):
 
     try:
         if count > 1:
-            _move_charwise("j", count - 1)
+            cursor.goDown(count - 1, False)
         old_pos = cursor.getPosition()
         cursor.gotoEndOfLine(False)
         new_pos = cursor.getPosition()
@@ -1038,7 +1038,7 @@ def _leave_insert_to_normal():
     if cursor is not None:
         try:
             if not cursor.isAtStartOfLine():
-                _move_charwise("h")
+                cursor.goLeft(1, False)
         except Exception:
             pass
     _goto_mode("normal")
@@ -1052,10 +1052,11 @@ def _switch_to_insert(state, cmd: str):
     try:
         if cmd == "a" or cmd == "A":
             textCursor = _get_text_cursor()
+            cursor = _get_cursor()
             if cmd == "A":
                 _goto_end_of_line()
             elif textCursor is not None and not textCursor.isEndOfParagraph():
-                _move_charwise("l")
+                 cursor.goRight(1, False)
 
         elif cmd == "I":
             _goto_start_of_line(True)
@@ -1064,11 +1065,11 @@ def _switch_to_insert(state, cmd: str):
             cursor = _get_cursor()
             if cursor is not None:
                 _goto_end_of_line()
-                _move_charwise("l")
+                cursor.goRight(1, False)
                 cursor.setString(chr(13))  # CR
                 if not cursor.isAtStartOfLine():
                     cursor.setString(chr(13) + chr(13))
-                    _move_charwise("l")
+                    cursor.goRight(1, False)
 
         elif cmd == "O":
             _goto_start_of_line()
@@ -1076,9 +1077,9 @@ def _switch_to_insert(state, cmd: str):
             if cursor is not None:
                 cursor.setString(chr(13))
                 if not cursor.isAtStartOfLine():
-                    _move_charwise("h")
+                    cursor.goLeft(1, False)
                     cursor.setString(chr(13) + chr(13))
-                    _move_charwise("l")
+                    cursor.goRight(1, False)
 
     except Exception:
         pass
@@ -1180,10 +1181,10 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
         "d": lambda: _delete_operation(pending_keys, key_char),
         "g": lambda: _g_command(False, raw_count, pending_keys),
         "G": lambda: _goto_line(False, raw_count),
-        "h": lambda: _move_charwise("h", count),
-        "j": lambda: _move_charwise("j", count),
-        "k": lambda: _move_charwise("k", count),
-        "l": lambda: _move_charwise("l", count),
+        "h": lambda: _move_charwise("h", count, False),
+        "j": lambda: _move_charwise("j", count, False),
+        "k": lambda: _move_charwise("k", count, False),
+        "l": lambda: _move_charwise("l", count, False),
         "H": lambda: _jump_to_page(False, "start", pending_keys),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
@@ -1342,7 +1343,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         _reset_count()
 
-        if pending_keys:  # Cancel since no match.
+        if pending_keys:  # Cancel rest of keys since no match.
             _reset_pending_keys()
             _set_mode("normal")
             return True
@@ -1358,7 +1359,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_delete_key(event):
             return self._consume_active_event(_delete_characters)
         if _is_backspace_key(event):
-            return self._consume_active_event(lambda: _move_charwise("h", count))
+            return self._consume_active_event(lambda: _move_charwise("h", count, False))
         if _is_insert_key(event):
             return self._consume_active_event(lambda: _switch_to_insert(state, "i"))
 
