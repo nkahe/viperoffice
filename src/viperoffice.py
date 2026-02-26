@@ -42,7 +42,7 @@ def _state():
             # An optional number that may precede the command to multiply
             # or iterate the command.
             "count": 0,
-            "operator_pending": None,
+            "pending_keys": None,
             "key_handler": None,
             # Python UNO may leave stale key-handler registrations attached even
             # after removeKeyHandler(); token guards ensure only the latest
@@ -105,23 +105,23 @@ def _is_count_set() -> bool:
     return bool(count != 0)
 
 
-def _get_operator() -> None | str:
-    return _state().get("operator_pending", None)
+def _get_pending_keys() -> None | str:
+    return _state().get("pending_keys", None)
 
-def _is_operator_pending() -> bool:
-    return bool(_get_operator() is not None)
 
-def _set_operator(operator: str) -> bool:
-    if operator == "g":
-        _state()["operator_pending"] = "g"
-        _update_statusline()
+def _add_pending_key(key: str) -> bool:
+    pending_keys = _state()["pending_keys"]
+    if key == "g":
+        if pending_keys is not None:
+            return False
+        _state()["pending_keys"] = "g"
     else:
         return False
     _update_statusline()
     return True
 
-def _reset_operator():
-    _state()["operator_pending"] = None
+def _reset_pending_keys():
+    _state()["pending_keys"] = None
     _update_statusline()
 
 
@@ -205,9 +205,9 @@ def _update_statusline(controller=None):
         if _get_raw_count() != 0:
             count_text = _get_count()
             text += f"  {count_text}"
-        operator = _get_operator()
-        if operator is not None:
-            text += f"  {operator}"
+        pendings_keys = _get_pending_keys()
+        if pendings_keys is not None:
+            text += f"  {pendings_keys}"
         controller.StatusIndicator.start(text, 0)
     except Exception:
         # Non-fatal for status update.
@@ -1101,13 +1101,13 @@ def _jump_to_page(expand: bool, target: str, operator: str | None):
         return False
 
 
-def _g_command(expand: bool, raw_count: int, operator: str | None, key_char: str = "g"):
-    if operator is None:
-        _set_operator("g")
+def _g_command(expand: bool, raw_count: int, pending_keys: str | None, key_char: str = "g"):
+    if pending_keys is None:
+        _add_pending_key("g")
         return True
 
     # second key determines the compound command.
-    _reset_operator()
+    _reset_pending_keys()
     if key_char == "g" :  # 'gg'
         # Defaults to first row.
         if raw_count == 0:
@@ -1123,7 +1123,7 @@ def _g_command(expand: bool, raw_count: int, operator: str | None, key_char: str
 # --------------
 
 """Build NORMAL-mode command dispatch map for character actions."""
-def _normal_actions(state, key_char, count: int, raw_count: int, operator: str | None):
+def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: str | None):
     actions = {
         "i": lambda: _switch_to_insert(state, "i"),
         "I": lambda: _switch_to_insert(state, "I"),
@@ -1131,19 +1131,19 @@ def _normal_actions(state, key_char, count: int, raw_count: int, operator: str |
         "A": lambda: _switch_to_insert(state, "A"),
         "o": lambda: _switch_to_insert(state, "o"),
         "O": lambda: _switch_to_insert(state, "O"),
-        "g": lambda: _g_command(False, raw_count, operator),
+        "g": lambda: _g_command(False, raw_count, pending_keys),
         "G": lambda: _goto_line(False, raw_count),
         "h": lambda: _move_charwise("h", count),
         "j": lambda: _move_charwise("j", count),
         "k": lambda: _move_charwise("k", count),
         "l": lambda: _move_charwise("l", count),
-        "H": lambda: _jump_to_page(False, "start", operator),
-        "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, operator),
-        "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, operator),
-        "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, operator),
-        "E": lambda: _run_word_motion_command(_WORD_MOTION_BIG_E, False, count, operator),
-        "b": lambda: _run_word_motion_command(_WORD_MOTION_B, False, count, operator),
-        "B": lambda: _run_word_motion_command(_WORD_MOTION_BIG_B, False, count, operator),
+        "H": lambda: _jump_to_page(False, "start", pending_keys),
+        "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, pending_keys),
+        "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, pending_keys),
+        "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, pending_keys),
+        "E": lambda: _run_word_motion_command(_WORD_MOTION_BIG_E, False, count, pending_keys),
+        "b": lambda: _run_word_motion_command(_WORD_MOTION_B, False, count, pending_keys),
+        "B": lambda: _run_word_motion_command(_WORD_MOTION_BIG_B, False, count, pending_keys),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
         "u": lambda: _undo_changes(count),
@@ -1169,7 +1169,7 @@ def _normal_ctrl_actions(count):
     u_code = int(getattr(Key, "U", 532))
 
     actions = {
-        c_code: lambda: _reset_operator(),
+        c_code: lambda: _reset_pending_keys(),
         b_code: lambda: _scroll_window(False, False, False),
         f_code: lambda: _scroll_window(False, True, False),
         d_code: lambda: _scroll_window(False, True, True),
@@ -1194,7 +1194,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _consume_active_event(self, action=None):
         if action is not None:
             action()
-            if _is_operator_pending() is False:
+            if _get_pending_keys() is None:
                 _reset_count()
         return True
 
@@ -1207,7 +1207,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         textCursor = _get_text_cursor()
         count = _get_count()
         raw_count = _get_raw_count()
-        operator = _get_operator()
+        pending_keys = _get_pending_keys()
 
         if textCursor is None:
             return False
@@ -1220,9 +1220,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # _msgbox(f"mods: {mods}, key_char: {key_char} key_code: {key_code}")
 
-        # If g-operator is pending, route all keys to _g_command.
-        if operator == "g":
-            return self._consume_active_event(lambda: _g_command(False, raw_count, operator, key_char))
+        # Route all input if these keys are pending.
+        if pending_keys == "g":
+            return self._consume_active_event(lambda: _g_command(False, raw_count, pending_keys, key_char))
 
         if state["mode"] == "INSERT":
             if is_escape or (is_only_ctrl and key_code == 514):  # C-c
@@ -1254,7 +1254,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # ----- Keys without modifiers after this ----
 
         # Match Normal mode character commands.
-        normal_actions = _normal_actions(state, key_char, count, raw_count, operator)
+        normal_actions = _normal_actions(state, key_char, count, raw_count, pending_keys)
         action = normal_actions.get(key_char)
         if action is not None:
             return self._consume_active_event(action)
