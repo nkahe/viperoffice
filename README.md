@@ -1,7 +1,8 @@
 # ViperOffice
 
-ViperOffice is an extension for LibreOffice and OpenOffice that brings subset of Vi/(Neo)Vim
-key bindings for navigation and editing text. It is written in Python. It currently supports only Writer.
+ViperOffice is an extension for LibreOffice and OpenOffice Writer that brings subset of
+Vi/(Neo)Vim text editor's text editing and navigation capabilities to word processing.
+It is written in Python.
 
 This is a new project under development and in it's early stages. There isn't enough
 supported features yet to be really useful and breakage can happen. Code hasn't been
