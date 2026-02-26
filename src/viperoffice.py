@@ -112,7 +112,24 @@ def _is_count_set() -> bool:
 
 
 def _get_operator() -> None | str:
-    return _state().get("operator_pending", 0)
+    return _state().get("operator_pending", None)
+
+def _is_operator_pending() -> bool:
+    return bool(_get_operator() is not None)
+
+def _set_operator(operator: str) -> bool:
+    if operator == "g":
+        _state()["operator_pending"] = "g"
+        _update_statusline()
+    else:
+        return False
+    _update_statusline()
+    return True
+
+def _reset_operator():
+    _state()["operator_pending"] = None
+    _update_statusline()
+
 
 
 # ------------
@@ -201,6 +218,9 @@ def _update_statusline(controller=None):
         if _get_raw_count() != 0:
             count_text = _get_count()
             text += f"  {count_text}"
+        operator = _get_operator()
+        if operator is not None:
+            text += f"  {operator}"
         controller.StatusIndicator.start(text, 0)
     except Exception:
         # Non-fatal for status update.
@@ -1067,16 +1087,19 @@ def _undo_changes(count=1, redo=False) -> bool:
 def _scroll_window(expand: bool, forward, halfpage=False) -> bool:
     """Scroll window by one page. Commands 'C-f' (forward) and 'C-b' (backward).
     """
-    try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
+    # try:
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    if halfpage:
+        pass
+    else:
         if forward:
             return cursor.screenDown()
         else:
             return cursor.screenUp()
-    except Exception:
-        return False
+    # except Exception:
+    return False
 
 
 def _jump_to_page(expand: bool, target: str, operator: str | None):
@@ -1091,6 +1114,24 @@ def _jump_to_page(expand: bool, target: str, operator: str | None):
     except Exception:
         return False
 
+
+def _g_command(expand: bool, raw_count: int, operator: str | None, key_char: str = "g"):
+    if operator is None:
+        _set_operator("g")
+        return True
+
+    # second key determines the compound command.
+    _reset_operator()
+    if key_char == "g" :  # 'gg'
+        # Defaults to first row.
+        if raw_count == 0:
+            _goto_line(expand, 1)
+        else:
+            _goto_line(expand, raw_count)
+        return True
+    # Unknown g+key: cancel silently.
+    return False
+
 # --------------
 # Input handling
 # --------------
@@ -1104,6 +1145,7 @@ def _normal_actions(state, key_char, count: int, raw_count: int, operator: str |
         "A": lambda: _switch_to_insert(state, "A"),
         "o": lambda: _switch_to_insert(state, "o"),
         "O": lambda: _switch_to_insert(state, "O"),
+        "g": lambda: _g_command(False, raw_count, operator),
         "G": lambda: _goto_line(False, raw_count),
         "h": lambda: _move_charwise("h", count),
         "j": lambda: _move_charwise("j", count),
@@ -1133,16 +1175,20 @@ def _normal_actions(state, key_char, count: int, raw_count: int, operator: str |
 
 
 def _normal_ctrl_actions(count):
-    r_code = int(getattr(Key, "R", 529))
-    # d_code = int(getattr(Key, "D", 514))
-    # u_code = int(getattr(Key, "U", 530))
-    f_code = int(getattr(Key, "F", 517))
     b_code = int(getattr(Key, "B", 512))
+    c_code = int(getattr(Key, "C", 514))
+    d_code = int(getattr(Key, "D", 515))
+    f_code = int(getattr(Key, "F", 517))
+    r_code = int(getattr(Key, "R", 529))
+    u_code = int(getattr(Key, "U", 532))
 
     actions = {
+        c_code: lambda: _reset_operator(),
+        b_code: lambda: _scroll_window(False, False, False),
+        f_code: lambda: _scroll_window(False, True, False),
+        d_code: lambda: _scroll_window(False, True, True),
+        u_code: lambda: _scroll_window(False, False, True),
         r_code: lambda: _undo_changes(count, False),
-        f_code: lambda: _scroll_window(False, True),
-        b_code: lambda: _scroll_window(False, False)
     }
 
     return actions
@@ -1162,7 +1208,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _consume_active_event(self, action=None):
         if action is not None:
             action()
-            _reset_count()
+            if _is_operator_pending() is False:
+                _reset_count()
         return True
 
     def keyPressed(self, event):
@@ -1198,6 +1245,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         is_escape = _is_escape(key_code, is_only_ctrl)
 
         # _msgbox(f"mods: {mods}, key_char: {key_char} key_code: {key_code}")
+
+        # If g-operator is pending, route all keys to _g_command.
+        if operator == "g":
+            return self._consume_active_event(lambda: _g_command(False, raw_count, operator, key_char))
 
         if state["mode"] == "INSERT":
             if is_escape or (is_only_ctrl and key_code == 514):  # C-c

@@ -66,7 +66,7 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
-- `G` without count moves cursor to end of current or next *text container*, which is not necessarily at end of document. Container can be for example a text frame. It's same as with default Ctrl + End shortcut.
+- Start and end of text which for example `G` and `gg` use, is LibreOffice's definition which is for *text container*. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
 
 ## Known issues / missing features
 
