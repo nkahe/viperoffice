@@ -50,13 +50,6 @@ def _state():
             "active_handler_token": 0,
             "view_event_listener": None,
             "global_event_broadcaster": None,
-            # For debug
-            "enable_calls": 0,
-            "disable_calls": 0,
-            "toggle_calls": 0,
-            # One-shot guards for duplicate transition callbacks from stale
-            # handlers (Python UNO lifecycle quirk).
-            "swallow_once_insert_press": False,
         }
         setattr(builtins, key, state)
     return state
@@ -1023,7 +1016,6 @@ def _switch_to_insert(state, cmd: str):
     # Some stale handlers may still receive this same insert-transition key
     # callback. Swallow one stale duplicate so the transition key does not get
     # inserted as text.
-    state["swallow_once_insert_press"] = True
     try:
         if cmd == "a" or cmd == "A":
             textCursor = _get_text_cursor()
@@ -1220,18 +1212,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if textCursor is None:
             return False
 
-        if not self._is_active_instance():
-            # Stale handlers can still be called by LO after lifecycle changes.
-            # Swallow one duplicate transition callback if needed.
-            if state["mode"] == "INSERT" and state["swallow_once_insert_press"]:
-                state["swallow_once_insert_press"] = False
-                return True
-            if state["mode"] == "NORMAL" and (
-                _is_navigation_key(event) or _is_function_key(event)
-            ):
-                return False
-            return bool(state["mode"] == "NORMAL")
-
         key_code = _key_code(event)
         key_char = _normalize_key_char(event)
         mods = _event_modifiers(event)
@@ -1325,6 +1305,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return True
         return False
 
+    # Needs to be implemented.
     def disposing(self, event):
         return None
 
@@ -1631,13 +1612,6 @@ def _attach_controller(controller):
     state = _state()
     if controller is None or state["key_handler"] is None:
         return
-    # LibreOffice can accumulate duplicate registrations of the same handler.
-    # Drain old registrations so addKeyHandler keeps one effective handler.
-    for _ in range(MAX_HANDLER_REMOVE_ATTEMPTS):
-        try:
-            controller.removeKeyHandler(state["key_handler"])
-        except Exception:
-            break
     try:
         controller.addKeyHandler(state["key_handler"])
     except Exception:
@@ -1768,73 +1742,40 @@ def _restore_default_cursor_all_views():
 def _initialize():
     state = _state()
     state["started"] = True
-    # Detach while handler reference is still available.
+    # Detach any previously registered handler before creating a new one.
     _detach_key_handler_from_all_views()
-    _state()["key_handler"] = None
+    state["key_handler"] = KeyHandler(state["active_handler_token"])
+    _attach_key_handler_to_all_views()
     _start_view_event_listener()
-    _reinitialize()
-
-
-def _reinitialize():
-    state = _state()
-    state["view_cursor"] = _current_controller().getViewCursor()
-    _set_mode("NORMAL")
-    _show_normal_cursor()
-
-
-def _ensure_initialized():
-    state = _state()
-    if not state["started"]:
-        _initialize()
-    else:
-        _reinitialize()
-
-
-def _set_vibreoffice_enabled(enable_value):
-    state = _state()
-    if enable_value == state["enabled"]:
-        return
-    state["enabled"] = enable_value
-    state["swallow_once_insert_press"] = False
-    if state["enabled"]:
-        state["active_handler_token"] += 1
-        state["key_handler"] = KeyHandler(state["active_handler_token"])
-        attached = _attach_key_handler_to_all_views()
-        # Fallback only when enumeration finds no eligible text views.
-        if attached == 0:
-            _attach_controller(_current_controller())
-        _activate_for_current_view()
-    else:
-        # Invalidate any stale attached handlers immediately, even if LO keeps
-        # old registrations around internally.
-        state["active_handler_token"] += 1
-        _detach_key_handler_from_all_views()
-        state["key_handler"] = None
-        _restore_status_all_views()
-        _restore_default_cursor_all_views()
+    enable_viper_office()
 
 
 def enable_viper_office():
     state = _state()
-    state["enable_calls"] += 1
-    _dbg(f"ENABLE call#{state['enable_calls']} state={id(state)}")
-    _ensure_initialized()
-    _set_vibreoffice_enabled(True)
+    if not state["started"]:
+        _initialize()
+    state["enabled"] = True
+    _activate_for_current_view()
+    controller = _current_controller()
+    if controller is not None:
+        state["view_cursor"] = controller.getViewCursor()
+    _set_mode("NORMAL")
+    _show_normal_cursor()
 
 
 def disable_viper_office():
     state = _state()
-    state["disable_calls"] += 1
-    _dbg(f"DISABLE call#{state['disable_calls']} state={id(state)}")
-    _set_vibreoffice_enabled(False)
+    state["enabled"] = False
+    _restore_status_all_views()
+    _restore_default_cursor_all_views()
 
 
 def toggle_viper_office():
     state = _state()
-    state["toggle_calls"] += 1
-    _dbg(f"TOGGLE call#{state['toggle_calls']} enabled_before={state['enabled']} state={id(state)}")
-    _ensure_initialized()
-    _set_vibreoffice_enabled(not state["enabled"])
+    if state["enabled"] is True:
+        disable_viper_office()
+    else:
+        enable_viper_office()
 
 
 g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office)
