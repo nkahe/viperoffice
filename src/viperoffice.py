@@ -317,7 +317,7 @@ def _to_start_of_line(first_non_blank=False):
         if not first_non_blank:
             return bool(cursor.gotoStartOfLine(False))
 
-        _to_end_of_line()
+        _to_end_of_line(False, 1, None)
 
         cursor.gotoStartOfLine(True)
         line_text = cursor.getString()
@@ -338,13 +338,29 @@ def _to_start_of_line(first_non_blank=False):
     return False
 
 
-# Motion '$'.
-def _to_end_of_line(count=1):
+# Command '$'.
+def _to_end_of_line(expand, count, pending_keys:str|None=None):
     cursor = _get_cursor()
     if cursor is None:
         return False
 
     try:
+        if pending_keys == "d":
+            textCursor = _get_text_cursor()
+            if textCursor is None:
+                return False
+            # Use view cursor to find end position (gotoEndOfLine is unreliable on text cursors).
+            if count > 1:
+                cursor.goDown(count - 1, False)
+            cursor.gotoEndOfLine(False)
+            end_range = cursor.getStart()
+            textCursor.gotoRange(textCursor.getStart(), False)
+            textCursor.gotoRange(end_range, True)
+            textCursor.setString("")
+            _reset_pending_keys()
+            _set_mode("normal")
+            return True
+
         if count > 1:
             cursor.goDown(count - 1, False)
         old_pos = cursor.getPosition()
@@ -1072,7 +1088,7 @@ def _switch_to_insert(state, cmd: str):
             textCursor = _get_text_cursor()
             cursor = _get_cursor()
             if cmd == "A":
-                _to_end_of_line()
+                _to_end_of_line(False, 1, None)
             elif textCursor is not None and not textCursor.isEndOfParagraph():
                  cursor.goRight(1, False)
 
@@ -1082,7 +1098,7 @@ def _switch_to_insert(state, cmd: str):
         elif cmd == "o":
             cursor = _get_cursor()
             if cursor is not None:
-                _to_end_of_line()
+                _to_end_of_line(False, 0, None)
                 cursor.goRight(1, False)
                 cursor.setString(chr(13))  # CR
                 if not cursor.isAtStartOfLine():
@@ -1122,7 +1138,7 @@ def _undo_changes(count=1, redo=False) -> bool:
         return False
 
 
-def _scroll_window(expand: bool, forward, halfpage=False) -> bool:
+def _scroll_window(expand: bool, forward: bool, halfpage=False) -> bool:
     """Scroll window by one page. Commands 'C-f' (forward) and 'C-b' (backward).
     """
     try:
@@ -1153,7 +1169,7 @@ def _jump_to_page(expand: bool, target: str, operator: str | None):
         return False
 
 
-def _g_command(expand: bool, raw_count: int, pending_keys: str | None, key_char: str = "g"):
+def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str="g"):
     if pending_keys is None:
         _add_pending_key("g")
         return True
@@ -1171,7 +1187,7 @@ def _g_command(expand: bool, raw_count: int, pending_keys: str | None, key_char:
     return False
 
 
-def _d_command(pending_keys: str | None, key_char : str) -> bool:
+def _d_command(pending_keys:str|None, key_char:str) -> bool:
     if pending_keys is None:
         _add_pending_key("d")
         return True
@@ -1188,7 +1204,7 @@ def _d_command(pending_keys: str | None, key_char : str) -> bool:
 # --------------
 
 """Build Normal-mode command dispatch map for character actions."""
-def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: str | None):
+def _normal_actions(state, key_char:str, expand, count:int, raw_count:int, pending_keys:str|None):
 
     # Motions / commands that are currently not supported by operators. Issuing
     # them while in operator pending mode returns to Normal mode.
@@ -1213,7 +1229,6 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
         "x": lambda: _delete_characters(count, False),
         "X": lambda: _delete_characters(count, True),
         "^": lambda: _to_start_of_line(True),
-        "$": lambda: _to_end_of_line(count),
         "/": _focus_findbar,
     }
 
@@ -1230,6 +1245,7 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
         "E": lambda: _word_motion(_WORD_MOTION_BIG_E, False, count, pending_keys),
         "b": lambda: _word_motion(_WORD_MOTION_B, False, count, pending_keys),
         "B": lambda: _word_motion(_WORD_MOTION_BIG_B, False, count, pending_keys),
+        "$": lambda: _to_end_of_line(False, count, pending_keys),
     }
     return actions, motions
 
@@ -1282,6 +1298,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         count = _get_count()
         raw_count = _get_raw_count()
         pending_keys = _get_pending_keys()
+        expand = False
 
         if textCursor is None:
             return False
@@ -1328,7 +1345,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # ----- Keys without modifiers after this ----
 
         # Match Normal mode character commands.
-        normal_actions, motions = _normal_actions(state, key_char, count, raw_count, pending_keys)
+        normal_actions, motions = _normal_actions(state, key_char, expand, count, raw_count, pending_keys)
 
         motion = motions.get(key_char)
         if motion is not None:
