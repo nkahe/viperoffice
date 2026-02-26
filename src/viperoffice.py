@@ -271,7 +271,7 @@ def _goto_mode(mode_name):
 
 
 # Commands 'h', 'j', 'k', 'l'.
-def _move_charwise(cmd: str, count: int, expand: bool, pending_keys=str|None):
+def _charwise_motion(cmd: str, count: int, expand: bool, pending_keys=str|None):
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -308,7 +308,7 @@ def _move_charwise(cmd: str, count: int, expand: bool, pending_keys=str|None):
 
 
 # Commands '0' and '^',
-def _goto_start_of_line(first_non_blank=False):
+def _to_start_of_line(first_non_blank=False):
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -317,7 +317,7 @@ def _goto_start_of_line(first_non_blank=False):
         if not first_non_blank:
             return bool(cursor.gotoStartOfLine(False))
 
-        _goto_end_of_line()
+        _to_end_of_line()
 
         cursor.gotoStartOfLine(True)
         line_text = cursor.getString()
@@ -339,7 +339,7 @@ def _goto_start_of_line(first_non_blank=False):
 
 
 # Motion '$'.
-def _goto_end_of_line(count=1):
+def _to_end_of_line(count=1):
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -370,7 +370,7 @@ def _goto_end_of_line(count=1):
 
 
 # 'G': Go to line [count] motion. 0 = last line.
-def _goto_line(expand: bool, raw_count: int) -> bool:
+def _to_line(expand: bool, raw_count: int) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -802,7 +802,7 @@ def _word_motion_once(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
     return False
 
 
-def _run_word_motion_command(
+def _word_motion(
     spec,
     expand: bool,
     count: int = 1,
@@ -877,7 +877,7 @@ def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool):
     view_cursor.gotoRange(edge, False)
 
 
-def _goto_next_non_empty_paragraph(text_cursor, expand: bool):
+def _to_next_non_empty_paragraph(text_cursor, expand: bool):
     moved = False
     while True:
         if not text_cursor.gotoNextParagraph(expand):
@@ -888,13 +888,13 @@ def _goto_next_non_empty_paragraph(text_cursor, expand: bool):
     return moved
 
 
-def _goto_next_sentence(text_cursor, cursor, expand: bool):
+def _to_next_sentence(text_cursor, cursor, expand: bool):
     # Implements one ")" motion with paragraph-edge handling.
     old_pos = cursor.getPosition()
 
     # From an empty line, jump directly to the next non-empty paragraph.
     if _is_current_paragraph_empty(text_cursor):
-        moved = _goto_next_non_empty_paragraph(text_cursor, expand)
+        moved = _to_next_non_empty_paragraph(text_cursor, expand)
         if moved:
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
         return moved
@@ -911,7 +911,7 @@ def _goto_next_sentence(text_cursor, cursor, expand: bool):
     if _same_pos(old_pos, cursor.getPosition()):
         if text_cursor.isEndOfParagraph():
             if _is_current_paragraph_empty(text_cursor):
-                _goto_next_non_empty_paragraph(text_cursor, expand)
+                _to_next_non_empty_paragraph(text_cursor, expand)
             else:
                 text_cursor.gotoNextParagraph(expand)
         else:
@@ -922,7 +922,7 @@ def _goto_next_sentence(text_cursor, cursor, expand: bool):
 
 
 # Repeats ")" motion by count times.
-def _goto_sentences_forward(expand: bool, count = 1):
+def _sentences_forward(expand: bool, count = 1):
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -931,7 +931,7 @@ def _goto_sentences_forward(expand: bool, count = 1):
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _goto_next_sentence(text_cursor, cursor, expand):
+            if not _to_next_sentence(text_cursor, cursor, expand):
                 break
             moved_any = True
         return moved_any
@@ -960,7 +960,7 @@ def _is_at_sentence_start_heuristic(text_cursor):
         return False
 
 
-def _goto_previous_sentence(text_cursor, cursor, expand: bool):
+def _to_previous_sentence(text_cursor, cursor, expand: bool):
     # Implements one "(" motion with sentence-start/paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -1008,7 +1008,7 @@ def _goto_previous_sentence(text_cursor, cursor, expand: bool):
 
 
 # Repeats "(" motion by count times.
-def _goto_sentences_backwards(expand: bool, count=2):
+def _sentences_backwards(expand: bool, count=2):
     # Repeats "(" motion by count times.
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -1018,7 +1018,7 @@ def _goto_sentences_backwards(expand: bool, count=2):
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _goto_previous_sentence(text_cursor, cursor, expand):
+            if not _to_previous_sentence(text_cursor, cursor, expand):
                 break
             moved_any = True
         return moved_any
@@ -1072,17 +1072,17 @@ def _switch_to_insert(state, cmd: str):
             textCursor = _get_text_cursor()
             cursor = _get_cursor()
             if cmd == "A":
-                _goto_end_of_line()
+                _to_end_of_line()
             elif textCursor is not None and not textCursor.isEndOfParagraph():
                  cursor.goRight(1, False)
 
         elif cmd == "I":
-            _goto_start_of_line(True)
+            _to_start_of_line(True)
 
         elif cmd == "o":
             cursor = _get_cursor()
             if cursor is not None:
-                _goto_end_of_line()
+                _to_end_of_line()
                 cursor.goRight(1, False)
                 cursor.setString(chr(13))  # CR
                 if not cursor.isAtStartOfLine():
@@ -1090,7 +1090,7 @@ def _switch_to_insert(state, cmd: str):
                     cursor.goRight(1, False)
 
         elif cmd == "O":
-            _goto_start_of_line()
+            _to_start_of_line()
             cursor = _get_cursor()
             if cursor is not None:
                 cursor.setString(chr(13))
@@ -1163,15 +1163,15 @@ def _g_command(expand: bool, raw_count: int, pending_keys: str | None, key_char:
     if key_char == "g" :  # 'gg'
         # Defaults to first row.
         if raw_count == 0:
-            _goto_line(expand, 1)
+            _to_line(expand, 1)
         else:
-            _goto_line(expand, raw_count)
+            _to_line(expand, raw_count)
         return True
     # Unknown g+key: cancel silently.
     return False
 
 
-def _delete_operation(pending_keys: str | None, key_char : str) -> bool:
+def _d_command(pending_keys: str | None, key_char : str) -> bool:
     if pending_keys is None:
         _add_pending_key("d")
         return True
@@ -1193,43 +1193,43 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
     # Motions / commands that are currently not supported by operators. Issuing
     # them while in operator pending mode returns to Normal mode.
     actions = {
-        "j": lambda: _move_charwise("j", count, False, pending_keys),
-        "k": lambda: _move_charwise("k", count, False, pending_keys),
+        "j": lambda: _charwise_motion("j", count, False, pending_keys),
+        "k": lambda: _charwise_motion("k", count, False, pending_keys),
         "i": lambda: _switch_to_insert(state, "i"),
         "I": lambda: _switch_to_insert(state, "I"),
         "a": lambda: _switch_to_insert(state, "a"),
         "A": lambda: _switch_to_insert(state, "A"),
         "o": lambda: _switch_to_insert(state, "o"),
         "O": lambda: _switch_to_insert(state, "O"),
-        "d": lambda: _delete_operation(pending_keys, key_char),
+        "d": lambda: _d_command(pending_keys, key_char),
         "g": lambda: _g_command(False, raw_count, pending_keys),
-        "G": lambda: _goto_line(False, raw_count),
+        "G": lambda: _to_line(False, raw_count),
         "H": lambda: _jump_to_page(False, "start", pending_keys),
-        ")": lambda: _goto_sentences_forward(False, count),
-        "(": lambda: _goto_sentences_backwards(False, count),
+        ")": lambda: _sentences_forward(False, count),
+        "(": lambda: _sentences_backwards(False, count),
         "u": lambda: _undo_changes(count),
         "U": lambda: _undo_changes(count, True),
         "s": lambda: _delete_characters(count, False, True),
         "x": lambda: _delete_characters(count, False),
         "X": lambda: _delete_characters(count, True),
-        "^": lambda: _goto_start_of_line(True),
-        "$": lambda: _goto_end_of_line(count),
+        "^": lambda: _to_start_of_line(True),
+        "$": lambda: _to_end_of_line(count),
         "/": _focus_findbar,
     }
 
     if key_char == "0" and raw_count == 0:
-        actions["0"] = lambda: _goto_start_of_line()
+        actions["0"] = lambda: _to_start_of_line()
 
     # Motions that currently support operators like "d".
     motions = {
-        "h": lambda: _move_charwise("h", count, False, pending_keys),
-        "l": lambda: _move_charwise("l", count, False, pending_keys),
-        "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, pending_keys),
-        "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, pending_keys),
-        "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, pending_keys),
-        "E": lambda: _run_word_motion_command(_WORD_MOTION_BIG_E, False, count, pending_keys),
-        "b": lambda: _run_word_motion_command(_WORD_MOTION_B, False, count, pending_keys),
-        "B": lambda: _run_word_motion_command(_WORD_MOTION_BIG_B, False, count, pending_keys),
+        "h": lambda: _charwise_motion("h", count, False, pending_keys),
+        "l": lambda: _charwise_motion("l", count, False, pending_keys),
+        "w": lambda: _word_motion(_WORD_MOTION_W, False, count, pending_keys),
+        "W": lambda: _word_motion(_WORD_MOTION_BIG_W, False, count, pending_keys),
+        "e": lambda: _word_motion(_WORD_MOTION_E, False, count, pending_keys),
+        "E": lambda: _word_motion(_WORD_MOTION_BIG_E, False, count, pending_keys),
+        "b": lambda: _word_motion(_WORD_MOTION_B, False, count, pending_keys),
+        "B": lambda: _word_motion(_WORD_MOTION_BIG_B, False, count, pending_keys),
     }
     return actions, motions
 
@@ -1348,6 +1348,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if action is not None:
             return self._consume_active_event(action)
 
+        if _is_backspace_key(event):
+            return self._consume_active_event(lambda: _charwise_motion("h", count, False, pending_keys))
+
         # Count parsing
         # - 1..9 always extend count
         # - 0 extends count only after count has started
@@ -1362,6 +1365,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_function_key(event):
             return False
 
+        # Now suitable key matched so reset.
         _reset_count()
 
         if pending_keys:  # Cancel rest of keys since no match.
@@ -1377,10 +1381,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
         if is_escape:
             return self._consume_active_event(lambda: _goto_mode("normal"))
+        # Deliberately cancels operator pending mode.
         if _is_delete_key(event):
             return self._consume_active_event(_delete_characters)
-        if _is_backspace_key(event):
-            return self._consume_active_event(lambda: _move_charwise("h", count, False))
         if _is_insert_key(event):
             return self._consume_active_event(lambda: _switch_to_insert(state, "i"))
 
