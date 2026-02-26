@@ -40,12 +40,12 @@ they are similar in functionality.
 
 Currently supported Normal mode commands:
 - Insert/append: `i`, `I`, `a`, `A`, `o`, `O`.
-- Motions: `hjkl`, `0`, `^`, `$`, `gg`, `G`, `()` ,`H`
-- Motions supported by operators: `w`, `W`, `b`, `B`, `e`, `E`, 
-- Scrolling: `C-f`, `C-b`, 
+- Motions supported by operators: `h`, `l`, `w`, `W`, `b`, `B`, `e`, `E` 
+- Other motions: `j`, `k`, `0`, `^`, `$`, `gg`, `G`, `()` ,`H`
 - Operators: `d`
 - Deletion: `x`, `X`, `s`.
-- Undo/redo: `u`, `C-r`.
+- Scrolling: `C-f`, `C-b`,
+- Undo/redo: `u`, `C-r`
 
 - Aliases: `/`: default search bar, `Ins`: i, `U`: C-r, `BS`: h 
 

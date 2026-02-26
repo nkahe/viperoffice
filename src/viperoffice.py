@@ -271,11 +271,29 @@ def _goto_mode(mode_name):
 
 
 # Commands 'h', 'j', 'k', 'l'.
-def _move_charwise(cmd, count, expand, pending_keys=None):
+def _move_charwise(cmd: str, count: int, expand: bool, pending_keys=str|None):
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
+        if pending_keys == "d":
+            textCursor = _get_text_cursor()
+            if textCursor is None:
+                return False
+            textCursor.gotoRange(textCursor.getStart(), False)
+            if cmd == "h":
+                moved = textCursor.goLeft(count, True)
+            elif cmd == "l":
+                moved = textCursor.goRight(count, True)
+            else:
+                return False
+            if not moved:
+                return False
+            textCursor.setString("")
+            _reset_pending_keys()
+            _set_mode("normal")
+            return True
+
         if cmd == "h":
             return bool(cursor.goLeft(count, expand))
         if cmd == "l":
@@ -1171,7 +1189,12 @@ def _delete_operation(pending_keys: str | None, key_char : str) -> bool:
 
 """Build Normal-mode command dispatch map for character actions."""
 def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: str | None):
+
+    # Motions / commands that are currently not supported by operators. Issuing
+    # them while in operator pending mode returns to Normal mode.
     actions = {
+        "j": lambda: _move_charwise("j", count, False, pending_keys),
+        "k": lambda: _move_charwise("k", count, False, pending_keys),
         "i": lambda: _switch_to_insert(state, "i"),
         "I": lambda: _switch_to_insert(state, "I"),
         "a": lambda: _switch_to_insert(state, "a"),
@@ -1181,10 +1204,6 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
         "d": lambda: _delete_operation(pending_keys, key_char),
         "g": lambda: _g_command(False, raw_count, pending_keys),
         "G": lambda: _goto_line(False, raw_count),
-        "h": lambda: _move_charwise("h", count, False),
-        "j": lambda: _move_charwise("j", count, False),
-        "k": lambda: _move_charwise("k", count, False),
-        "l": lambda: _move_charwise("l", count, False),
         "H": lambda: _jump_to_page(False, "start", pending_keys),
         ")": lambda: _goto_sentences_forward(False, count),
         "(": lambda: _goto_sentences_backwards(False, count),
@@ -1203,6 +1222,8 @@ def _normal_actions(state, key_char, count: int, raw_count: int, pending_keys: s
 
     # Motions that currently support operators like "d".
     motions = {
+        "h": lambda: _move_charwise("h", count, False, pending_keys),
+        "l": lambda: _move_charwise("l", count, False, pending_keys),
         "w": lambda: _run_word_motion_command(_WORD_MOTION_W, False, count, pending_keys),
         "W": lambda: _run_word_motion_command(_WORD_MOTION_BIG_W, False, count, pending_keys),
         "e": lambda: _run_word_motion_command(_WORD_MOTION_E, False, count, pending_keys),
