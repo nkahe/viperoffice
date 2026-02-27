@@ -209,6 +209,52 @@ def _get_text_cursor():
         return None
 
 
+def _debug_cursor_state():
+    """Show debug info about view cursor and text cursor ranges. For development use."""
+    cursor = _get_cursor()
+    if cursor is None:
+        _msgbox("No view cursor available.", "ViperOffice cursor debug")
+        return
+    try:
+        text_cursor = _get_text_cursor()
+        state = _state()
+        lines = [f"Mode: {state['mode']}  pending: {state['pending_keys']}"]
+
+        # View cursor info
+        try:
+            pos = cursor.getPosition()
+            x = pos.X() if callable(pos.X) else pos.X
+            y = pos.Y() if callable(pos.Y) else pos.Y
+            lines.append(f"ViewCursor pos: X={x}, Y={y}")
+        except Exception:
+            lines.append("ViewCursor pos: unavailable")
+        try:
+            vc_start = cursor.getStart()
+            vc_end   = cursor.getEnd()
+            lines.append(f"ViewCursor collapsed: {cursor.isCollapsed()}")
+            lines.append(f"ViewCursor at start of line: {cursor.isAtStartOfLine()}")
+        except Exception:
+            lines.append("ViewCursor range: unavailable")
+
+        # Text cursor info
+        if text_cursor is None:
+            lines.append("TextCursor: unavailable")
+        else:
+            try:
+                lines.append(f"TextCursor collapsed: {text_cursor.isCollapsed()}")
+                lines.append(f"TextCursor start of paragraph: {text_cursor.isStartOfParagraph()}")
+                lines.append(f"TextCursor end of paragraph: {text_cursor.isEndOfParagraph()}")
+                lines.append(f"TextCursor start of word: {text_cursor.isStartOfWord()}")
+                lines.append(f"TextCursor end of word: {text_cursor.isEndOfWord()}")
+                lines.append(f"TextCursor string: {repr(text_cursor.getString()[:40])}")
+            except Exception as e:
+                lines.append(f"TextCursor info error: {e}")
+
+        _msgbox("\n".join(lines), "ViperOffice cursor debug")
+    except Exception as e:
+        _msgbox(f"Error: {e}", "ViperOffice cursor debug")
+
+
 def _update_statusline(controller=None):
     if controller is None:
         controller = _current_controller()
