@@ -43,10 +43,12 @@ def _state():
             "enabled": False,
             # Current vi input mode. Can be "normal", "insert" or "pending".
             "mode": "normal",
+            # Visible cursor.
             "view_cursor": None,
-            # An optional number that may precede the command to multiply
-            # or iterate the command.
+            # An optional number that may precede the command to multiply or
+            # iterate the command.
             "count": 0,
+            # Pending commands like 'd' or 'g'.
             "pending_keys": None,
             "key_handler": None,
             # Python UNO may leave stale key-handler registrations attached even
@@ -122,18 +124,25 @@ def _is_count_set() -> bool:
     return bool(count != 0)
 
 
-def _get_pending_keys() -> None | str:
+def _get_pending_keys() -> None|str:
     return _state().get("pending_keys", None)
 
 
-def _add_pending_key(key: str) -> bool:
+def _add_pending_key(new_key:str) -> bool:
     pending_keys = _state()["pending_keys"]
-    if key == "g" or key == "d":
+    # _msgbox(f"{new_key=} {pending_keys=}")
+    if new_key == "g":
+        if pending_keys not in (None, "d"):
+            return False
+    if new_key == "d":
         if pending_keys is not None:
             return False
-        _state()["pending_keys"] = key
+
+    if pending_keys == None:
+        _state()["pending_keys"] = new_key
     else:
-        return False
+        _state()["pending_keys"] = pending_keys + new_key
+
     _update_statusline()
     return True
 
@@ -311,6 +320,7 @@ def _update_statusline(controller=None):
         pass
 
 
+# Selects character right to cursor as Normal mode cursor.
 def _show_normal_cursor():
     textCursor = _get_text_cursor()
     controller = _current_controller()
@@ -504,14 +514,14 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
         return False
 
 
-# 'G': Go to line [count] motion. 0 = last line.
+# 'G' and 'gg': Go to line [count] motion. 0 = last line.
 def _to_line(expand: bool, raw_count:int) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
         if raw_count == 0:
-            cursor.gotoEnd(False)
+            cursor.gotoEnd(expand)
             return True
         line_number = max(1, int(raw_count))
         cursor.gotoStart(expand)
@@ -1291,8 +1301,8 @@ def _jump_to_page(expand: bool, target: str, operator: str | None) -> bool:
 
 
 def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) -> bool:
-    """Handle g -command"""
-    if pending_keys is None:
+    """Handle g -commands"""
+    if pending_keys in (None, "d"):
         _add_pending_key("g")
         return True
 
@@ -1304,6 +1314,8 @@ def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) 
             _to_line(expand, 1)
         else:
             _to_line(expand, raw_count)
+        if pending_keys[0] == "d":
+            _d_command(pending_keys, key_char)
         return True
     # Unknown g+key: cancel silently.
     return False
@@ -1316,7 +1328,7 @@ def _d_command(pending_keys:str|None, key_char:str) -> bool:
         _goto_mode("pending")
         return True
 
-    elif pending_keys == "d":
+    elif pending_keys in ("d", "dg"):
 
         if key_char == "d" :  # 'dd'
             _msgbox("dd pressed!")
@@ -1351,8 +1363,6 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
         "O": lambda: _switch_to_insert("O"),
         "d": lambda: _d_command(pending_keys, key_char),
         "D": lambda: _to_end_of_line(False, count, "d"),
-        "g": lambda: _g_command(False, raw_count, pending_keys, key_char),
-        "G": lambda: _to_line(False, raw_count),
         "H": lambda: _jump_to_page(False, "start", pending_keys),
         ")": lambda: _sentences_forward(False, count),
         "(": lambda: _sentences_backwards(False, count),
@@ -1376,6 +1386,8 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
         "B": lambda: _word_motion(_WORD_MOTION_BIG_B, False, count, pending_keys),
         "$": lambda: _to_end_of_line(expand, count, pending_keys),
         "^": lambda: _to_start_of_line(expand, True),
+        "g": lambda: _g_command(expand, raw_count, pending_keys, key_char),
+        "G": lambda: _to_line(expand, raw_count),
     }
 
     if key_char == "0" and raw_count == 0:
@@ -1418,11 +1430,17 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _consume_active_event(self, action, pending_keys:str|None, key_char=""):
         if action is not None:
             action()
+
             if pending_keys is None:
                 _reset_count()
-            # Operator actions after motion.
+
             elif pending_keys == "d":
+                current = _get_pending_keys()
+                if current != "d":
+                    return True
+                # Route to operator after motion.
                 _d_command(pending_keys, key_char)
+
         return True
 
     def keyPressed(self, event):
@@ -1430,16 +1448,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if not state["enabled"]:
             return False
 
-        # Don't do anything if textCursor isn't working (as in annotations).
-        textCursor = _get_text_cursor()
+        # Don't do anything if text cursor isn't working (as in annotations).
+        if _get_text_cursor() is None:
+            return False
+
         count: int = _get_count()
         raw_count: int = _get_raw_count()
         pending_keys: str | None = _get_pending_keys()
         mode: str = _get_mode()
         expand: bool = mode in ("visual", "pending")
-
-        if textCursor is None:
-            return False
 
         key_code: int = _key_code(event)
         key_char: str = _normalize_key_char(event)
@@ -1499,9 +1516,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         action = normal_actions.get(key_char)
         if action is not None:
             if pending_keys == "d":
-                if pending_keys == key_char:   # dd
+                if key_char == "d":   # dd
                     return self._consume_active_event(action, pending_keys)
-                # If non-d command given, return to Normal mode.
+
+                if key_char == "g":
+                   return self._consume_active_event(
+                       lambda: _g_command(expand, raw_count, pending_keys, key_char),
+                       pending_keys, key_char)
+
+                # other non-d command:  cancel
                 _reset_pending_keys()
                 _set_mode("normal")
                 return True
