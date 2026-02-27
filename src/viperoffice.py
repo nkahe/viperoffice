@@ -394,21 +394,39 @@ def _delete() -> bool:
         return False
 
 
-# Commands '0' and '^',
-def _to_start_of_line(expand:bool, first_non_blank, pending_keys=None):
+def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
+    """Motion to start of line. Commands '0' and '^'.
+    Args:
+    expand : Expand selection
+    first_non_blank : To first non blank character.
+    """
+
     cursor = _get_cursor()
     if cursor is None:
         return False
 
     try:
         if not first_non_blank:
-            return bool(cursor.gotoStartOfLine(False))
+            return bool(cursor.gotoStartOfLine(expand))
 
-        _to_end_of_line(False, 1, None)
+        text_cursor = _get_text_cursor()
+
+        # This variable represents the original line the cursor was on before
+        # any of the following changes.
+        old_line = cursor.getPosition().Y
+
+        # Select all of the current line and put it into a string.
+        cursor.gotoEndOfLine(False)
+
+        if cursor.getPosition().Y > old_line:
+            # If gotoEndOfLine moved cursor to next line then move it back.
+            cursor.goLeft(1, False)
 
         cursor.gotoStartOfLine(True)
         line_text = cursor.getString()
-        cursor.gotoStartOfLine(False)
+
+        cursor.gotoRange(text_cursor, False)
+        cursor.gotoStartOfLine(expand)
 
         i = 0
         while i < len(line_text):
@@ -416,18 +434,18 @@ def _to_start_of_line(expand:bool, first_non_blank, pending_keys=None):
             if ch != " " and ch != "\t":
                 break
             i += 1
+
+        # Move the cursor to the first non space/tab character.
         if i > 0:
-            cursor.goRight(i, False)
+            cursor.goRight(i, expand)
         return True
 
-    except Exception as e:
+    except Exception:
         return False
-    return False
 
 
-
-# Command '$'.
-def _to_end_of_line(expand, count, pending_keys:str|None=None) -> bool:
+def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
+    """Motion to end of line. Command '$' """
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -1311,12 +1329,8 @@ def _normal_actions(state, key_char:str, expand, count:int, raw_count:int, pendi
         "s": lambda: _delete_characters(count, False, True),
         "x": lambda: _delete_characters(count, False),
         "X": lambda: _delete_characters(count, True),
-        "^": lambda: _to_start_of_line(True),
         "/": _focus_findbar,
     }
-
-    if key_char == "0" and raw_count == 0:
-        actions["0"] = lambda: _to_start_of_line()
 
     # Motions that currently support operators like "d".
     motions = {
@@ -1328,8 +1342,13 @@ def _normal_actions(state, key_char:str, expand, count:int, raw_count:int, pendi
         "E": lambda: _word_motion(_WORD_MOTION_BIG_E, False, count, pending_keys),
         "b": lambda: _word_motion(_WORD_MOTION_B, False, count, pending_keys),
         "B": lambda: _word_motion(_WORD_MOTION_BIG_B, False, count, pending_keys),
-        "$": lambda: _to_end_of_line(False, count, pending_keys),
+        "$": lambda: _to_end_of_line(expand, count, pending_keys),
+        "^": lambda: _to_start_of_line(expand, True),
     }
+
+    if key_char == "0" and raw_count == 0:
+        motions["0"] = lambda: _to_start_of_line(expand, False)
+
     return actions, motions
 
 
