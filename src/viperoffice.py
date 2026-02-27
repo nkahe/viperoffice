@@ -143,20 +143,9 @@ def _reset_pending_keys():
     _update_statusline()
 
 
-
 # ------------------------
 # General helper functions
 # ------------------------
-
-def _dbg(msg):
-    if not DEBUG:
-        return
-    try:
-        ts = datetime.datetime.now().strftime("%m-%d %H:%M:%S.%f")
-        with open("/tmp/viperffice-debug.log", "a", encoding="utf-8") as f:
-            f.write(f"{ts} {msg}\n")
-    except Exception:
-        pass
 
 def _current_doc():
     try:
@@ -208,6 +197,41 @@ def _get_text_cursor():
         return cursor.getText().createTextCursorByRange(cursor)
     except Exception:
         return None
+
+
+# For debugging
+
+def _dbg(msg):
+    if not DEBUG:
+        return
+    try:
+        ts = datetime.datetime.now().strftime("%m-%d %H:%M:%S.%f")
+        with open("/tmp/viperffice-debug.log", "a", encoding="utf-8") as f:
+            f.write(f"{ts} {msg}\n")
+    except Exception:
+        pass
+
+
+def _msgbox(text, title="ViperOffice"):
+    try:
+        controller = _current_controller()
+        if controller is None:
+            return
+        parent = controller.getFrame().getContainerWindow()
+        toolkit = parent.getToolkit()
+        try:
+            # Legacy UNO signature used by some versions.
+            box = toolkit.createMessageBox(
+                parent, Rectangle(), "infobox", 1, title, str(text),
+            )
+        except Exception:
+            # Newer UNO signature used by some versions.
+            box = toolkit.createMessageBox(
+                parent, 1, 1, title, str(text),
+            )
+        box.execute()
+    except Exception:
+        pass
 
 
 def _debug_cursor_state():
@@ -1550,32 +1574,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return True
         return False
 
-    # Needs to be implemented.
     def disposing(self, event):
         return None
-
-
-# For debugging if needed.
-def _msgbox(text, title="ViperOffice"):
-    try:
-        controller = _current_controller()
-        if controller is None:
-            return
-        parent = controller.getFrame().getContainerWindow()
-        toolkit = parent.getToolkit()
-        try:
-            # Legacy UNO signature used by some versions.
-            box = toolkit.createMessageBox(
-                parent, Rectangle(), "infobox", 1, title, str(text),
-            )
-        except Exception:
-            # Newer UNO signature used by some versions.
-            box = toolkit.createMessageBox(
-                parent, 1, 1, title, str(text),
-            )
-        box.execute()
-    except Exception:
-        pass
 
 
 def _focus_findbar() -> bool:
