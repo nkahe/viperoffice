@@ -9,6 +9,8 @@ class XKeyHandler(Protocol):
 
 class KeyModifier:
     MOD1: int
+    MOD2: int
+    MOD3: int
 
 
 class Key:
@@ -20,3 +22,10 @@ class Key:
     HOME: int
     END: int
     DELETE: int
+
+
+class Rectangle:
+    X: int
+    Y: int
+    Width: int
+    Height: int

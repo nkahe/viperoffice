@@ -1,14 +1,19 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
 import builtins
 import datetime
-import unohelper
+import unohelper   # This project allow typings for the full LibreOffice API.
 from functools import lru_cache
-from typing import Any, Final
+from typing import Any, Callable, Final
 
-from com.sun.star.awt import XKeyHandler
 from com.sun.star.awt import KeyModifier
+from com.sun.star.awt import XKeyHandler
 from com.sun.star.awt import Key
 from com.sun.star.awt import Rectangle
 from com.sun.star.document import XEventListener
+
+if TYPE_CHECKING:
+    from com.sun.star.text import XViewCursor
 
 
 # ------------
@@ -139,18 +144,16 @@ def _reset_pending_keys():
 
 
 
-# ------------
-# Editor
-# ------------
-
-# Editor - Functions to manipulate view and model (document).
+# ------------------------
+# General helper functions
+# ------------------------
 
 def _dbg(msg):
     if not DEBUG:
         return
     try:
         ts = datetime.datetime.now().strftime("%m-%d %H:%M:%S.%f")
-        with open("/tmp/vibreoffice-debug.log", "a", encoding="utf-8") as f:
+        with open("/tmp/viperffice-debug.log", "a", encoding="utf-8") as f:
             f.write(f"{ts} {msg}\n")
     except Exception:
         pass
@@ -194,7 +197,8 @@ def _get_frame():
 
 
 def _get_cursor():
-   return _state()["view_cursor"]
+    return _state()["view_cursor"]
+
 
 def _get_text_cursor():
     cursor = _get_cursor()
@@ -252,6 +256,12 @@ def _debug_cursor_state():
         _msgbox(f"Error: {e}", "ViperOffice cursor debug")
 
 
+# ------------
+# Editor
+# ------------
+
+# Functions to manipulate view and model (document).
+
 def _update_statusline(controller=None):
     if controller is None:
         controller = _current_controller()
@@ -275,7 +285,6 @@ def _update_statusline(controller=None):
     except Exception:
         # Non-fatal for status update.
         pass
-
 
 
 def _show_normal_cursor():
@@ -306,7 +315,7 @@ def _show_insert_cursor():
 
 
 # Sets Vi input mode handling cursor accordingly.
-def _goto_mode(mode_name) -> bool:
+def _goto_mode(mode_name: str) -> bool:
     if mode_name == "normal":
         _show_normal_cursor()
     elif mode_name == "insert":
@@ -328,7 +337,7 @@ def _goto_mode(mode_name) -> bool:
 
 
 # Commands 'h', 'j', 'k', 'l'.
-def _charwise_motion(cmd:str, count:int, expand:bool, pending_keys:str|None):
+def _charwise_motion(cmd:str, count:int, expand:bool, pending_keys:str|None) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -365,18 +374,13 @@ def _charwise_motion(cmd:str, count:int, expand:bool, pending_keys:str|None):
 
 
 def _yank() -> bool:
-    """Yank motion or selection"""
+    """Yank motion or selection to clipboard"""
     try:
         dispatcher = _get_dispatcher()
         frame = _get_frame()
         if dispatcher is None or frame is None:
             return False
-        text_cursor = _get_text_cursor()  # Needs to be before copy.
         dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
-        # if delete is True:
-        #     if text_cursor is not None:
-        #         # Delete text range set by motion or selection.
-        #         text_cursor.setString("")
         return True
     except Exception:
         return False
@@ -477,7 +481,7 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
 
 
 # 'G': Go to line [count] motion. 0 = last line.
-def _to_line(expand: bool, raw_count: int) -> bool:
+def _to_line(expand: bool, raw_count:int) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -496,7 +500,7 @@ def _to_line(expand: bool, raw_count: int) -> bool:
 
 # ISKEYWORD is constant, so compile checker once and reuse for word motions.
 @lru_cache(maxsize=1)
-def _compile_iskeyword_checker():
+def _compile_iskeyword_checker() -> Callable[[str], bool]:
     spec = ISKEYWORD
     ranges = []
     singles = set()
@@ -648,7 +652,7 @@ def _cursor_xy(cursor):
         return (None, None)
 
 
-def _normalize_motion_range(result, for_operator: bool = False):
+def _normalize_motion_range(result, for_operator:bool = False):
     if not isinstance(result, dict):
         return {"moved": False}
     normalized = dict(result)
@@ -669,7 +673,7 @@ def _range_xy(rng):
     return _pos_xy(rng)
 
 
-def _query_word_motion(spec, count: int, expand: bool = False):
+def _query_word_motion(spec, count:int, expand:bool=False):
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None or not _validate_word_motion_spec(spec):
@@ -710,7 +714,7 @@ def _query_word_motion(spec, count: int, expand: bool = False):
     return _normalize_motion_range(result)
 
 
-def _apply_motion_result(result, expand: bool, operator: str | None) -> bool:
+def _apply_motion_result(result, expand:bool, operator:str|None) -> bool:
     if not isinstance(result, dict) or not result.get("moved", False):
         return False
     end_range = result.get("end_range")
@@ -741,7 +745,7 @@ def _apply_motion_result(result, expand: bool, operator: str | None) -> bool:
     return True
 
 
-def _goto_next_paragraph_with_policy(text_cursor, expand: bool, cross_empty: bool) -> bool:
+def _goto_next_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
     if not text_cursor.gotoNextParagraph(expand):
         return False
     if not cross_empty:
@@ -751,7 +755,7 @@ def _goto_next_paragraph_with_policy(text_cursor, expand: bool, cross_empty: boo
     return True
 
 
-def _goto_previous_paragraph_with_policy(text_cursor, expand: bool, cross_empty: bool) -> bool:
+def _goto_previous_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
     if not text_cursor.gotoPreviousParagraph(expand):
         return False
     if not cross_empty:
@@ -967,7 +971,7 @@ def _same_pos(a, b):
     return _pos_xy(a) == _pos_xy(b)
 
 
-def _is_current_paragraph_empty(text_cursor):
+def _is_current_paragraph_empty(text_cursor) -> bool:
     if text_cursor is None:
         return False
     try:
@@ -984,7 +988,7 @@ def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool):
     view_cursor.gotoRange(edge, False)
 
 
-def _to_next_non_empty_paragraph(text_cursor, expand: bool):
+def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
     moved = False
     while True:
         if not text_cursor.gotoNextParagraph(expand):
@@ -995,7 +999,7 @@ def _to_next_non_empty_paragraph(text_cursor, expand: bool):
     return moved
 
 
-def _to_next_sentence(text_cursor, cursor, expand: bool):
+def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
     # Implements one ")" motion with paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -1029,7 +1033,7 @@ def _to_next_sentence(text_cursor, cursor, expand: bool):
 
 
 # Repeats ")" motion by count times.
-def _sentences_forward(expand: bool, count = 1):
+def _sentences_forward(expand:bool, count:int=1) -> bool:
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -1046,7 +1050,7 @@ def _sentences_forward(expand: bool, count = 1):
         return False
 
 
-def _is_at_sentence_start_heuristic(text_cursor):
+def _is_at_sentence_start_heuristic(text_cursor) -> bool:
     if text_cursor is None:
         return False
     try:
@@ -1067,7 +1071,7 @@ def _is_at_sentence_start_heuristic(text_cursor):
         return False
 
 
-def _to_previous_sentence(text_cursor, cursor, expand: bool):
+def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
     # Implements one "(" motion with sentence-start/paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -1115,7 +1119,7 @@ def _to_previous_sentence(text_cursor, cursor, expand: bool):
 
 
 # Repeats "(" motion by count times.
-def _sentences_backwards(expand: bool, count=2):
+def _sentences_backwards(expand:bool, count=2) -> bool:
     # Repeats "(" motion by count times.
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -1134,7 +1138,7 @@ def _sentences_backwards(expand: bool, count=2):
 
 
 # For commands 'x','X' and 's'.
-def _delete_characters(count=1, reverse=False, substitute=False):
+def _delete_characters(count=1, reverse=False, substitute=False) -> bool:
     textCursor = _get_text_cursor()
     if textCursor is None:
         return False
@@ -1151,7 +1155,7 @@ def _delete_characters(count=1, reverse=False, substitute=False):
         textCursor.setString("")
         if substitute:
             state = _state()
-            _switch_to_insert(state, "i")
+            _switch_to_insert("i")
         return True
     except Exception:
         return False
@@ -1170,7 +1174,7 @@ def _leave_insert_to_normal():
 
 
 # Commands 'a', 'I', 'A', 'o' and 'O'.
-def _switch_to_insert(state, cmd: str):
+def _switch_to_insert(cmd:str):
     # Some stale handlers may still receive this same insert-transition key
     # callback. Swallow one stale duplicate so the transition key does not get
     # inserted as text.
@@ -1184,7 +1188,7 @@ def _switch_to_insert(state, cmd: str):
                  cursor.goRight(1, False)
 
         elif cmd == "I":
-            _to_start_of_line(True)
+            _to_start_of_line(False, True)
 
         elif cmd == "o":
             cursor = _get_cursor()
@@ -1197,7 +1201,7 @@ def _switch_to_insert(state, cmd: str):
                     cursor.goRight(1, False)
 
         elif cmd == "O":
-            _to_start_of_line()
+            _to_start_of_line(False, False)
             cursor = _get_cursor()
             if cursor is not None:
                 cursor.setString(chr(13))
@@ -1211,8 +1215,9 @@ def _switch_to_insert(state, cmd: str):
     _goto_mode("insert")
 
 
-# Commands 'u', 'C-r'.
 def _undo_changes(count=1, redo=False) -> bool:
+    """Undo or redo changes. Commands 'u' and 'C-r'.
+    """
     doc = _current_doc()
     if doc is None:
         return False
@@ -1229,7 +1234,7 @@ def _undo_changes(count=1, redo=False) -> bool:
         return False
 
 
-def _scroll_window(expand: bool, forward: bool, halfpage=False) -> bool:
+def _scroll_window(forward:bool, halfpage=False) -> bool:
     """Scroll window by one page. Commands 'C-f' (forward) and 'C-b' (backward).
     """
     try:
@@ -1238,6 +1243,7 @@ def _scroll_window(expand: bool, forward: bool, halfpage=False) -> bool:
             return False
         if halfpage:
             pass
+            return False
         else:
             if forward:
                 return cursor.screenDown()
@@ -1247,7 +1253,7 @@ def _scroll_window(expand: bool, forward: bool, halfpage=False) -> bool:
         return False
 
 
-def _jump_to_page(expand: bool, target: str, operator: str | None):
+def _jump_to_page(expand: bool, target: str, operator: str | None) -> bool:
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -1260,7 +1266,8 @@ def _jump_to_page(expand: bool, target: str, operator: str | None):
         return False
 
 
-def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str):
+def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) -> bool:
+    """Handle g -command"""
     if pending_keys is None:
         _add_pending_key("g")
         return True
@@ -1279,6 +1286,7 @@ def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str):
 
 
 def _d_command(pending_keys:str|None, key_char:str) -> bool:
+    """Delete text {motion} moves over"""
     if pending_keys is None:
         _add_pending_key("d")
         _goto_mode("pending")
@@ -1304,19 +1312,19 @@ def _d_command(pending_keys:str|None, key_char:str) -> bool:
 # --------------
 
 """Build Normal-mode command dispatch map for character actions."""
-def _normal_actions(state, key_char:str, expand, count:int, raw_count:int, pending_keys:str|None):
+def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys:str|None):
 
     # Motions / commands that are currently not supported by operators. Issuing
     # them while in operator pending mode returns to Normal mode.
     actions = {
         "j": lambda: _charwise_motion("j", count, False, pending_keys),
         "k": lambda: _charwise_motion("k", count, False, pending_keys),
-        "i": lambda: _switch_to_insert(state, "i"),
-        "I": lambda: _switch_to_insert(state, "I"),
-        "a": lambda: _switch_to_insert(state, "a"),
-        "A": lambda: _switch_to_insert(state, "A"),
-        "o": lambda: _switch_to_insert(state, "o"),
-        "O": lambda: _switch_to_insert(state, "O"),
+        "i": lambda: _switch_to_insert("i"),
+        "I": lambda: _switch_to_insert("I"),
+        "a": lambda: _switch_to_insert("a"),
+        "A": lambda: _switch_to_insert("A"),
+        "o": lambda: _switch_to_insert("o"),
+        "O": lambda: _switch_to_insert("O"),
         "d": lambda: _d_command(pending_keys, key_char),
         "D": lambda: _to_end_of_line(False, count, "d"),
         "g": lambda: _g_command(False, raw_count, pending_keys, key_char),
@@ -1362,10 +1370,10 @@ def _normal_ctrl_actions(count):
 
     actions = {
         c_code: lambda: _reset_pending_keys(),
-        b_code: lambda: _scroll_window(False, False, False),
-        f_code: lambda: _scroll_window(False, True, False),
-        d_code: lambda: _scroll_window(False, True, True),
-        u_code: lambda: _scroll_window(False, False, True),
+        b_code: lambda: _scroll_window(False, False),
+        f_code: lambda: _scroll_window(True, False),
+        d_code: lambda: _scroll_window(True, True),
+        u_code: lambda: _scroll_window(False, True),
         r_code: lambda: _undo_changes(count, False),
     }
 
@@ -1399,10 +1407,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
 
         # Don't do anything if textCursor isn't working (as in annotations).
-        textCursor: XTextCursor | None = _get_text_cursor()
+        textCursor = _get_text_cursor()
         count: int = _get_count()
         raw_count: int = _get_raw_count()
-        pending_keys: str = _get_pending_keys()
+        pending_keys: str | None = _get_pending_keys()
         mode: str = _get_mode()
         expand: bool = mode in ("visual", "pending")
 
@@ -1453,7 +1461,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # ----- Keys without modifiers after this ----
 
-        normal_actions, motions = _normal_actions(state, key_char, expand, count, raw_count, pending_keys)
+        normal_actions, motions = _normal_actions(key_char, expand, count, raw_count, pending_keys)
 
         # Match motions
         motion = motions.get(key_char)
@@ -1481,7 +1489,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         #     return self._consume_active_event(action)
 
         if _is_backspace_key(event):
-            return self._consume_active_event(lambda: _charwise_motion("h", count, False, pending_keys))
+            return self._consume_active_event(
+                lambda: _charwise_motion("h", count, False, pending_keys),
+                pending_keys
+            )
 
         # Count parsing
         # - 1..9 always extend count
@@ -1507,7 +1518,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # TODO: bind navigation keys to movement functions so count can be used.
         if _is_navigation_key(event):
-            if pending_keys:
+            if pending_keys is not None:
                 _reset_pending_keys()
                 _set_mode("normal")
             return False
@@ -1517,7 +1528,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_delete_key(event):
             return self._consume_active_event(_delete_characters, pending_keys)
         if _is_insert_key(event):
-            return self._consume_active_event(lambda: _switch_to_insert(state, "i"), pending_keys)
+            return self._consume_active_event(lambda: _switch_to_insert("i"), pending_keys)
 
         return self._consume_active_event(None, pending_keys)
 

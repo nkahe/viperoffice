@@ -38,21 +38,25 @@ This will simply build the extension file from the template files in
 - For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
 they are similar in functionality.
 
+- Modes: Normal, Insert.
+- Optional count for motions.
+- Statusline with mode, count, pending command.
+
 Currently supported Normal mode commands:
 - Insert/append: `i`, `I`, `a`, `A`, `o`, `O`.
-- Motions supported by operators: `h`, `l`, `w`, `W`, `b`, `B`, `e`, `E` 
-- Other motions: `j`, `k`, `0`, `^`, `$`, `gg`, `G`, `()` ,`H`
+- Motions supported by operators: `h`, `l`, `$`, `0`, `^`, `w`, `W`, `b`, `B`, `e`, `E` 
+- Other motions: `j`, `k`, `gg`, `G`, `()` ,`H`
 - Operators: `d`
-- Deletion: `x`, `X`, `s`.
-- Scrolling: `C-f`, `C-b`,
+- Other deletion: `x`, `X`, `D`, `s`.
+- Scrolling: `C-f`, `C-b`
 - Undo/redo: `u`, `C-r`
 
-- Aliases: `/`: default search bar, `Ins`: i, `U`: C-r, `BS`: h 
+- Aliases: `/` = default search bar, `Ins` = i, `U` = C-r, `BS` = h 
 
-Insert Mode:
-- Switch to Normal mode: `Esc` aliases: `C-[`, `C-c`
+Supported Insert mode commands:
+- Switch to Normal mode: `Esc`, aliases: `C-[`, `C-c`
 
-Other shortcuts and keys are passed to LibreOffice. 
+Other shortcuts and keys are passed to LibreOffice so they work as expected.
 
 ## Shortcuts for enabling and disabling
 
@@ -69,6 +73,7 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
 - Start and end of text which for example `G` and `gg` use, is LibreOffice's definition which is for *text container*. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
+- Operators don't support `j` or `k`.
 
 ## Known issues / missing features
 
