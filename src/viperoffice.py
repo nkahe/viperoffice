@@ -1314,18 +1314,40 @@ def _d_command(pending_keys:str|None, key_char:str) -> bool:
     return False
 
 
+def _replace_character(count:int, pending_keys, key_char:str) -> bool:
+    """Replace character(s) under cursor with {key_char}.
+       With {count} replace {count} characters with {count} {key_char}.
+    """
+    if pending_keys is None:
+        _add_pending_key("r")
+        return True
+
+    _reset_pending_keys()
+    try:
+        cursor = _get_cursor()
+        length = len(cursor.getString())
+
+        if length > 1:
+            cursor.setString(key_char * length)
+        else:
+            cursor.setString(key_char * count)
+        return True
+    except Exception:
+        return False
+
+
 # --------------
 # Input handling
 # --------------
 
 """Build Normal-mode command dispatch map for character actions."""
-def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys:str|None):
+def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys):
 
     # Motions / commands that are currently not supported by operators. Issuing
     # them while in operator pending mode returns to Normal mode.
     actions = {
-        "j": lambda: _charwise_motion("j", count, False, pending_keys),
-        "k": lambda: _charwise_motion("k", count, False, pending_keys),
+        "j": lambda: _charwise_motion("j", count, False),
+        "k": lambda: _charwise_motion("k", count, False),
         "i": lambda: _switch_to_insert("i"),
         "I": lambda: _switch_to_insert("I"),
         "a": lambda: _switch_to_insert("a"),
@@ -1334,6 +1356,7 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
         "O": lambda: _switch_to_insert("O"),
         "d": lambda: _d_command(pending_keys, key_char),
         "D": lambda: _to_end_of_line(expand, count, "d"),
+        "r": lambda: _replace_character(count, pending_keys, key_char),
         "u": lambda: _undo_and_redo(count),
         "U": lambda: _undo_and_redo(count, True),
         "s": lambda: _delete_characters(count, False, True),
@@ -1438,9 +1461,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_active_event(
                 lambda: _g_command(expand, raw_count, pending_keys, key_char)
             )
-
-
-
+        if pending_keys == "r":
+            if key_char.isprintable() or key_code in (1280, 1282):  # enter, tab
+                return self._consume_active_event(
+                    lambda: _replace_character(count, pending_keys, key_char)
+                )
+            _reset_pending_keys()
+            return True
 
         if mode == "insert":
             if is_escape or (is_ctrl and key_code == 514):  # C-c

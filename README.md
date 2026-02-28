@@ -38,17 +38,18 @@ This will simply build the extension file from the template files in
 - For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
 they are similar in functionality.
 
-- Modes: Normal, Insert.
-- Optional count for motions.
+- Modes: Normal (+Operator pending), Insert.
+- Optional count for most commands.
 - Statusline with mode, count, pending command.
 
 Currently supported Normal mode commands:
-- Insert/append: `i`, `I`, `a`, `A`, `o`, `O`.
+- Insert: `i`, `I`, `a`, `A`, `o`, `O`.
 - Motions supported by operators: `h`, `l`, `$`, `0`, `^`, `w`, `W`, `b`, `B`, `e`, `E` 
 - Other motions: `j`, `k`, `gg`, `G`, `()` ,`H`
-- Operators: `d`
-- Other deletion: `x`, `X`, `D`, `s`.
 - Scrolling: `C-f`, `C-b`
+- Replace: `r`
+- Operators: `d`
+- Other deletion: `x`, `X`, `D`, `s`
 - Undo/redo: `u`, `C-r`
 
 - Aliases: `/` = default search bar, `Ins` = i, `U` = C-r, `BS` = h 
@@ -73,6 +74,7 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
 - Start and end of text which for example `G` and `gg` use, is LibreOffice's definition which is for *text container*. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
+- For yank/paste system clipboard is used instead of registers.
 - Operators don't support `j` or `k`.
 
 ## Known issues / missing features
