@@ -383,26 +383,50 @@ def _charwise_motion(cmd:str, count:int, expand:bool) -> bool:
     return False
 
 
-def _yank() -> bool:
-    """Yank motion or selection to clipboard"""
+def _yank_and_delete() -> bool:
+    """Yank current selection to clipboard and delete it."""
     try:
+        text_cursor = _get_text_cursor()
         dispatcher = _get_dispatcher()
         frame = _get_frame()
         if dispatcher is None or frame is None:
             return False
         dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
+        if text_cursor is not None:
+            text_cursor.setString("")
         return True
     except Exception:
         return False
 
 
-def _delete() -> bool:
-    """Delete motion or selection"""
+def _paste(count:int, after_cursor:bool):
+    """Paste text from clipboard after or before cursor {count} times."""
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    mode = _get_mode()
+    if text_cursor is None or cursor is None:
+        return False
+
     try:
-        text_cursor = _get_text_cursor()  # Needs to be before copy.
-        if text_cursor is not None:
-            # Delete text range set by motion or selection.
-            text_cursor.setString("")
+        # msg(f"{after_cursor=} {text_cursor.isEndOfParagraph()=}")
+        if after_cursor == True and text_cursor.isEndOfParagraph() == False:
+            text_cursor.goRight(1, False)
+
+        if mode == "normal":
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            controller = _current_controller()
+            if controller is None:
+                return False
+            controller.select(text_cursor)
+
+        dispatcher = _get_dispatcher()
+        frame = _get_frame()
+        if dispatcher is None or frame is None:
+            return False
+
+        for _ in range(count):
+            dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
+
         return True
     except Exception:
         return False
@@ -1356,6 +1380,8 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
         "O": lambda: _switch_to_insert("O"),
         "d": lambda: _d_command(pending_keys, key_char),
         "D": lambda: _to_end_of_line(expand, count, "d"),
+        "p": lambda: _paste(count, True),
+        "P": lambda: _paste(count, False),
         "r": lambda: _replace_character(count, pending_keys, key_char),
         "u": lambda: _undo_and_redo(count),
         "U": lambda: _undo_and_redo(count, True),

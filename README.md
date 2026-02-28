@@ -51,6 +51,7 @@ Currently supported Normal mode commands:
 - Operators: `d`
 - Other deletion: `x`, `X`, `D`, `s`
 - Undo/redo: `u`, `C-r`
+- Copy/paste: `p`, `P` 
 
 - Aliases: `/` = default search bar, `Ins` = i, `U` = C-r, `BS` = h 
 
