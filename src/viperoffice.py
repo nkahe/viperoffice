@@ -2,8 +2,9 @@ from __future__ import annotations
 from typing import Any, Callable, Final, TYPE_CHECKING
 import builtins
 import datetime
+import threading
 import unohelper   # This project allow typings for the full LibreOffice API.
-from functools import lru_cache
+from functools import lru_cache  # For compiling word specs.
 from com.sun.star.awt import KeyModifier, XKeyHandler, Key, Rectangle
 from com.sun.star.document import XEventListener
 
@@ -35,16 +36,19 @@ def _state():
             # Has the extension been started. Will only be set to true.
             "started": False,
             "enabled": False,
-            # Current vi input mode. Can be "normal", "insert" or "pending".
+            # Current vi input mode. Can be currently "normal", "insert" or "pending".
             "mode": "normal",
-            # Visible cursor.
+            # Visible cursor. Type is XViewCursor UNO object.
             "view_cursor": None,
             # An optional number that may precede the command to multiply or
-            # iterate the command.
+            # iterate the command. Type int.
             "count": 0,
-            # Pending commands like 'd' or 'g'.
+            # Pending commands like 'd' or 'dg'. Type str | None.
             "pending_keys": None,
             "key_handler": None,
+            # Saved cursor position if for example position need to be
+            # restored after motion.
+            "cursor_position": None,
             # Python UNO may leave stale key-handler registrations attached even
             # after removeKeyHandler(); token guards ensure only the latest
             # generation can execute commands.
@@ -159,6 +163,16 @@ def _reset_pending_keys():
     _state()["pending_keys"] = None
     _update_statusline()
 
+
+def _set_position(position) -> bool:
+    if position is None:
+        return False
+    _state()["cursor_position"] = position
+    return True
+
+
+def _get_position():
+    return _state()["cursor_position"]
 
 # ------------------------
 # General helper functions
@@ -395,9 +409,11 @@ def _yank_and_delete(yank:bool, delete:bool) -> bool:
             if dispatcher is None or frame is None:
                 return False
             dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
+            return True
         if delete:
             if text_cursor is not None:
                 text_cursor.setString("")
+        return True
     except Exception:
         return False
 
@@ -1347,6 +1363,53 @@ def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
     return False
 
 
+def _y_command(pending_keys:str|None, key_char:str) -> bool:
+    """Yanks text {motion} moves over"""
+    # msg(f"d-command: {pending_keys=} {key_char}")
+
+    if key_char == "Y":
+        cursor = _get_cursor()
+        text_cursor = _get_text_cursor()
+        if cursor is None or text_cursor is None:
+            return False
+        # collapse to pos 0 (char under cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        _to_end_of_line(True, 1, None)
+        _yank_and_delete(True, False)
+        return True
+
+    if pending_keys is None:
+        cursor = _get_cursor()
+        _set_position(cursor.getStart())
+        _add_pending_key("y")
+        _goto_mode("pending")
+        return True
+
+    elif pending_keys in ("y", "yg"):
+        if key_char == "y" :  # 'dd'
+            msg("yy pressed!")
+        else:
+            _yank_and_delete(True, False)
+            position = _get_position()
+            cursor = _get_cursor()
+            if position is not None and cursor is not None:
+                # Keep yanked range visually selected briefly, then restore cursor.
+                # Use _set_mode instead of _goto_mode so the selection isn't
+                # collapsed immediately by _show_normal_cursor().
+                def _flash_restore():
+                    cursor.gotoRange(position, False)
+                    _show_normal_cursor()
+                threading.Timer(0.08, _flash_restore).start()
+                _reset_pending_keys()
+                _set_mode("normal")
+                return True
+
+        _reset_pending_keys()
+        _goto_mode("normal")
+        return True
+    return False
+
+
 def _replace_character(count:int, pending_keys, key_char:str) -> bool:
     """Replace character(s) under cursor with {key_char}.
        With {count} replace {count} characters with {count} {key_char}.
@@ -1405,12 +1468,12 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
     motions = {
         "h": lambda: _charwise_motion("h", count, expand),
         "l": lambda: _charwise_motion("l", count, expand),
-        "w": lambda: _word_motion(_WORD_MOTION_W, False, count, pending_keys),
-        "W": lambda: _word_motion(_WORD_MOTION_BIG_W, False, count, pending_keys),
-        "e": lambda: _word_motion(_WORD_MOTION_E, False, count, pending_keys),
-        "E": lambda: _word_motion(_WORD_MOTION_BIG_E, False, count, pending_keys),
-        "b": lambda: _word_motion(_WORD_MOTION_B, False, count, pending_keys),
-        "B": lambda: _word_motion(_WORD_MOTION_BIG_B, False, count, pending_keys),
+        "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
+        "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
+        "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
+        "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, pending_keys),
+        "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, pending_keys),
+        "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, pending_keys),
         "$": lambda: _to_end_of_line(expand, count, pending_keys),
         "^": lambda: _to_start_of_line(expand, True),
         "H": lambda: _jump_to_page(expand, "start", pending_keys),
@@ -1540,13 +1603,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         motion = motions.get(key_char)
         if motion is not None:
             post_action = None  # Done after action.
-            if pending_keys == "d":
+            if pending_keys in ("d", "y"):
                 if key_char == "g":  # dg
                     post_action = motions.get("g")
                 else:
-                    post_action = normal_actions.get("d")
-            elif pending_keys == "dg":
-                post_action = normal_actions.get("d")
+                    post_action = normal_actions.get(pending_keys)
+            elif pending_keys in ("dg", "yg"):
+                post_action = normal_actions.get(pending_keys)
             return self._consume_active_event(motion, post_action)
 
         # No supported currently since didn't match "dgg" so cancel.
@@ -1558,12 +1621,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Other Normal mode commands
         action = normal_actions.get(key_char)
         if action is not None:
-            if pending_keys == "d":
-                if key_char == "d":   # dd
+            if pending_keys in ("d", "y"):
+                if key_char == pending_keys:   # dd, yy
                     return self._consume_active_event(action)
                 if key_char == "g": # dgg
                    return self._consume_active_event(
-                        lambda: normal_actions.get("d"),
+                        lambda: normal_actions.get(pending_keys),
                     )
 
                 # other non-d command: cancel
