@@ -383,18 +383,21 @@ def _charwise_motion(cmd:str, count:int, expand:bool) -> bool:
     return False
 
 
-def _yank_and_delete() -> bool:
-    """Yank current selection to clipboard and delete it."""
+def _yank_and_delete(yank:bool, delete:bool) -> bool:
+    """Yank and/or delete current selection to clipboard."""
     try:
-        text_cursor = _get_text_cursor()
-        dispatcher = _get_dispatcher()
-        frame = _get_frame()
-        if dispatcher is None or frame is None:
+        if not yank and not delete:
             return False
-        dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
-        if text_cursor is not None:
-            text_cursor.setString("")
-        return True
+        text_cursor = _get_text_cursor()
+        if yank:
+            dispatcher = _get_dispatcher()
+            frame = _get_frame()
+            if dispatcher is None or frame is None:
+                return False
+            dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
+        if delete:
+            if text_cursor is not None:
+                text_cursor.setString("")
     except Exception:
         return False
 
@@ -1312,10 +1315,19 @@ def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) 
     return False
 
 
-def _d_command(pending_keys:str|None, key_char:str) -> bool:
+def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
     """Delete text {motion} moves over"""
 
-    # msg(f"d-command: {pending_keys=} {key_char}")
+    if key_char == "D":
+        cursor = _get_cursor()
+        text_cursor = _get_text_cursor()
+        if cursor is None or text_cursor is None:
+            return False
+        # collapse to pos 0 (char under cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        _to_end_of_line(True, count, None),
+        _yank_and_delete(True, True)
+        return True
 
     if pending_keys is None:
         _add_pending_key("d")
@@ -1323,18 +1335,15 @@ def _d_command(pending_keys:str|None, key_char:str) -> bool:
         return True
 
     elif pending_keys in ("d", "dg"):
-
         if key_char == "d" :  # 'dd'
             msg("dd pressed!")
         else:
-            _yank_and_delete()
+            _yank_and_delete(True, True)
             # _yank()
             # _delete()
-
         _reset_pending_keys()
         _goto_mode("normal")
         return True
-
     return False
 
 
@@ -1378,8 +1387,9 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
         "A": lambda: _switch_to_insert("A"),
         "o": lambda: _switch_to_insert("o"),
         "O": lambda: _switch_to_insert("O"),
-        "d": lambda: _d_command(pending_keys, key_char),
-        "D": lambda: _to_end_of_line(expand, count, "d"),
+        "d": lambda: _delete_command(count, pending_keys, key_char),
+        "D": lambda: _delete_command(count, pending_keys, key_char),
+        "y": lambda: _y_command(pending_keys, key_char),
         "p": lambda: _paste(count, True),
         "P": lambda: _paste(count, False),
         "r": lambda: _replace_character(count, pending_keys, key_char),
@@ -1540,7 +1550,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_active_event(motion, post_action)
 
         # No supported currently since didn't match "dgg" so cancel.
-        if pending_keys == "dg":
+        if pending_keys in ("dg", "yg"):
             _reset_pending_keys()
             _set_mode("normal")
             return True
@@ -1548,9 +1558,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Other Normal mode commands
         action = normal_actions.get(key_char)
         if action is not None:
-            if key_char == "D":
-                _add_pending_key("d")
-                return self._consume_active_event(action)
             if pending_keys == "d":
                 if key_char == "d":   # dd
                     return self._consume_active_event(action)
