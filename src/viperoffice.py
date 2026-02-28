@@ -1,20 +1,14 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import Any, Callable, Final, TYPE_CHECKING
 import builtins
 import datetime
 import unohelper   # This project allow typings for the full LibreOffice API.
 from functools import lru_cache
-from typing import Any, Callable, Final
-
-from com.sun.star.awt import KeyModifier
-from com.sun.star.awt import XKeyHandler
-from com.sun.star.awt import Key
-from com.sun.star.awt import Rectangle
+from com.sun.star.awt import KeyModifier, XKeyHandler, Key, Rectangle
 from com.sun.star.document import XEventListener
 
 if TYPE_CHECKING:
     from com.sun.star.text import XViewCursor
-
 
 # ------------
 # Global state
@@ -60,6 +54,20 @@ def _state():
         }
         setattr(builtins, key, state)
     return state
+
+
+def _get_cursor():
+    return _state()["view_cursor"]
+
+
+def _get_text_cursor():
+    cursor = _get_cursor()
+    if cursor is None:
+        return None
+    try:
+        return cursor.getText().createTextCursorByRange(cursor)
+    except Exception:
+        return None
 
 
 def _set_mode(new_mode: str) -> bool:
@@ -130,7 +138,7 @@ def _get_pending_keys() -> None|str:
 
 def _add_pending_key(new_key:str) -> bool:
     pending_keys = _state()["pending_keys"]
-    # _msgbox(f"{new_key=} {pending_keys=}")
+    # msg(f"{new_key=} {pending_keys=}")
     if new_key == "g":
         if pending_keys not in (None, "d"):
             return False
@@ -194,20 +202,6 @@ def _get_frame():
         return None
 
 
-def _get_cursor():
-    return _state()["view_cursor"]
-
-
-def _get_text_cursor():
-    cursor = _get_cursor()
-    if cursor is None:
-        return None
-    try:
-        return cursor.getText().createTextCursorByRange(cursor)
-    except Exception:
-        return None
-
-
 # For debugging
 
 def _dbg(msg):
@@ -221,7 +215,7 @@ def _dbg(msg):
         pass
 
 
-def _msgbox(text, title="ViperOffice"):
+def msg(text, title="ViperOffice"):
     try:
         controller = _current_controller()
         if controller is None:
@@ -247,7 +241,7 @@ def _debug_cursor_state():
     """Show debug info about view cursor and text cursor ranges. For development use."""
     cursor = _get_cursor()
     if cursor is None:
-        _msgbox("No view cursor available.", "ViperOffice cursor debug")
+        msg("No view cursor available.", "ViperOffice cursor debug")
         return
     try:
         text_cursor = _get_text_cursor()
@@ -284,9 +278,9 @@ def _debug_cursor_state():
             except Exception as e:
                 lines.append(f"TextCursor info error: {e}")
 
-        _msgbox("\n".join(lines), "ViperOffice cursor debug")
+        msg("\n".join(lines), "ViperOffice cursor debug")
     except Exception as e:
-        _msgbox(f"Error: {e}", "ViperOffice cursor debug")
+        msg(f"Error: {e}", "ViperOffice cursor debug")
 
 
 # ------------
@@ -371,29 +365,11 @@ def _goto_mode(mode_name: str) -> bool:
 
 
 # Commands 'h', 'j', 'k', 'l'.
-def _charwise_motion(cmd:str, count:int, expand:bool, pending_keys:str|None) -> bool:
+def _charwise_motion(cmd:str, count:int, expand:bool) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
-        if pending_keys == "d":
-            textCursor = _get_text_cursor()
-            if textCursor is None:
-                return False
-            textCursor.gotoRange(textCursor.getStart(), False)
-            if cmd == "h":
-                moved = textCursor.goLeft(count, True)
-            elif cmd == "l":
-                moved = textCursor.goRight(count, True)
-            else:
-                return False
-            if not moved:
-                return False
-            textCursor.setString("")
-            _reset_pending_keys()
-            _set_mode("normal")
-            return True
-
         if cmd == "h":
             return bool(cursor.goLeft(count, expand))
         if cmd == "l":
@@ -433,16 +409,11 @@ def _delete() -> bool:
 
 
 def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
-    """Motion to start of line. Commands '0' and '^'.
-    Args:
-    expand : Expand selection
-    first_non_blank : To first non blank character.
-    """
+    """Motion to start of line. Commands '0' and '^'."""
 
     cursor = _get_cursor()
     if cursor is None:
         return False
-
     try:
         if not first_non_blank:
             return bool(cursor.gotoStartOfLine(expand))
@@ -462,7 +433,6 @@ def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
 
         cursor.gotoStartOfLine(True)
         line_text = cursor.getString()
-
         cursor.gotoRange(text_cursor, False)
         cursor.gotoStartOfLine(expand)
 
@@ -477,7 +447,6 @@ def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
         if i > 0:
             cursor.goRight(i, expand)
         return True
-
     except Exception:
         return False
 
@@ -487,7 +456,6 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
-
     try:
         if count > 1:
             cursor.goDown(count - 1, expand)
@@ -507,9 +475,7 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
             # to previous line end unless this was an empty-line no-op.
             if cursor.isAtStartOfLine() and old_y != new_y:
                 cursor.goLeft(1, expand)
-
         return True
-
     except Exception:
         return False
 
@@ -1287,13 +1253,13 @@ def _scroll_window(forward:bool, halfpage=False) -> bool:
         return False
 
 
-def _jump_to_page(expand: bool, target: str, operator: str | None) -> bool:
+def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
     try:
         cursor = _get_cursor()
         if cursor is None:
             return False
         if target is "start":
-            return bool(cursor.jumpToStartOfPage())
+            return bool(cursor.jumpToStartOfPage(expand))
         else:
             return False
     except Exception:
@@ -1302,6 +1268,7 @@ def _jump_to_page(expand: bool, target: str, operator: str | None) -> bool:
 
 def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) -> bool:
     """Handle g -commands"""
+    # msg(f"{pending_keys=} {key_char=}")
     if pending_keys in (None, "d"):
         _add_pending_key("g")
         return True
@@ -1323,6 +1290,9 @@ def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) 
 
 def _d_command(pending_keys:str|None, key_char:str) -> bool:
     """Delete text {motion} moves over"""
+
+    # msg(f"d-command: {pending_keys=} {key_char}")
+
     if pending_keys is None:
         _add_pending_key("d")
         _goto_mode("pending")
@@ -1331,10 +1301,11 @@ def _d_command(pending_keys:str|None, key_char:str) -> bool:
     elif pending_keys in ("d", "dg"):
 
         if key_char == "d" :  # 'dd'
-            _msgbox("dd pressed!")
+            msg("dd pressed!")
         else:
-            _yank()
-            _delete()
+            _yank_and_delete()
+            # _yank()
+            # _delete()
 
         _reset_pending_keys()
         _goto_mode("normal")
@@ -1547,8 +1518,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_digit_char(key_char):
             if key_char != "0" or _get_raw_count() > 0:
                 _add_to_count(int(key_char))
-                # _msgbox(f"count {int(key_char)}")
-                return self._consume_active_event(None, pending_keys)
+                # msg(f"count {int(key_char)}")
+                return self._consume_active_event(None)
 
         # ----- Non-character keys -----
 
@@ -1724,7 +1695,7 @@ def _is_ctrl_shift(mods):
     )
 
 
-def _is_altgr_char_event(event, key_char, key_code):
+def _is_altgr_char(event, key_char, key_code) -> bool:
     if not (isinstance(key_char, str) and len(key_char) == 1 and ord(key_char) >= 32):
         return False
     mods = _event_modifiers(event)
@@ -2019,6 +1990,7 @@ def _initialize():
 
 
 def enable_viper_office():
+    """Enable ViperOffice"""
     state = _state()
     if not state["started"]:
         _initialize()
@@ -2032,6 +2004,7 @@ def enable_viper_office():
 
 
 def disable_viper_office():
+    """Disable ViperOffice"""
     state = _state()
     state["enabled"] = False
     _restore_status_all_views()
@@ -2039,6 +2012,7 @@ def disable_viper_office():
 
 
 def toggle_viper_office():
+    """Toggle enabling of ViperOffice"""
     state = _state()
     if state["enabled"] is True:
         disable_viper_office()
