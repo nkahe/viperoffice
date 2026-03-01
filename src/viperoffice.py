@@ -1259,7 +1259,7 @@ def _undo_and_redo(count=1, redo=False) -> bool:
         return False
 
 
-def _scroll_window(forward:bool, halfpage=False) -> bool:
+def _scroll_window(count:int, forward:bool, halfpage=False) -> bool:
     """Scroll window by one page. Commands 'C-f' (forward) and 'C-b' (backward).
     """
     try:
@@ -1271,9 +1271,12 @@ def _scroll_window(forward:bool, halfpage=False) -> bool:
             return False
         else:
             if forward:
-                return cursor.screenDown()
+                for _ in range(count):
+                    cursor.screenDown()
             else:
-                return cursor.screenUp()
+                for _ in range(count):
+                    cursor.screenUp()
+            return True
     except Exception:
         return False
 
@@ -1433,10 +1436,10 @@ def _normal_ctrl_actions(count):
 
     actions = {
         c_code: lambda: _reset_pending_keys(),
-        b_code: lambda: _scroll_window(False, False),
-        f_code: lambda: _scroll_window(True, False),
-        d_code: lambda: _scroll_window(True, True),
-        u_code: lambda: _scroll_window(False, True),
+        b_code: lambda: _scroll_window(count, False, False),
+        f_code: lambda: _scroll_window(count, True, False),
+        d_code: lambda: _scroll_window(count, True, True),
+        u_code: lambda: _scroll_window(count, False, True),
         r_code: lambda: _undo_and_redo(count, False),
     }
 
