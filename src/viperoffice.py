@@ -142,14 +142,6 @@ def _get_pending_keys() -> None|str:
 
 def _add_pending_key(new_key:str) -> bool:
     pending_keys = _state()["pending_keys"]
-    # msg(f"{new_key=} {pending_keys=}")
-    if new_key == "g":
-        if pending_keys not in (None, "d"):
-            return False
-    if new_key == "d":
-        if pending_keys is not None:
-            return False
-
     if pending_keys == None:
         _state()["pending_keys"] = new_key
     else:
@@ -1311,7 +1303,7 @@ def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
 def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) -> bool:
     """Handle g -commands"""
     # msg(f"{pending_keys=} {key_char=}")
-    if pending_keys in (None, "d"):
+    if pending_keys in (None, "d", "y"):
         _add_pending_key("g")
         return True
 
@@ -1323,8 +1315,6 @@ def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) 
             _to_line(expand, 1)
         else:
             _to_line(expand, raw_count)
-        # if pending_keys[0] == "d":
-        #     _d_command(pending_keys, key_char)
         return True
     # Unknown g+key: cancel silently.
     return False
@@ -1340,7 +1330,7 @@ def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
             return False
         # collapse to pos 0 (char under cursor)
         cursor.gotoRange(text_cursor.getStart(), False)
-        _to_end_of_line(True, count, None),
+        _to_end_of_line(True, count, None)
         _yank_and_delete(True, True)
         return True
 
@@ -1349,13 +1339,11 @@ def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
         _goto_mode("pending")
         return True
 
-    elif pending_keys in ("d", "dg"):
+    if pending_keys in ("d", "dg"):
         if key_char == "d" :  # 'dd'
             msg("dd pressed!")
         else:
             _yank_and_delete(True, True)
-            # _yank()
-            # _delete()
         _reset_pending_keys()
         _goto_mode("normal")
         return True
@@ -1529,7 +1517,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _reset_count()
             if post_action is not None:
                 post_action()
-
         return True
 
     def keyPressed(self, event):
@@ -1552,13 +1539,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_code: int = _key_code(event)
         is_ctrl: bool = _is_only_ctrl(mods)
         is_escape: bool = _is_escape(key_code, is_ctrl)
+        post_action = None
+
+        normal_actions, motions = _normal_actions(
+            key_char, expand, count, raw_count, pending_keys
+        )
 
         # msg(f"{expand=} {raw_count=} {pending_keys=} {key_char=} {key_code=}")
 
         # Route all input if these keys are pending.
-        if pending_keys == "g":
+        if pending_keys is not None and "g" in pending_keys:
+            if pending_keys == "dg":
+                post_action = lambda: (fn := normal_actions.get("d")) and fn()
+            elif pending_keys == "yg":
+                post_action = lambda: (fn := normal_actions.get("y")) and fn()
             return self._consume_active_event(
-                lambda: _g_command(expand, raw_count, pending_keys, key_char)
+                lambda: _g_command(expand, raw_count, pending_keys, key_char),
+                post_action
             )
         if pending_keys == "r":
             if key_char.isprintable() or key_code in (1280, 1282):  # enter, tab
@@ -1595,21 +1592,19 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # ----- Keys without modifiers after this ----
 
-        normal_actions, motions = _normal_actions(
-            key_char, expand, count, raw_count, pending_keys
-        )
 
         # Match motions that operators support.
         motion = motions.get(key_char)
         if motion is not None:
-            post_action = None  # Done after action.
-            if pending_keys in ("d", "y"):
+            if pending_keys in ("y", "d"):
                 if key_char == "g":  # dg, yg
-                    post_action = motions.get("g")
+                    post_action = lambda: (fn := normal_actions.get("g")) and fn()
                 else:
-                    post_action = normal_actions.get(pending_keys)
-            elif pending_keys in ("dg", "yg"):
-                post_action = normal_actions.get(pending_keys[0])
+                    post_action = lambda: (
+                        fn := normal_actions.get(pending_keys)) and fn(
+                    )
+            # elif pending_keys in ("dg", "yg"):
+            #     post_action = normal_actions.get(pending_keys[0])
             return self._consume_active_event(motion, post_action)
 
         # No supported currently since didn't match "dgg" so cancel.
