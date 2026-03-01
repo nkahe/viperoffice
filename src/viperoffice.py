@@ -131,11 +131,6 @@ def _get_raw_count() -> int:
     return _state().get("count", 0)
 
 
-def _is_count_set() -> bool:
-    count = _state().get("count", 0)
-    return bool(count != 0)
-
-
 def _get_pending_keys() -> None|str:
     return _state().get("pending_keys", None)
 
@@ -156,11 +151,14 @@ def _reset_pending_keys():
     _update_statusline()
 
 
-def _set_position(position) -> bool:
-    if position is None:
+def _set_position() -> bool:
+    """Save current view cursor position"""
+    try:
+        cursor = _get_cursor()
+        _state()["cursor_position"] = cursor.getStart()
+        return True
+    except Exception:
         return False
-    _state()["cursor_position"] = position
-    return True
 
 
 def _get_position():
@@ -356,6 +354,7 @@ def _goto_mode(mode_name: str) -> bool:
     elif mode_name == "insert":
         _show_insert_cursor()
     elif mode_name == "pending":
+        # _set_position()
         controller = _current_controller()
         if controller is not None:
             text_cursor = _get_text_cursor()
@@ -392,8 +391,8 @@ def _charwise_motion(cmd:str, count:int, expand:bool) -> bool:
 def _yank_and_delete(yank:bool, delete:bool) -> bool:
     """Yank and/or delete current selection to clipboard."""
     try:
-        # if yank is False and delete is False:
-        #     return False
+        if yank == False and delete == False:
+            return False
         text_cursor = _get_text_cursor()
         if yank == True:
             dispatcher = _get_dispatcher()
@@ -697,8 +696,7 @@ def _normalize_motion_range(result, for_operator:bool = False):
 
 def _clone_text_range(text_cursor):
     try:
-        text_obj = text_cursor.getText()
-        return text_obj.createTextCursorByRange(text_cursor.getStart()).getStart()
+        return text_cursor.getStart()
     except Exception:
         return None
 
@@ -733,7 +731,8 @@ def _query_word_motion(spec, count:int, expand:bool=False):
         moved_any = True
         steps_done += 1
 
-    end_range = _clone_text_range(text_cursor)
+    # end_range = _clone_text_range(text_cursor)
+    end_range = text_cursor.getEnd() if expand else _clone_text_range(text_cursor)
 
     result = {
         "moved": moved_any,
@@ -748,7 +747,7 @@ def _query_word_motion(spec, count:int, expand:bool=False):
     return _normalize_motion_range(result)
 
 
-def _apply_motion_result(result, expand:bool, operator:str|None) -> bool:
+def _apply_motion_result(result, expand:bool) -> bool:
     if not isinstance(result, dict) or not result.get("moved", False):
         return False
     end_range = result.get("end_range")
@@ -756,24 +755,7 @@ def _apply_motion_result(result, expand:bool, operator:str|None) -> bool:
     if cursor is None or end_range is None:
         return False
     try:
-        # Move cursor by default.
-        if operator is None:
-            cursor.gotoRange(end_range, expand)
-
-        # Deletion
-        if operator == "d":
-            start_range = result.get("start_range")
-            if start_range is None:
-                return False
-            text = cursor.getText()
-            tc = text.createTextCursorByRange(start_range)
-            tc.gotoRange(end_range, True)
-            tc.setString("")
-            cursor.gotoRange(tc.getStart(), False)
-            _reset_pending_keys()
-            _set_mode("normal")
-        else:
-            return False
+        cursor.gotoRange(end_range, expand)
     except Exception:
         return False
     return True
@@ -968,14 +950,20 @@ def _word_motion(
         if not _validate_word_motion_spec(spec):
             return False
         if expand:
-            # Keep selection behavior by applying one step at a time.
+            if operator is not None:
+                # Operator: query collapsed so start/end ranges are accurate.
+                result = _query_word_motion(spec, count, expand=False)
+                if not result.get("moved", False):
+                    return False
+                return _apply_motion_result(result, expand)
+            # Visual mode: step-by-step so selection updates incrementally.
             steps = max(1, int(count))
             moved_any = False
             for _ in range(steps):
                 result = _query_word_motion(spec, 1, expand=True)
                 if not result.get("moved", False):
                     break
-                if not _apply_motion_result(result, expand, operator):
+                if not _apply_motion_result(result, expand):
                     break
                 moved_any = True
             return moved_any
@@ -984,7 +972,7 @@ def _word_motion(
         if not result.get("moved", False):
             return False
 
-        return _apply_motion_result(result, expand, operator)
+        return _apply_motion_result(result, expand)
     except Exception:
         return False
 
@@ -1366,8 +1354,7 @@ def _y_command(pending_keys:str|None, key_char:str) -> bool:
         return True
 
     if pending_keys is None:
-        cursor = _get_cursor()
-        _set_position(cursor.getStart())
+        _set_position()
         _add_pending_key("y")
         _goto_mode("pending")
         return True
@@ -1507,7 +1494,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return self._token == _state().get("active_handler_token")
 
     # Consume {action} and after that {post_action} if set.
-    def _consume_active_event(self, action, post_action=None) -> bool:
+    def _consume_action(self, action, post_action=None) -> bool:
         if action is not None:
             action()
             # Can't be passed as parameter since that might been updated.
@@ -1539,7 +1526,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key_code: int = _key_code(event)
         is_ctrl: bool = _is_only_ctrl(mods)
         is_escape: bool = _is_escape(key_code, is_ctrl)
-        post_action = None
+        post_action: Callable[[], None] | None = None
 
         normal_actions, motions = _normal_actions(
             key_char, expand, count, raw_count, pending_keys
@@ -1553,13 +1540,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 post_action = lambda: (fn := normal_actions.get("d")) and fn()
             elif pending_keys == "yg":
                 post_action = lambda: (fn := normal_actions.get("y")) and fn()
-            return self._consume_active_event(
+            return self._consume_action(
                 lambda: _g_command(expand, raw_count, pending_keys, key_char),
                 post_action
             )
         if pending_keys == "r":
             if key_char.isprintable() or key_code in (1280, 1282):  # enter, tab
-                return self._consume_active_event(
+                return self._consume_action(
                     lambda: _replace_character(count, pending_keys, key_char)
                 )
             _reset_pending_keys()
@@ -1567,7 +1554,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if mode == "insert":
             if is_escape or (is_ctrl and key_code == 514):  # C-c
-                return self._consume_active_event(_leave_insert_to_normal)
+                return self._consume_action(_leave_insert_to_normal)
             return False
 
         # ----- Non-Insert mode after this -----
@@ -1580,7 +1567,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             action = actions.get(key_code)
 
             if action is not None:
-                return self._consume_active_event(action)
+                return self._consume_action(action)
             else:
                 return False
 
@@ -1605,7 +1592,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                     )
             # elif pending_keys in ("dg", "yg"):
             #     post_action = normal_actions.get(pending_keys[0])
-            return self._consume_active_event(motion, post_action)
+            return self._consume_action(motion, post_action)
 
         # No supported currently since didn't match "dgg" so cancel.
         if pending_keys in ("dg", "yg"):
@@ -1618,9 +1605,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if action is not None:
             if pending_keys in ("d", "y"):
                 if key_char == pending_keys:   # dd, yy
-                    return self._consume_active_event(action)
+                    return self._consume_action(action)
                 if key_char == "g": # dgg
-                   return self._consume_active_event(
+                   return self._consume_action(
                         lambda: normal_actions.get(pending_keys),
                     )
 
@@ -1629,14 +1616,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _set_mode("normal")
                 return True
             else:
-                return self._consume_active_event(action)
+                return self._consume_action(action)
 
         # action = normal_actions.get(key_char) or motions.get(key_char)
         # if action is not None:
         #     return self._consume_active_event(action)
 
         if _is_backspace_key(event):
-            return self._consume_active_event(
+            return self._consume_action(
                 lambda: _charwise_motion("h", count, False)
             )
 
@@ -1647,7 +1634,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if key_char != "0" or _get_raw_count() > 0:
                 _add_to_count(int(key_char))
                 # msg(f"count {int(key_char)}")
-                return self._consume_active_event(None)
+                return self._consume_action(None)
 
         # ----- Non-character keys -----
 
@@ -1669,14 +1656,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _set_mode("normal")
             return False
         if is_escape:
-            return self._consume_active_event(lambda: _goto_mode("normal"))
+            return self._consume_action(lambda: _goto_mode("normal"))
         # Deliberately cancels operator pending mode.
         if _is_delete_key(event):
-            return self._consume_active_event(_delete_characters)
+            return self._consume_action(_delete_characters)
         if _is_insert_key(event):
-            return self._consume_active_event(lambda: _switch_to_insert("i"))
+            return self._consume_action(lambda: _switch_to_insert("i"))
 
-        return self._consume_active_event(None)
+        return self._consume_action(None)
     # -----------------------------------------
     def keyReleased(self, event):
         state = _state()
