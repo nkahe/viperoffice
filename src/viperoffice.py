@@ -1336,7 +1336,14 @@ def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
 
     if pending_keys in ("d", "dg"):
         if key_char == "d" :  # 'dd'
-            msg("dd pressed!")
+            controller = _current_controller()
+            if controller is None:
+                return False
+            _to_start_of_line(False, False)
+            _charwise_motion("j", count, True)
+            text_cursor = _get_text_cursor()
+            controller.select(text_cursor)
+            _yank_and_delete(True, True)
         else:
             _yank_and_delete(True, True)
         _reset_pending_keys()

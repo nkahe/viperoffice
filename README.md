@@ -48,10 +48,9 @@ Currently supported Normal mode commands:
 - Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `()`, `H`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
-- Operators: `d`
-- Other deletion: `x`, `X`, `D`, `s`
+- Deletion: `x`, `X`, `d`, `dd`, `D`, `s`
 - Undo/redo: `u`, `C-r`
-- Copy/paste: `p`, `P` 
+- Copy/paste: `y`, `p`, `P` 
 
 - Aliases: `/` = default search bar, `Ins` = i, `U` = C-r, `BS` = h 
 
