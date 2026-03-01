@@ -1336,23 +1336,17 @@ def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
 
     if pending_keys in ("d", "dg"):
         if key_char == "d" :  # 'dd'
-            controller = _current_controller()
-            if controller is None:
-                return False
             _to_start_of_line(False, False)
             _charwise_motion("j", count, True)
-            text_cursor = _get_text_cursor()
-            controller.select(text_cursor)
-            _yank_and_delete(True, True)
-        else:
-            _yank_and_delete(True, True)
+
+        _yank_and_delete(True, True)
         _reset_pending_keys()
         _goto_mode("normal")
         return True
     return False
 
 
-def _y_command(pending_keys:str|None, key_char:str) -> bool:
+def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
     """Yanks text {motion} moves over"""
     # msg(f"d-command: {pending_keys=} {key_char}")
 
@@ -1374,27 +1368,25 @@ def _y_command(pending_keys:str|None, key_char:str) -> bool:
         return True
 
     elif pending_keys in ("y", "yg"):
-        if key_char == "y" :  # 'dd'
-            msg("yy pressed!")
-        else:
-            _yank_and_delete(True, False)
-            position = _get_position()
-            cursor = _get_cursor()
-            if position is not None and cursor is not None:
-                # Keep yanked range visually selected briefly, then restore cursor.
-                # Use _set_mode instead of _goto_mode so the selection isn't
-                # collapsed immediately by _show_normal_cursor().
-                def _flash_restore():
-                    cursor.gotoRange(position, False)
-                    _show_normal_cursor()
-                threading.Timer(0.08, _flash_restore).start()
-                _reset_pending_keys()
-                _set_mode("normal")
-                return True
+        if key_char == "y" :  # 'yy'
+            _to_start_of_line(False, False)
+            _charwise_motion("j", count, True)
 
-        _reset_pending_keys()
-        _goto_mode("normal")
-        return True
+        _yank_and_delete(True, False)
+        position = _get_position()
+        cursor = _get_cursor()
+        if position is not None and cursor is not None:
+            # Keep yanked range visually selected briefly, then restore cursor.
+            # Use _set_mode instead of _goto_mode so the selection isn't
+            # collapsed immediately by _show_normal_cursor().
+            def _flash_restore():
+                cursor.gotoRange(position, False)
+                _show_normal_cursor()
+            threading.Timer(0.08, _flash_restore).start()
+            _reset_pending_keys()
+            _set_mode("normal")
+            return True
+
     return False
 
 
@@ -1460,7 +1452,7 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
         "O": lambda: _switch_to_insert("O"),
         "d": lambda: _delete_command(count, pending_keys, key_char),
         "D": lambda: _delete_command(count, pending_keys, key_char),
-        "y": lambda: _y_command(pending_keys, key_char),
+        "y": lambda: _y_command(count, pending_keys, key_char),
         "p": lambda: _paste(count, True),
         "P": lambda: _paste(count, False),
         "r": lambda: _replace_character(count, pending_keys, key_char),
