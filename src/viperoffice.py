@@ -350,9 +350,11 @@ def _show_insert_cursor():
 #  cursor position is saved.
 def _goto_mode(mode_name: str) -> bool:
     if mode_name == "normal":
+        _reset_pending_keys()
         _show_normal_cursor()
     elif mode_name == "insert":
         _show_insert_cursor()
+        _reset_pending_keys()
     elif mode_name == "pending":
         # _set_position()
         controller = _current_controller()
@@ -1184,6 +1186,8 @@ def _delete_characters(count=1, reverse=False, substitute=False) -> bool:
 
 # Commmand 'Esc',
 def _leave_insert_to_normal():
+    if _get_mode() == "normal":
+        return True
     cursor = _get_cursor()
     if cursor is not None:
         try:
@@ -1191,7 +1195,7 @@ def _leave_insert_to_normal():
                 cursor.goLeft(1, False)
         except Exception:
             pass
-    _goto_mode("normal")
+    return _goto_mode("normal")
 
 
 # Commands 'a', 'I', 'A', 'o' and 'O'.
@@ -1225,7 +1229,7 @@ def _switch_to_insert(cmd:str):
             _to_start_of_line(False, False)
             cursor = _get_cursor()
             if cursor is not None:
-                cursor.setString(chr(13))
+                cursor.setString(chr(13))  # CR
                 if not cursor.isAtStartOfLine():
                     cursor.goLeft(1, False)
                     cursor.setString(chr(13) + chr(13))
@@ -1317,8 +1321,7 @@ def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) 
 
 def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
     """Delete text {motion} moves over"""
-
-    if key_char == "D":
+    if key_char in ("C", "D", "S"):
         cursor = _get_cursor()
         text_cursor = _get_text_cursor()
         if cursor is None or text_cursor is None:
@@ -1327,29 +1330,35 @@ def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
         cursor.gotoRange(text_cursor.getStart(), False)
         _to_end_of_line(True, count, None)
         _yank_and_delete(True, True)
+        if key_char in ("C", "S"):
+            _goto_mode("insert")
+        else:
+            _goto_mode("normal")
         return True
 
     if pending_keys is None:
-        _add_pending_key("d")
-        _goto_mode("pending")
-        return True
+        if key_char in ("c", "d"):
+            _add_pending_key(key_char)
+            _goto_mode("pending")
+            return True
+        return False
 
-    if pending_keys in ("d", "dg"):
-        if key_char == "d" :  # 'dd'
+    if pending_keys in ("d", "dg", "c"):
+        if key_char in ("d", "c") :  # 'dd', 'cc'
             _to_start_of_line(False, False)
             _charwise_motion("j", count, True)
-
         _yank_and_delete(True, True)
-        _reset_pending_keys()
-        _goto_mode("normal")
-        return True
+        if pending_keys[0] == "c":
+            _goto_mode("insert")
+        else:
+            _goto_mode("normal")
+
     return False
 
 
 def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
     """Yanks text {motion} moves over"""
     # msg(f"d-command: {pending_keys=} {key_char}")
-
     if key_char == "Y":
         cursor = _get_cursor()
         text_cursor = _get_text_cursor()
@@ -1357,7 +1366,7 @@ def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
             return False
         # collapse to pos 0 (char under cursor)
         cursor.gotoRange(text_cursor.getStart(), False)
-        _to_end_of_line(True, 1, None)
+        _to_end_of_line(True, count, None)
         _yank_and_delete(True, False)
         return True
 
@@ -1371,7 +1380,6 @@ def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
         if key_char == "y" :  # 'yy'
             _to_start_of_line(False, False)
             _charwise_motion("j", count, True)
-
         _yank_and_delete(True, False)
         position = _get_position()
         cursor = _get_cursor()
@@ -1386,7 +1394,6 @@ def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
             _reset_pending_keys()
             _set_mode("normal")
             return True
-
     return False
 
 
@@ -1442,25 +1449,29 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
     # Motions / commands that are currently not supported by operators. Issuing
     # them while in operator pending mode returns to Normal mode.
     actions = {
+        "c": lambda: _delete_command(count, pending_keys, key_char),
+        "C": lambda: _delete_command(count, pending_keys, key_char),
+        "d": lambda: _delete_command(count, pending_keys, key_char),
+        "D": lambda: _delete_command(count, pending_keys, key_char),
         "j": lambda: _charwise_motion("j", count, False),
         "k": lambda: _charwise_motion("k", count, False),
-        "i": lambda: _switch_to_insert("i"),
+        "i": lambda: _goto_mode("insert"),
         "I": lambda: _switch_to_insert("I"),
         "a": lambda: _switch_to_insert("a"),
         "A": lambda: _switch_to_insert("A"),
         "o": lambda: _switch_to_insert("o"),
         "O": lambda: _switch_to_insert("O"),
-        "d": lambda: _delete_command(count, pending_keys, key_char),
-        "D": lambda: _delete_command(count, pending_keys, key_char),
-        "y": lambda: _y_command(count, pending_keys, key_char),
         "p": lambda: _paste(count, True),
         "P": lambda: _paste(count, False),
         "r": lambda: _replace_character(count, pending_keys, key_char),
         "u": lambda: _undo_and_redo(count),
         "U": lambda: _undo_and_redo(count, True),
         "s": lambda: _delete_characters(count, False, True),
+        "S": lambda: _delete_command(count, pending_keys, key_char),
         "x": lambda: _delete_characters(count, False),
         "X": lambda: _delete_characters(count, True),
+        "y": lambda: _y_command(count, pending_keys, key_char),
+        "Y": lambda: _y_command(count, pending_keys, key_char),
         "/": _focus_findbar,
     }
 
@@ -1589,7 +1600,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Match motions that operators support.
         motion = motions.get(key_char)
         if motion is not None:
-            if pending_keys in ("y", "d"):
+            if pending_keys in ("c", "d", "y"):
                 if key_char == "g":  # dg, yg
                     post_action = lambda: (fn := normal_actions.get("g")) and fn()
                 else:
@@ -1609,7 +1620,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Other Normal mode commands
         action = normal_actions.get(key_char)
         if action is not None:
-            if pending_keys in ("d", "y"):
+            if pending_keys in ("c", "d", "y"):
                 if key_char == pending_keys:   # dd, yy
                     return self._consume_action(action)
                 if key_char == "g": # dgg
