@@ -26,7 +26,7 @@ DEBUG = False
 ISKEYWORD: Final[str] = "@,48-57,_,192-255"
 
 # Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
-MAX_HANDLER_REMOVE_ATTEMPTS = 6
+MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 6
 
 def _state():
     key = "_vipereoffice_state"
@@ -46,8 +46,8 @@ def _state():
             # Pending commands like 'd' or 'dg'. Type str | None.
             "pending_keys": None,
             "key_handler": None,
-            # Saved cursor position if for example position need to be
-            # restored after motion.
+            # Saved cursor position for example position need to be restored
+            # after motion.
             "cursor_position": None,
             # Python UNO may leave stale key-handler registrations attached even
             # after removeKeyHandler(); token guards ensure only the latest
@@ -356,13 +356,13 @@ def _show_insert_cursor():
         pass
 
 
-# Sets Vi input mode handling cursor accordingly.
+# Sets mode handling cursor accordingly. In operator pending and visual modes
+#  cursor position is saved.
 def _goto_mode(mode_name: str) -> bool:
     if mode_name == "normal":
         _show_normal_cursor()
     elif mode_name == "insert":
         _show_insert_cursor()
-    # Operator pending mode only for operator commands.
     elif mode_name == "pending":
         controller = _current_controller()
         if controller is not None:
@@ -400,17 +400,16 @@ def _charwise_motion(cmd:str, count:int, expand:bool) -> bool:
 def _yank_and_delete(yank:bool, delete:bool) -> bool:
     """Yank and/or delete current selection to clipboard."""
     try:
-        if not yank and not delete:
-            return False
+        # if yank is False and delete is False:
+        #     return False
         text_cursor = _get_text_cursor()
-        if yank:
+        if yank == True:
             dispatcher = _get_dispatcher()
             frame = _get_frame()
             if dispatcher is None or frame is None:
                 return False
             dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
-            return True
-        if delete:
+        if delete == True:
             if text_cursor is not None:
                 text_cursor.setString("")
         return True
@@ -1523,6 +1522,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _consume_active_event(self, action, post_action=None) -> bool:
         if action is not None:
             action()
+            # Can't be passed as parameter since that might been updated.
             pending_keys = _get_pending_keys()
             # msg(f"consume_active: {pending_keys=})
             if pending_keys is None:
@@ -1604,12 +1604,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if motion is not None:
             post_action = None  # Done after action.
             if pending_keys in ("d", "y"):
-                if key_char == "g":  # dg
+                if key_char == "g":  # dg, yg
                     post_action = motions.get("g")
                 else:
                     post_action = normal_actions.get(pending_keys)
             elif pending_keys in ("dg", "yg"):
-                post_action = normal_actions.get(pending_keys)
+                post_action = normal_actions.get(pending_keys[0])
             return self._consume_active_event(motion, post_action)
 
         # No supported currently since didn't match "dgg" so cancel.
