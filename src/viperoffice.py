@@ -1275,14 +1275,22 @@ def _scroll_window(forward:bool, halfpage=False) -> bool:
 
 
 def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
+    """Jump to start of page."""
     try:
         cursor = _get_cursor()
         if cursor is None:
             return False
-        if target is "start":
-            return bool(cursor.jumpToStartOfPage(expand))
-        else:
-            return False
+        if target == "start":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToStartOfPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToStartOfPage()
+            return True
+        return False
     except Exception:
         return False
 
@@ -1409,6 +1417,26 @@ def _replace_character(count:int, pending_keys, key_char:str) -> bool:
 # Input handling
 # --------------
 
+def _normal_ctrl_actions(count):
+    b_code = int(getattr(Key, "B", 512))
+    c_code = int(getattr(Key, "C", 514))
+    d_code = int(getattr(Key, "D", 515))
+    f_code = int(getattr(Key, "F", 517))
+    r_code = int(getattr(Key, "R", 529))
+    u_code = int(getattr(Key, "U", 532))
+
+    actions = {
+        c_code: lambda: _reset_pending_keys(),
+        b_code: lambda: _scroll_window(False, False),
+        f_code: lambda: _scroll_window(True, False),
+        d_code: lambda: _scroll_window(True, True),
+        u_code: lambda: _scroll_window(False, True),
+        r_code: lambda: _undo_and_redo(count, False),
+    }
+
+    return actions
+
+
 """Build Normal-mode command dispatch map for character actions."""
 def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys):
 
@@ -1460,26 +1488,6 @@ def _normal_actions(key_char:str, expand, count:int, raw_count:int, pending_keys
         motions["0"] = lambda: _to_start_of_line(expand, False)
 
     return actions, motions
-
-def _normal_ctrl_actions(count):
-    b_code = int(getattr(Key, "B", 512))
-    c_code = int(getattr(Key, "C", 514))
-    d_code = int(getattr(Key, "D", 515))
-    f_code = int(getattr(Key, "F", 517))
-    r_code = int(getattr(Key, "R", 529))
-    u_code = int(getattr(Key, "U", 532))
-
-    actions = {
-        c_code: lambda: _reset_pending_keys(),
-        b_code: lambda: _scroll_window(False, False),
-        f_code: lambda: _scroll_window(True, False),
-        d_code: lambda: _scroll_window(True, True),
-        u_code: lambda: _scroll_window(False, True),
-        r_code: lambda: _undo_and_redo(count, False),
-    }
-
-    return actions
-
 
 # UNO key handler
 # Return values for keyPressed/keyReleased:

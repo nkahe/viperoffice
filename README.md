@@ -45,8 +45,7 @@ they are similar in functionality.
 
 Currently supported Normal mode commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`.
-- Motions supported by operators: `h`, `l`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `()`
-- Other motions: `j`, `k`, `H`
+- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `()`, `H`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
 - Operators: `d`
