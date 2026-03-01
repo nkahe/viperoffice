@@ -13,6 +13,7 @@ which are written in LibreOffice Basic. They are reference and inspiration for
 the project. However, this isn't a direct port and many areas like word based
 motions are completely different.
 
+Goal: VibreOffice was great but goal is to have behavior more glose to Vim.
 
 ## Installation/Usage
 
@@ -44,8 +45,8 @@ they are similar in functionality.
 
 Currently supported Normal mode commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`.
-- Motions supported by operators: `h`, `l`, `$`, `0`, `^`, `w`, `W`, `b`, `B`, `e`, `E` 
-- Other motions: `j`, `k`, `gg`, `G`, `()` ,`H`
+- Motions supported by operators: `h`, `l`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `()`
+- Other motions: `j`, `k`, `H`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
 - Operators: `d`

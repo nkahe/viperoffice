@@ -1007,7 +1007,7 @@ def _is_current_paragraph_empty(text_cursor) -> bool:
 
 def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool):
     edge = text_cursor.getEnd() if expand else text_cursor.getStart()
-    view_cursor.gotoRange(edge, False)
+    view_cursor.gotoRange(edge, expand)
 
 
 def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
@@ -1055,7 +1055,7 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
 
 
 # Repeats ")" motion by count times.
-def _sentences_forward(expand:bool, count:int=1) -> bool:
+def _sentences_forward(expand: bool, count: int = 1) -> bool:
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -1141,8 +1141,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
 
 
 # Repeats "(" motion by count times.
-def _sentences_backwards(expand:bool, count=2) -> bool:
-    # Repeats "(" motion by count times.
+def _sentences_backwards(expand: bool, count: int = 1) -> bool:
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
