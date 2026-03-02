@@ -1663,20 +1663,20 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         expand: bool = _get_mode() in ("visual", "pending")
         motions = self._motions(key, expand, count, pending_keys)
         motion = motions.get(key.char)
-        if motion is not None:
-            # If operator is pending, add it to be done after motion.
-            if "c" in (pending_keys or "") or "d" in (pending_keys or ""):
-                return self._consume_action(motion,
-                    lambda: _delete_command(count, pending_keys, key.char)
-                )
-            elif "y" in (pending_keys or ""):
-                return self._consume_action(motion,
-                    lambda: _y_command(count, pending_keys, key.char)
-                )
-            elif "g" in (pending_keys or ""):
-                return self._consume_action(motion, lambda: _reset_pending_keys())
-            return self._consume_action(motion)
-        return None
+        if motion is None:
+            return None
+        # If operator is pending, add it to be done after motion.
+        if "c" in (pending_keys or "") or "d" in (pending_keys or ""):
+            return self._consume_action(motion,
+                lambda: _delete_command(count, pending_keys, key.char)
+            )
+        elif "y" in (pending_keys or ""):
+            return self._consume_action(motion,
+                lambda: _y_command(count, pending_keys, key.char)
+            )
+        elif "g" in (pending_keys or ""):
+            return self._consume_action(motion, lambda: _reset_pending_keys())
+        return self._consume_action(motion)
 
     def _match_commands(self, key, count, pending_keys):
         normal_actions = self._normal_actions(key, count, pending_keys)
