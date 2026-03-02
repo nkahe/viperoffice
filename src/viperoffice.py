@@ -544,9 +544,10 @@ def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
     if cursor is None:
         return False
     try:
-        if raw_count == 0 and default_end:  # Command 'G'
+        if raw_count == 0 and default_end == True:  # Command 'G'
             cursor.gotoEnd(expand)
             return True
+
         cursor.gotoStart(expand) # Command 'gg'
         if raw_count > 1:
             cursor.goDown(raw_count - 1, expand)
@@ -1332,7 +1333,7 @@ def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
 
 
 def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
-    """Delete text {motion} moves over"""
+    """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
     if key_char in ("C", "D", "S"):
         cursor = _get_cursor()
         text_cursor = _get_text_cursor()
@@ -1457,6 +1458,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _reset_count()
             if post_action is not None:
                 post_action()
+                _reset_count()
         return True
 
     @staticmethod
@@ -1478,92 +1480,74 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     @staticmethod
-    def _normal_actions(key_char:str, expand, count:int, pending_keys):
+    def _normal_actions(key, expand, count:int, raw_count, pending_keys):
         """Build Normal-mode command dispatch map for character actions."""
+
         # Motions / commands that are currently not supported by operators. Issuing
         # them while in operator pending mode returns to Normal mode.
-        actions = {
-            "c": lambda: _delete_command(count, pending_keys, key_char),
-            "C": lambda: _delete_command(count, pending_keys, key_char),
-            "d": lambda: _delete_command(count, pending_keys, key_char),
-            "D": lambda: _delete_command(count, pending_keys, key_char),
-            "g": lambda: KeyHandler._parse_g_commands(count, expand, pending_keys, key_char),
-            "j": lambda: _charwise_motion("j", count, False),
-            "k": lambda: _charwise_motion("k", count, False),
-            "i": lambda: _goto_mode("insert"),
-            "I": lambda: _switch_to_insert("I"),
-            "a": lambda: _switch_to_insert("a"),
-            "A": lambda: _switch_to_insert("A"),
-            "o": lambda: _switch_to_insert("o"),
-            "O": lambda: _switch_to_insert("O"),
-            "p": lambda: _paste(count, True),
-            "P": lambda: _paste(count, False),
-            "r": lambda: _replace_character(count, pending_keys, key_char),
-            "u": lambda: _undo_and_redo(count),
-            "U": lambda: _undo_and_redo(count, True),
-            "s": lambda: _delete_characters(count, False, True),
-            "S": lambda: _delete_command(count, pending_keys, key_char),
-            "x": lambda: _delete_characters(count, False),
-            "X": lambda: _delete_characters(count, True),
-            "y": lambda: _y_command(count, pending_keys, key_char),
-            "Y": lambda: _y_command(count, pending_keys, key_char),
-            "/": _focus_findbar,
-        }
+        if "g" in (pending_keys or ""):
+            actions = {
+            }
+        else:
+            actions = {
+                "c": lambda: _delete_command(count, pending_keys, key.char),
+                "C": lambda: _delete_command(count, pending_keys, key.char),
+                "d": lambda: _delete_command(count, pending_keys, key.char),
+                "D": lambda: _delete_command(count, pending_keys, key.char),
+                "g": lambda: KeyHandler._g_command(pending_keys),
+                "j": lambda: _charwise_motion("j", count, False),
+                "k": lambda: _charwise_motion("k", count, False),
+                "i": lambda: _goto_mode("insert"),
+                "I": lambda: _switch_to_insert("I"),
+                "a": lambda: _switch_to_insert("a"),
+                "A": lambda: _switch_to_insert("A"),
+                "o": lambda: _switch_to_insert("o"),
+                "O": lambda: _switch_to_insert("O"),
+                "p": lambda: _paste(count, True),
+                "P": lambda: _paste(count, False),
+                "r": lambda: _replace_character(count, pending_keys, key.char),
+                "u": lambda: _undo_and_redo(count),
+                "U": lambda: _undo_and_redo(count, True),
+                "s": lambda: _delete_characters(count, False, True),
+                "S": lambda: _delete_command(count, pending_keys, key.char),
+                "x": lambda: _delete_characters(count, False),
+                "X": lambda: _delete_characters(count, True),
+                "y": lambda: _y_command(count, pending_keys, key.char),
+                "Y": lambda: _y_command(count, pending_keys, key.char),
+                "/": _focus_findbar,
+            }
 
         # Motions that currently support operators like "d".
-        motions = {
-            "h": lambda: _charwise_motion("h", count, expand),
-            "l": lambda: _charwise_motion("l", count, expand),
-            "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
-            "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
-            "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
-            "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, pending_keys),
-            "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, pending_keys),
-            "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, pending_keys),
-            "$": lambda: _to_end_of_line(expand, count, pending_keys),
-            "^": lambda: _to_start_of_line(expand, True),
-            "H": lambda: _jump_to_page(expand, "start", pending_keys),
-            "G": lambda: _to_line(expand, _get_raw_count(), True),
-            ")": lambda: _sentences_forward(expand, count),
-            "(": lambda: _sentences_backwards(expand, count),
-        }
 
-        if key_char == "0" and _get_raw_count() == 0:
-            motions["0"] = lambda: _to_start_of_line(expand, False)
+        if "g" in (pending_keys or ""):
+            motions = {
+                "g": lambda: _to_line(expand, _get_raw_count(), False),
+                "e": lambda: _word_motion(_WORD_MOTION_GE, expand, count, pending_keys),
+                "E": lambda: _word_motion(_WORD_MOTION_G_BIG_E, expand, count, pending_keys)
+            }
+        else:
+            motions = {
+                "h": lambda: _charwise_motion("h", count, expand),
+                "l": lambda: _charwise_motion("l", count, expand),
+                "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
+                "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
+                "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
+                "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, pending_keys),
+                "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, pending_keys),
+                "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, pending_keys),
+                "$": lambda: _to_end_of_line(expand, count, pending_keys),
+                "^": lambda: _to_start_of_line(expand, True),
+                "H": lambda: _jump_to_page(expand, "start", pending_keys),
+                "G": lambda: _to_line(expand, _get_raw_count(), True),
+                ")": lambda: _sentences_forward(expand, count),
+                "(": lambda: _sentences_backwards(expand, count),
+            }
+            if key.char == "0" and _get_raw_count() == 0:
+                motions["0"] = lambda: _to_start_of_line(expand, False)
 
         return actions, motions
 
-    @staticmethod
-    def _parse_g_commands(count:int, expand:bool, pending_keys:str|None, key_char:str) -> bool:
-        """Handle g-commands (gg, ge, gE)."""
-        # msg(f"{pending_keys=} {key_char=}")
-        if pending_keys in (None, "d", "y", "c"):
-            _add_pending_key("g")
-            return True
-
-        # operator prefix if any (e.g. "dg" → "d", "yg" → "y")
-        operator = pending_keys[0] if pending_keys and len(pending_keys) == 2 else None
-        _reset_pending_keys()
-        if key_char == "g":
-            _to_line(expand or operator is not None, _get_raw_count(), False)
-            if operator == "d":
-                _yank_and_delete(True, True)
-                _goto_mode("normal")
-            elif operator == "y":
-                _yank_and_delete(True, False)
-            elif operator == "c":
-                _yank_and_delete(True, True)
-                _goto_mode("insert")
-            return True
-        if key_char == "e":
-            return _word_motion(_WORD_MOTION_GE, expand, count, pending_keys)
-        if key_char == "E":
-            return _word_motion(_WORD_MOTION_G_BIG_E, expand, count, pending_keys)
-
-        # Unknown g+key: cancel silently.
-        _goto_mode("normal")
-        return False
-
+    # ------------------------------------------
     def keyPressed(self, event):
         state = _state()
         if not state["enabled"]:
@@ -1583,19 +1567,18 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             is_ctrl=_is_ctrl,
             is_escape=_is_escape(_code, _is_ctrl),
         )
-
-        expand: bool = mode in ("visual", "pending")
-        count: int = _get_count()
-
         # msg(f"{expand=} {raw_count=} {pending_keys=} {key=}")
 
-        # Insert mode is parsed here.
+        # Insert mode commands matching.
         if mode == "insert":
             if key.is_escape or (key.is_ctrl and key.code == 514):  # C-c
                 return self._consume_action(_leave_insert_to_normal)
             return False
 
         pending_keys: str | None = _get_pending_keys()
+        expand: bool = mode in ("visual", "pending")
+        count: int = _get_count()
+        raw_count: int = _get_count()
 
         if pending_keys == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
@@ -1605,13 +1588,20 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _reset_pending_keys()
             return True
 
-        if pending_keys in ("g", "dg", "yg", "cg"):
-            return self._consume_action(
-                lambda: KeyHandler._parse_g_commands(count, expand, pending_keys, key.char)
-            )
+        # Count parsing
+        # - 1..9 always extend count
+        # - 0 extends count only after count has started
+        # Commands that can take count should be before this.
+        if _is_digit_char(key.char):
+            if key.char != "0" or _get_raw_count() > 0:
+                _add_to_count(int(key.char))
+                return self._consume_action(None)
 
-        # msg(f"mods: {mods}\nkey: {key}\n"
-        #     f"is_only_ctrl: {key['is_ctrl']}")
+        normal_actions, motions = self._normal_actions(
+            key, expand, count, raw_count, pending_keys
+        )
+
+        # msg(f"mods: {mods}\nkey: {key}\n is_only_ctrl: {key['is_ctrl']}")
 
         if key.is_ctrl:
             actions = self._normal_ctrl_actions(count)
@@ -1630,27 +1620,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # ----- Keys without modifiers after this ----
 
-        post_action: Callable[[], None] | None = None
-
-        normal_actions, motions = self._normal_actions(
-            key.char, expand, count, pending_keys
-        )
-
         # Match motions that operators support.
         motion = motions.get(key.char)
         if motion is not None:
-            if pending_keys in ("c", "d", "y"):
-                if key.char == "g":  # dg, yg
-                    post_action = lambda: (fn := normal_actions.get("g")) and fn()
-                else:
-                    post_action = lambda: (
-                        fn := normal_actions.get(pending_keys)) and fn(
-                    )
-            # elif pending_keys in ("dg", "yg"):
-            #     post_action = normal_actions.get(pending_keys[0])
-            return self._consume_action(motion, post_action)
+            # If operator is pending, add it to be done after motion.
+            if "c" in (pending_keys or "") or "d" in (pending_keys or ""):
+                return self._consume_action(motion,
+                    lambda: _delete_command(count, pending_keys, key.char)
+                )
+            elif "y" in (pending_keys or ""):
+                return self._consume_action(motion,
+                    lambda: _y_command(count, pending_keys, key.char)
+                )
+            elif "g" in (pending_keys or ""):
+                return self._consume_action(motion, lambda: _reset_pending_keys())
+            return self._consume_action(motion)
 
-        # Other Normal mode commands
+        # Other Normal mode commands.       dg g
         action = normal_actions.get(key.char)
         if action is not None:
             if pending_keys in ("c", "d", "y"):
@@ -1666,20 +1652,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             else:
                 return self._consume_action(action)
 
+        # No suitable commands matched for "g" so cancel.
+        if "g" in (pending_keys or ""):
+            _reset_count()
+            _goto_mode("normal")
+            return True
+
         # Before count parsing.
         if _is_backspace_key(event):
-            return self._consume_action(
-                lambda: _charwise_motion("h", count, False)
-            )
-
-        # Count parsing
-        # - 1..9 always extend count
-        # - 0 extends count only after count has started
-        # Commands that can take count should be before this.
-        if _is_digit_char(key.char):
-            if key.char != "0" or _get_raw_count() > 0:
-                _add_to_count(int(key.char))
-                return self._consume_action(None)
+            return self._consume_action(lambda: _charwise_motion("h", count, False))
 
         # ----- Non-character keys -----
 
@@ -1710,6 +1691,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
+
+    @staticmethod
+    def _g_command(pending_keys:str|None):
+        if pending_keys in (None, "d", "y", "c"):
+            _add_pending_key("g")
+            return True
+
     def keyReleased(self, event):
         state = _state()
         if not state["enabled"]:
