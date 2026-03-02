@@ -45,19 +45,19 @@ they are similar in functionality.
 
 Currently supported Normal mode commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`.
-- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `()`, `H`
+- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `()`, `H`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`
 - Undo/redo: `u`, `C-r`
-- Copy/paste: `y`, `yy`, `p`, `P` 
+- Copy/paste: `y`, `yy`, `Y`, `p`, `P` 
 
 - Aliases: `/` = default search bar, `Ins` = i, `U` = C-r, `BS` = h 
 
 Supported Insert mode commands:
 - Switch to Normal mode: `Esc`, aliases: `C-[`, `C-c`
 
-Other shortcuts and keys are passed to LibreOffice so they work as expected.
+Other shortcuts and keys are passed to LibreOffice.
 
 ## Shortcuts for enabling and disabling
 
@@ -73,9 +73,11 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
-- Start and end of text which for example `G` and `gg` use, is LibreOffice's definition which is for *text container*. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
-- For yank/paste system clipboard is used instead of registers.
+- Start and end of text which for example `G` and `gg` use, operate on *text container* like C-Home/End in LibreOffice. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
+- For yank/paste system clipboard is used instead of registers. `x` and `X` don't yank
+  to clipboard but just delete.
 - Operators don't support `j` or `k`.
+- `Y` does same as `y$`.
 
 ## Known issues / missing features
 

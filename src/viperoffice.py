@@ -535,19 +535,23 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
         return False
 
 
-# 'G' and 'gg': Go to line [count] motion. 0 = last line.
-def _to_line(expand: bool, raw_count:int) -> bool:
+# NOTE: 'Text container' is not same as document. Can be for example a text frame.
+def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
+    """Go to line [count] motion. Commands 'G' and 'gg'.
+    Other args:
+    default_end: bool  To default to end of text container if no count given.
+                       else default of start of text container.
+    """
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
-        if raw_count == 0:
+        if raw_count == 0 and default_end:  # Command 'G'
             cursor.gotoEnd(expand)
             return True
-        line_number = max(1, int(raw_count))
-        cursor.gotoStart(expand)
-        if line_number > 1:
-            cursor.goDown(line_number - 1, expand)
+        cursor.gotoStart(expand) # Command 'gg'
+        if raw_count > 1:
+            cursor.goDown(raw_count - 1, expand)
         return True
     except Exception:
         return False
@@ -852,14 +856,22 @@ def _scan_backward_word_target(paragraph_text, offset, is_keyword_char, spec):
     target = spec.get("target", WORD_TARGET_START)
     i = min(offset - 1, length - 1)
 
+    if target == WORD_TARGET_END:
+        # ge/gE: skip current word chars backward, then skip blanks,
+        # landing on the last char of the previous word.
+        cls = classify(paragraph_text[i], is_keyword_char, big_word)
+        if cls != "blank":
+            while i >= 0 and classify(paragraph_text[i], is_keyword_char, big_word) == cls:
+                i -= 1
+        while i >= 0 and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+            i -= 1
+        return i if i >= 0 else None
+
     # Skip trailing blanks when scanning backward.
     while i >= 0 and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
         i -= 1
     if i < 0:
         return None
-
-    if target == WORD_TARGET_END:
-        return i
 
     if target == WORD_TARGET_START:
         cls = classify(paragraph_text[i], is_keyword_char, big_word)
@@ -1321,26 +1333,6 @@ def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
         return False
 
 
-def _g_command(expand:bool, raw_count:int, pending_keys:str|None, key_char:str) -> bool:
-    """Handle g -commands"""
-    # msg(f"{pending_keys=} {key_char=}")
-    if pending_keys in (None, "d", "y"):
-        _add_pending_key("g")
-        return True
-
-    # second key determines the compound command.
-    _reset_pending_keys()
-    if key_char == "g" :  # 'gg'
-        # Defaults to first row.
-        if raw_count == 0:
-            _to_line(expand, 1)
-        else:
-            _to_line(expand, raw_count)
-        return True
-    # Unknown g+key: cancel silently.
-    return False
-
-
 def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
     """Delete text {motion} moves over"""
     if key_char in ("C", "D", "S"):
@@ -1474,6 +1466,7 @@ def _normal_actions(key_char:str, expand, count:int, pending_keys):
         "C": lambda: _delete_command(count, pending_keys, key_char),
         "d": lambda: _delete_command(count, pending_keys, key_char),
         "D": lambda: _delete_command(count, pending_keys, key_char),
+        "g": lambda: _g_commands(count, expand, pending_keys, key_char),
         "j": lambda: _charwise_motion("j", count, False),
         "k": lambda: _charwise_motion("k", count, False),
         "i": lambda: _goto_mode("insert"),
@@ -1509,8 +1502,7 @@ def _normal_actions(key_char:str, expand, count:int, pending_keys):
         "$": lambda: _to_end_of_line(expand, count, pending_keys),
         "^": lambda: _to_start_of_line(expand, True),
         "H": lambda: _jump_to_page(expand, "start", pending_keys),
-        "g": lambda: _g_command(expand, _get_raw_count(), pending_keys, key_char),
-        "G": lambda: _to_line(expand, _get_raw_count()),
+        "G": lambda: _to_line(expand, _get_raw_count(), True),
         ")": lambda: _sentences_forward(expand, count),
         "(": lambda: _sentences_backwards(expand, count),
     }
@@ -1519,6 +1511,26 @@ def _normal_actions(key_char:str, expand, count:int, pending_keys):
         motions["0"] = lambda: _to_start_of_line(expand, False)
 
     return actions, motions
+
+
+def _g_commands(count:int, expand:bool, pending_keys:str|None, key_char:str) -> bool:
+    """Handle g -commands"""
+    # msg(f"{pending_keys=} {key_char=}")
+    if pending_keys in (None, "d", "y", "c"):
+        _add_pending_key("g")
+        return True
+
+    _reset_pending_keys()
+    if key_char == "g":
+        return _to_line(expand, _get_raw_count(), False)
+    if key_char == "e":
+        return _word_motion(_WORD_MOTION_GE, expand, count, pending_keys)
+    if key_char == "E":
+        return _word_motion(_WORD_MOTION_G_BIG_E, expand, count, pending_keys)
+
+    # Unknown g+key: cancel silently.
+    return False
+
 
 # UNO key handler
 # Return values for keyPressed/keyReleased:
@@ -1575,16 +1587,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # msg(f"{expand=} {raw_count=} {pending_keys=} {key=}")
 
-        # Route all input if these keys are pending.
-        if pending_keys is not None and "g" in pending_keys:
-            if pending_keys == "dg":
-                post_action = lambda: (fn := normal_actions.get("d")) and fn()
-            elif pending_keys == "yg":
-                post_action = lambda: (fn := normal_actions.get("y")) and fn()
-            return self._consume_action(
-                lambda: (fn := normal_actions.get("g")) and fn(),
-                post_action
-            )
         if pending_keys == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
                 return self._consume_action(
@@ -1592,6 +1594,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 )
             _reset_pending_keys()
             return True
+
+        if pending_keys == "g":
+            return self._consume_action(
+                lambda: _g_commands(count, expand, pending_keys, key.char)
+            )
 
         if mode == "insert":
             if key.is_escape or (key.is_ctrl and key.code == 514):  # C-c
