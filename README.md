@@ -3,17 +3,14 @@
 ViperOffice is an extension for LibreOffice and OpenOffice that brings subset of Vi/(Neo)Vim
 Vi/(Neo)Vim text editors text editing and navigation capabilities to word processing.
 
-This is a new project under development and in it's early stages. There isn't enough
-supported features yet to be really useful and breakage can happen. Code hasn't been
-refined.
+This is a new project under development and in it's early stages. Feature set is
+incomplete and breakage can happen since there is lots of moving parts. Code isn't very refined yet.
 
 Some of the of code is partially based on LibreOffice extensions
 - [jmagers/vibreoffice](https://github.com/jmagers/vibreoffice) and [fedorov-ao/vibreoffice](https://github.com/fedorov-ao/vibreoffice)
 which are written in LibreOffice Basic. They are reference and inspiration for
-the project. However, this isn't a direct port and many areas like word based
-motions are completely different.
+the project. However, this isn't a direct port.
 
-Goal: VibreOffice was great but goal is to have behavior more glose to Vim.
 
 ## Installation/Usage
 
@@ -40,12 +37,12 @@ This will simply build the extension file from the template files in
 they are similar in functionality.
 
 - Modes: Normal (+Operator pending), Insert.
-- Optional count for most commands.
 - Statusline with mode, count, pending command.
 
-Currently supported Normal mode commands:
+Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`.
 - Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `()`, `H`
+- Number count for most commands. Example `4j`, `3gg`, `d3gE`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`
