@@ -81,8 +81,7 @@ def _get_text_cursor():
 
 
 def _set_mode(new_mode: str) -> bool:
-    # Pending mode is by _add_pending_key(),
-    if new_mode == "normal" or new_mode == "insert" or new_mode == "pending":
+    if new_mode in ("normal", "insert", "pending"):
         _state()["mode"] = new_mode
         _update_statusline()
         return True
@@ -353,7 +352,7 @@ def _show_insert_cursor():
 
 
 # Sets mode handling cursor accordingly. In operator pending and visual modes
-#  cursor position is saved.
+#  cursor state is saved so it can be used by operator commands.
 def _goto_mode(mode_name: str) -> bool:
     if mode_name == "normal":
         _reset_pending_keys()
@@ -364,13 +363,12 @@ def _goto_mode(mode_name: str) -> bool:
     elif mode_name == "pending":
         # _set_position()
         controller = _current_controller()
-        if controller is not None:
-            text_cursor = _get_text_cursor()
-            if text_cursor is not None:
-                # Deselect
-                text_cursor.gotoRange(text_cursor.getStart(), False)
-                # Show selection
-                controller.select(text_cursor)
+        text_cursor = _get_text_cursor()
+        if controller is not None and text_cursor is not None:
+            # Deselect
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            # Show selection
+            controller.select(text_cursor)
     else:
         return False
     _set_mode(mode_name)
@@ -1437,25 +1435,6 @@ def _replace_character(count:int, pending_keys, key_char:str) -> bool:
 # Input handling
 # --------------
 
-def _normal_ctrl_actions(count):
-    b_code = int(getattr(Key, "B", 512))
-    c_code = int(getattr(Key, "C", 514))
-    d_code = int(getattr(Key, "D", 515))
-    f_code = int(getattr(Key, "F", 517))
-    r_code = int(getattr(Key, "R", 529))
-    u_code = int(getattr(Key, "U", 532))
-
-    actions = {
-        c_code: lambda: _reset_pending_keys(),
-        b_code: lambda: _scroll_window(count, False, False),
-        f_code: lambda: _scroll_window(count, True, False),
-        d_code: lambda: _scroll_window(count, True, True),
-        u_code: lambda: _scroll_window(count, False, True),
-        r_code: lambda: _undo_and_redo(count, False),
-    }
-    return actions
-
-
 # UNO key handler
 # Return values for keyPressed/keyReleased:
 #   True  -> event is swallowed (LibreOffice should not process it)
@@ -1481,6 +1460,24 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return True
 
     @staticmethod
+    def _normal_ctrl_actions(count):
+        b_code = int(getattr(Key, "B", 512))
+        c_code = int(getattr(Key, "C", 514))
+        d_code = int(getattr(Key, "D", 515))
+        f_code = int(getattr(Key, "F", 517))
+        r_code = int(getattr(Key, "R", 529))
+        u_code = int(getattr(Key, "U", 532))
+        actions = {
+            c_code: lambda: _reset_pending_keys(),
+            b_code: lambda: _scroll_window(count, False, False),
+            f_code: lambda: _scroll_window(count, True, False),
+            d_code: lambda: _scroll_window(count, True, True),
+            u_code: lambda: _scroll_window(count, False, True),
+            r_code: lambda: _undo_and_redo(count, False),
+        }
+        return actions
+
+    @staticmethod
     def _normal_actions(key_char:str, expand, count:int, pending_keys):
         """Build Normal-mode command dispatch map for character actions."""
         # Motions / commands that are currently not supported by operators. Issuing
@@ -1490,7 +1487,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "C": lambda: _delete_command(count, pending_keys, key_char),
             "d": lambda: _delete_command(count, pending_keys, key_char),
             "D": lambda: _delete_command(count, pending_keys, key_char),
-            "g": lambda: KeyHandler._g_commands(count, expand, pending_keys, key_char),
+            "g": lambda: KeyHandler._parse_g_commands(count, expand, pending_keys, key_char),
             "j": lambda: _charwise_motion("j", count, False),
             "k": lambda: _charwise_motion("k", count, False),
             "i": lambda: _goto_mode("insert"),
@@ -1537,7 +1534,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions, motions
 
     @staticmethod
-    def _g_commands(count:int, expand:bool, pending_keys:str|None, key_char:str) -> bool:
+    def _parse_g_commands(count:int, expand:bool, pending_keys:str|None, key_char:str) -> bool:
         """Handle g-commands (gg, ge, gE)."""
         # msg(f"{pending_keys=} {key_char=}")
         if pending_keys in (None, "d", "y", "c"):
@@ -1564,6 +1561,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return _word_motion(_WORD_MOTION_G_BIG_E, expand, count, pending_keys)
 
         # Unknown g+key: cancel silently.
+        _goto_mode("normal")
         return False
 
     def keyPressed(self, event):
@@ -1575,11 +1573,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _get_text_cursor() is None:
             return False
 
-        count: int = _get_count()
         mode: str = _get_mode()
-        pending_keys: str | None = _get_pending_keys()
-        expand: bool = mode in ("visual", "pending")
-
         mods: int = _event_modifiers(event)
         _code = _key_code(event)
         _is_ctrl = _is_only_ctrl(mods)
@@ -1589,18 +1583,19 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             is_ctrl=_is_ctrl,
             is_escape=_is_escape(_code, _is_ctrl),
         )
-        post_action: Callable[[], None] | None = None
 
-        normal_actions, motions = self._normal_actions(
-            key.char, expand, count, pending_keys
-        )
+        expand: bool = mode in ("visual", "pending")
+        count: int = _get_count()
 
         # msg(f"{expand=} {raw_count=} {pending_keys=} {key=}")
 
+        # Insert mode is parsed here.
         if mode == "insert":
             if key.is_escape or (key.is_ctrl and key.code == 514):  # C-c
                 return self._consume_action(_leave_insert_to_normal)
             return False
+
+        pending_keys: str | None = _get_pending_keys()
 
         if pending_keys == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
@@ -1612,16 +1607,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if pending_keys in ("g", "dg", "yg", "cg"):
             return self._consume_action(
-                lambda: KeyHandler._g_commands(count, expand, pending_keys, key.char)
+                lambda: KeyHandler._parse_g_commands(count, expand, pending_keys, key.char)
             )
-
-        # ----- Non-Insert mode after this -----
 
         # msg(f"mods: {mods}\nkey: {key}\n"
         #     f"is_only_ctrl: {key['is_ctrl']}")
 
         if key.is_ctrl:
-            actions = _normal_ctrl_actions(count)
+            actions = self._normal_ctrl_actions(count)
             action = actions.get(key.code)
 
             if action is not None:
@@ -1636,6 +1629,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 return False
 
         # ----- Keys without modifiers after this ----
+
+        post_action: Callable[[], None] | None = None
+
+        normal_actions, motions = self._normal_actions(
+            key.char, expand, count, pending_keys
+        )
 
         # Match motions that operators support.
         motion = motions.get(key.char)
@@ -1667,10 +1666,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             else:
                 return self._consume_action(action)
 
-        # action = normal_actions.get(key_char) or motions.get(key_char)
-        # if action is not None:
-        #     return self._consume_active_event(action)
-
+        # Before count parsing.
         if _is_backspace_key(event):
             return self._consume_action(
                 lambda: _charwise_motion("h", count, False)
@@ -1679,10 +1675,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Count parsing
         # - 1..9 always extend count
         # - 0 extends count only after count has started
+        # Commands that can take count should be before this.
         if _is_digit_char(key.char):
             if key.char != "0" or _get_raw_count() > 0:
                 _add_to_count(int(key.char))
-                # msg(f"count {int(key_char)}")
                 return self._consume_action(None)
 
         # ----- Non-character keys -----
