@@ -1456,82 +1456,6 @@ def _normal_ctrl_actions(count):
     return actions
 
 
-"""Build Normal-mode command dispatch map for character actions."""
-def _normal_actions(key_char:str, expand, count:int, pending_keys):
-
-    # Motions / commands that are currently not supported by operators. Issuing
-    # them while in operator pending mode returns to Normal mode.
-    actions = {
-        "c": lambda: _delete_command(count, pending_keys, key_char),
-        "C": lambda: _delete_command(count, pending_keys, key_char),
-        "d": lambda: _delete_command(count, pending_keys, key_char),
-        "D": lambda: _delete_command(count, pending_keys, key_char),
-        "g": lambda: _g_commands(count, expand, pending_keys, key_char),
-        "j": lambda: _charwise_motion("j", count, False),
-        "k": lambda: _charwise_motion("k", count, False),
-        "i": lambda: _goto_mode("insert"),
-        "I": lambda: _switch_to_insert("I"),
-        "a": lambda: _switch_to_insert("a"),
-        "A": lambda: _switch_to_insert("A"),
-        "o": lambda: _switch_to_insert("o"),
-        "O": lambda: _switch_to_insert("O"),
-        "p": lambda: _paste(count, True),
-        "P": lambda: _paste(count, False),
-        "r": lambda: _replace_character(count, pending_keys, key_char),
-        "u": lambda: _undo_and_redo(count),
-        "U": lambda: _undo_and_redo(count, True),
-        "s": lambda: _delete_characters(count, False, True),
-        "S": lambda: _delete_command(count, pending_keys, key_char),
-        "x": lambda: _delete_characters(count, False),
-        "X": lambda: _delete_characters(count, True),
-        "y": lambda: _y_command(count, pending_keys, key_char),
-        "Y": lambda: _y_command(count, pending_keys, key_char),
-        "/": _focus_findbar,
-    }
-
-    # Motions that currently support operators like "d".
-    motions = {
-        "h": lambda: _charwise_motion("h", count, expand),
-        "l": lambda: _charwise_motion("l", count, expand),
-        "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
-        "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
-        "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
-        "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, pending_keys),
-        "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, pending_keys),
-        "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, pending_keys),
-        "$": lambda: _to_end_of_line(expand, count, pending_keys),
-        "^": lambda: _to_start_of_line(expand, True),
-        "H": lambda: _jump_to_page(expand, "start", pending_keys),
-        "G": lambda: _to_line(expand, _get_raw_count(), True),
-        ")": lambda: _sentences_forward(expand, count),
-        "(": lambda: _sentences_backwards(expand, count),
-    }
-
-    if key_char == "0" and _get_raw_count() == 0:
-        motions["0"] = lambda: _to_start_of_line(expand, False)
-
-    return actions, motions
-
-
-def _g_commands(count:int, expand:bool, pending_keys:str|None, key_char:str) -> bool:
-    """Handle g -commands"""
-    # msg(f"{pending_keys=} {key_char=}")
-    if pending_keys in (None, "d", "y", "c"):
-        _add_pending_key("g")
-        return True
-
-    _reset_pending_keys()
-    if key_char == "g":
-        return _to_line(expand, _get_raw_count(), False)
-    if key_char == "e":
-        return _word_motion(_WORD_MOTION_GE, expand, count, pending_keys)
-    if key_char == "E":
-        return _word_motion(_WORD_MOTION_G_BIG_E, expand, count, pending_keys)
-
-    # Unknown g+key: cancel silently.
-    return False
-
-
 # UNO key handler
 # Return values for keyPressed/keyReleased:
 #   True  -> event is swallowed (LibreOffice should not process it)
@@ -1555,6 +1479,92 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if post_action is not None:
                 post_action()
         return True
+
+    @staticmethod
+    def _normal_actions(key_char:str, expand, count:int, pending_keys):
+        """Build Normal-mode command dispatch map for character actions."""
+        # Motions / commands that are currently not supported by operators. Issuing
+        # them while in operator pending mode returns to Normal mode.
+        actions = {
+            "c": lambda: _delete_command(count, pending_keys, key_char),
+            "C": lambda: _delete_command(count, pending_keys, key_char),
+            "d": lambda: _delete_command(count, pending_keys, key_char),
+            "D": lambda: _delete_command(count, pending_keys, key_char),
+            "g": lambda: KeyHandler._g_commands(count, expand, pending_keys, key_char),
+            "j": lambda: _charwise_motion("j", count, False),
+            "k": lambda: _charwise_motion("k", count, False),
+            "i": lambda: _goto_mode("insert"),
+            "I": lambda: _switch_to_insert("I"),
+            "a": lambda: _switch_to_insert("a"),
+            "A": lambda: _switch_to_insert("A"),
+            "o": lambda: _switch_to_insert("o"),
+            "O": lambda: _switch_to_insert("O"),
+            "p": lambda: _paste(count, True),
+            "P": lambda: _paste(count, False),
+            "r": lambda: _replace_character(count, pending_keys, key_char),
+            "u": lambda: _undo_and_redo(count),
+            "U": lambda: _undo_and_redo(count, True),
+            "s": lambda: _delete_characters(count, False, True),
+            "S": lambda: _delete_command(count, pending_keys, key_char),
+            "x": lambda: _delete_characters(count, False),
+            "X": lambda: _delete_characters(count, True),
+            "y": lambda: _y_command(count, pending_keys, key_char),
+            "Y": lambda: _y_command(count, pending_keys, key_char),
+            "/": _focus_findbar,
+        }
+
+        # Motions that currently support operators like "d".
+        motions = {
+            "h": lambda: _charwise_motion("h", count, expand),
+            "l": lambda: _charwise_motion("l", count, expand),
+            "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
+            "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
+            "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
+            "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, pending_keys),
+            "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, pending_keys),
+            "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, pending_keys),
+            "$": lambda: _to_end_of_line(expand, count, pending_keys),
+            "^": lambda: _to_start_of_line(expand, True),
+            "H": lambda: _jump_to_page(expand, "start", pending_keys),
+            "G": lambda: _to_line(expand, _get_raw_count(), True),
+            ")": lambda: _sentences_forward(expand, count),
+            "(": lambda: _sentences_backwards(expand, count),
+        }
+
+        if key_char == "0" and _get_raw_count() == 0:
+            motions["0"] = lambda: _to_start_of_line(expand, False)
+
+        return actions, motions
+
+    @staticmethod
+    def _g_commands(count:int, expand:bool, pending_keys:str|None, key_char:str) -> bool:
+        """Handle g-commands (gg, ge, gE)."""
+        # msg(f"{pending_keys=} {key_char=}")
+        if pending_keys in (None, "d", "y", "c"):
+            _add_pending_key("g")
+            return True
+
+        # operator prefix if any (e.g. "dg" → "d", "yg" → "y")
+        operator = pending_keys[0] if pending_keys and len(pending_keys) == 2 else None
+        _reset_pending_keys()
+        if key_char == "g":
+            _to_line(expand or operator is not None, _get_raw_count(), False)
+            if operator == "d":
+                _yank_and_delete(True, True)
+                _goto_mode("normal")
+            elif operator == "y":
+                _yank_and_delete(True, False)
+            elif operator == "c":
+                _yank_and_delete(True, True)
+                _goto_mode("insert")
+            return True
+        if key_char == "e":
+            return _word_motion(_WORD_MOTION_GE, expand, count, pending_keys)
+        if key_char == "E":
+            return _word_motion(_WORD_MOTION_G_BIG_E, expand, count, pending_keys)
+
+        # Unknown g+key: cancel silently.
+        return False
 
     def keyPressed(self, event):
         state = _state()
@@ -1581,11 +1591,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         )
         post_action: Callable[[], None] | None = None
 
-        normal_actions, motions = _normal_actions(
+        normal_actions, motions = self._normal_actions(
             key.char, expand, count, pending_keys
         )
 
         # msg(f"{expand=} {raw_count=} {pending_keys=} {key=}")
+
+        if mode == "insert":
+            if key.is_escape or (key.is_ctrl and key.code == 514):  # C-c
+                return self._consume_action(_leave_insert_to_normal)
+            return False
 
         if pending_keys == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
@@ -1595,15 +1610,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _reset_pending_keys()
             return True
 
-        if pending_keys == "g":
+        if pending_keys in ("g", "dg", "yg", "cg"):
             return self._consume_action(
-                lambda: _g_commands(count, expand, pending_keys, key.char)
+                lambda: KeyHandler._g_commands(count, expand, pending_keys, key.char)
             )
-
-        if mode == "insert":
-            if key.is_escape or (key.is_ctrl and key.code == 514):  # C-c
-                return self._consume_action(_leave_insert_to_normal)
-            return False
 
         # ----- Non-Insert mode after this -----
 
@@ -1641,24 +1651,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             #     post_action = normal_actions.get(pending_keys[0])
             return self._consume_action(motion, post_action)
 
-        # No supported currently since didn't match "dgg" so cancel.
-        if pending_keys in ("dg", "yg"):
-            _reset_pending_keys()
-            _set_mode("normal")
-            return True
-
         # Other Normal mode commands
         action = normal_actions.get(key.char)
         if action is not None:
             if pending_keys in ("c", "d", "y"):
                 if key.char == pending_keys:   # dd, yy
                     return self._consume_action(action)
-                if key.char == "g": # dgg
-                   return self._consume_action(
-                        lambda: normal_actions.get(pending_keys),
-                    )
+                if key.char == "g":  # dg, yg, cg: let _g_commands advance pending to "dg"/"yg"/"cg"
+                    return self._consume_action(action)
 
-                # other non-d command: cancel
+                # other non-operator command: cancel
                 _reset_pending_keys()
                 _set_mode("normal")
                 return True
