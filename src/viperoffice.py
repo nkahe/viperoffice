@@ -32,7 +32,7 @@ DEBUG = False
 ISKEYWORD: Final[str] = "@,48-57,_,192-255"
 
 # Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
-MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 6
+MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 3
 
 def _state():
     key = "_vipereoffice_state"
@@ -1323,6 +1323,15 @@ def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
             else:
                 cursor.jumpToStartOfPage()
             return True
+        elif target == "end":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToEndOfPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToEndOfPage()
         return False
     except Exception:
         return False
@@ -1534,6 +1543,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "$": lambda: _to_end_of_line(expand, count, pending_keys),
                 "^": lambda: _to_start_of_line(expand, True),
                 "H": lambda: _jump_to_page(expand, "start", pending_keys),
+                "L": lambda: _jump_to_page(expand, "end", pending_keys),
                 "G": lambda: _to_line(expand, _get_raw_count(), True),
                 ")": lambda: _sentences_forward(expand, count),
                 "(": lambda: _sentences_backwards(expand, count),

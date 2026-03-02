@@ -41,7 +41,7 @@ they are similar in functionality.
 
 Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`.
-- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `()`, `H`
+- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `()`, `H`, `L`
 - Number count for most commands. Example `4j`, `3gg`, `d3gE`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
@@ -73,6 +73,7 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 - Start and end of text which for example `G` and `gg` use, operate on *text container* like C-Home/End in LibreOffice. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
 - For yank/paste system clipboard is used instead of registers. `x` and `X` don't yank
   to clipboard but just delete.
+- `H` and `L` motions move cursor to start and end of page instead of screen.
 - Operators don't support `j` or `k`.
 - `Y` does same as `y$`.
 
