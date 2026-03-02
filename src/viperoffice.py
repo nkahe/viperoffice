@@ -55,10 +55,6 @@ def _state():
             # Saved cursor position for example position need to be restored
             # after motion.
             "cursor_position": None,
-            # Python UNO may leave stale key-handler registrations attached even
-            # after removeKeyHandler(); token guards ensure only the latest
-            # generation can execute commands.
-            "active_handler_token": 0,
             "view_event_listener": None,
             "global_event_broadcaster": None,
         }
@@ -1441,11 +1437,9 @@ def _replace_character(count:int, pending_keys, key_char:str) -> bool:
 #   True  -> event is swallowed (LibreOffice should not process it)
 #   False -> event is passed through to LibreOffice default handling
 class KeyHandler(unohelper.Base, XKeyHandler):
-    def __init__(self, token):
-        self._token = token
 
-    def _is_active_instance(self):
-        return self._token == _state().get("active_handler_token")
+    def __init__(self):
+        pass
 
     # Consume {action} and after that {post_action} if set.
     def _consume_action(self, action, post_action=None) -> bool:
@@ -1480,11 +1474,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     @staticmethod
-    def _normal_actions(key, expand, count:int, raw_count, pending_keys):
-        """Build Normal-mode command dispatch map for character actions."""
-
-        # Motions / commands that are currently not supported by operators. Issuing
-        # them while in operator pending mode returns to Normal mode.
+    def _normal_actions(key, count:int, pending_keys):
+        """Build Normal-mode command dispatch map for actions."""
+        # Available commands after "g" command.
         if "g" in (pending_keys or ""):
             actions = {
             }
@@ -1495,7 +1487,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "d": lambda: _delete_command(count, pending_keys, key.char),
                 "D": lambda: _delete_command(count, pending_keys, key.char),
                 "g": lambda: KeyHandler._g_command(pending_keys),
-                "j": lambda: _charwise_motion("j", count, False),
+                "j": lambda: _charwise_motion("j", count, False),  # Don't support operators.
                 "k": lambda: _charwise_motion("k", count, False),
                 "i": lambda: _goto_mode("insert"),
                 "I": lambda: _switch_to_insert("I"),
@@ -1516,9 +1508,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "Y": lambda: _y_command(count, pending_keys, key.char),
                 "/": _focus_findbar,
             }
+        return actions
 
-        # Motions that currently support operators like "d".
-
+    # These can be used independently or with operators.
+    @staticmethod
+    def _motions(key, expand, count:int, pending_keys):
+        """Build motion dispatch map for actions."""
+        # Available motions after "g" command.
         if "g" in (pending_keys or ""):
             motions = {
                 "g": lambda: _to_line(expand, _get_raw_count(), False),
@@ -1545,7 +1541,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if key.char == "0" and _get_raw_count() == 0:
                 motions["0"] = lambda: _to_start_of_line(expand, False)
 
-        return actions, motions
+        return motions
 
     # ------------------------------------------
     def keyPressed(self, event):
@@ -1567,7 +1563,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             is_ctrl=_is_ctrl,
             is_escape=_is_escape(_code, _is_ctrl),
         )
-        # msg(f"{expand=} {raw_count=} {pending_keys=} {key=}")
+        # msg(f"{expand=} {pending_keys=} {key=}")
 
         # Insert mode commands matching.
         if mode == "insert":
@@ -1576,9 +1572,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
 
         pending_keys: str | None = _get_pending_keys()
-        expand: bool = mode in ("visual", "pending")
         count: int = _get_count()
-        raw_count: int = _get_count()
 
         if pending_keys == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
@@ -1597,16 +1591,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _add_to_count(int(key.char))
                 return self._consume_action(None)
 
-        normal_actions, motions = self._normal_actions(
-            key, expand, count, raw_count, pending_keys
-        )
-
         # msg(f"mods: {mods}\nkey: {key}\n is_only_ctrl: {key['is_ctrl']}")
 
         if key.is_ctrl:
             actions = self._normal_ctrl_actions(count)
             action = actions.get(key.code)
-
             if action is not None:
                 return self._consume_action(action)
             else:
@@ -1620,37 +1609,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # ----- Keys without modifiers after this ----
 
-        # Match motions that operators support.
-        motion = motions.get(key.char)
-        if motion is not None:
-            # If operator is pending, add it to be done after motion.
-            if "c" in (pending_keys or "") or "d" in (pending_keys or ""):
-                return self._consume_action(motion,
-                    lambda: _delete_command(count, pending_keys, key.char)
-                )
-            elif "y" in (pending_keys or ""):
-                return self._consume_action(motion,
-                    lambda: _y_command(count, pending_keys, key.char)
-                )
-            elif "g" in (pending_keys or ""):
-                return self._consume_action(motion, lambda: _reset_pending_keys())
-            return self._consume_action(motion)
+        # Match and handle motions that support operators.
+        matched_motions = self._match_motions(key, count, pending_keys)
+        if matched_motions is not None:
+            return matched_motions
 
-        # Other Normal mode commands.       dg g
-        action = normal_actions.get(key.char)
-        if action is not None:
-            if pending_keys in ("c", "d", "y"):
-                if key.char == pending_keys:   # dd, yy
-                    return self._consume_action(action)
-                if key.char == "g":  # dg, yg, cg: let _g_commands advance pending to "dg"/"yg"/"cg"
-                    return self._consume_action(action)
-
-                # other non-operator command: cancel
-                _reset_pending_keys()
-                _set_mode("normal")
-                return True
-            else:
-                return self._consume_action(action)
+        # Match and handle non-motion commands.
+        matched_commands = self._match_commands(key, count, pending_keys)
+        if matched_commands is not None:
+            return matched_commands
 
         # No suitable commands matched for "g" so cancel.
         if "g" in (pending_keys or ""):
@@ -1691,6 +1658,41 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
+
+    def _match_motions(self, key, count, pending_keys):
+        expand: bool = _get_mode() in ("visual", "pending")
+        motions = self._motions(key, expand, count, pending_keys)
+        motion = motions.get(key.char)
+        if motion is not None:
+            # If operator is pending, add it to be done after motion.
+            if "c" in (pending_keys or "") or "d" in (pending_keys or ""):
+                return self._consume_action(motion,
+                    lambda: _delete_command(count, pending_keys, key.char)
+                )
+            elif "y" in (pending_keys or ""):
+                return self._consume_action(motion,
+                    lambda: _y_command(count, pending_keys, key.char)
+                )
+            elif "g" in (pending_keys or ""):
+                return self._consume_action(motion, lambda: _reset_pending_keys())
+            return self._consume_action(motion)
+        return None
+
+    def _match_commands(self, key, count, pending_keys):
+        normal_actions = self._normal_actions(key, count, pending_keys)
+        action = normal_actions.get(key.char)
+        if action is None:
+            return None
+        if pending_keys in ("c", "d", "y"):
+            if key.char == pending_keys:        # dd, yy, cc
+                return self._consume_action(action)
+            if key.char == "g":                 # dg, yg, cg
+                return self._consume_action(action)
+            # non-operator key while pending: cancel
+            _reset_pending_keys()
+            _set_mode("normal")
+            return None
+        return self._consume_action(action)
 
     @staticmethod
     def _g_command(pending_keys:str|None):
@@ -2114,7 +2116,7 @@ def _initialize():
     state["started"] = True
     # Detach any previously registered handler before creating a new one.
     _detach_key_handler_from_all_views()
-    state["key_handler"] = KeyHandler(state["active_handler_token"])
+    state["key_handler"] = KeyHandler()
     _attach_key_handler_to_all_views()
     _start_view_event_listener()
     enable_viper_office()
