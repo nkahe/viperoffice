@@ -962,8 +962,12 @@ def _word_motion_once_forward(text_cursor, expand: bool, is_keyword_char, spec) 
 
     if next_offset is not None and next_offset < length:
         text_cursor.gotoStartOfParagraph(False)
-        if next_offset > 0:
-            text_cursor.goRight(next_offset, expand)
+        move = next_offset
+        # e/E are inclusive: include the char at next_offset in the selection.
+        if expand and spec.get("target") == WORD_TARGET_END:
+            move = next_offset + 1
+        if move > 0:
+            text_cursor.goRight(move, expand)
         return True
 
     return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
