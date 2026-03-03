@@ -42,14 +42,14 @@ they are similar in functionality.
 Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`, Visual `v`.
 - Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `()`, `H`, `L`
-- Number count for most commands. Example `4j`, `3gg`, `d3gE`
+- Number count for most commands. Example `10j`, `3gg`, `d4gE`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
-- Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`
-- Undo/redo: `u`, `C-r`
+- Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`, `S`
+- Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P` 
 
-- Aliases: `/` = default search bar, `Ins` = i, `U` = C-r, `BS` = h 
+- Aliases: `/` = default search bar, `Ins` = i, `BS` = h 
 
 Supported Insert mode commands:
 - Switch to Normal mode: `Esc`, aliases: `C-[`, `C-c`
@@ -71,7 +71,7 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
 - Start and end of text which for example `G` and `gg` use, operate on *text container* like C-Home/End in LibreOffice. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
-- For yank/paste system clipboard is used instead of registers. `x` and `X` don't yank
+- For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank
   to clipboard but just delete.
 - `H` and `L` motions move cursor to start and end of page instead of screen.
 - Operators don't support `j` or `k`.

@@ -1272,52 +1272,6 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _delete_characters(count:int, key, mode:str) -> bool:
-    """Delete characters. Commands 'x','X' and 's'."""
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
-        return False
-    try:
-        if mode != "visual":
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            if key.char == "X":
-                text_cursor.collapseToStart()
-                # At start of line
-                if not text_cursor.goLeft(count, True):
-                    return False
-            # At end of line
-            elif not text_cursor.goRight(count, True):
-                return False
-
-        elif key.char == "X":
-            # X in visual mode: expand selection to cover full visual lines.
-            # gotoStartOfLine/gotoEndOfLine are view cursor methods, so use
-            # the view cursor to navigate to each end of the selection first.
-            cursor = _get_cursor()
-            if cursor is None:
-                return False
-            sel_start = text_cursor.getStart()
-            sel_end   = text_cursor.getEnd()
-            cursor.gotoRange(sel_start, False)
-            cursor.gotoStartOfLine(False)
-            line_start = cursor.getStart()
-            cursor.gotoRange(sel_end, False)
-            cursor.gotoEndOfLine(False)
-            line_end = cursor.getStart()
-            text_cursor.gotoRange(line_start, False)
-            text_cursor.gotoRange(line_end, True)
-
-        text_cursor.setString("")
-
-        if key.char == "s":
-            _switch_to_insert("i")
-        elif mode == "visual":
-            _goto_mode("normal")
-        return True
-    except Exception:
-        return False
-
-
 # Commmand 'Esc',
 def _leave_insert_to_normal():
     if _get_mode() == "normal":
@@ -1441,9 +1395,78 @@ def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
         return False
 
 
+def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
+    """Delete single characters. Commands 'x','X' and 's'."""
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+    try:
+        if mode == "visual" and key.char == "X":
+            _delete_selected_lines(key)
+
+        if mode != "visual":
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            if key.char == "X":
+                text_cursor.collapseToStart()
+                # At start of line
+                if not text_cursor.goLeft(count, True):
+                    return False
+            # At end of line
+            elif not text_cursor.goRight(count, True):
+                return False
+
+        text_cursor.setString("")
+
+        if key.char == "s":
+            _switch_to_insert("i")
+        elif mode == "visual":
+            _goto_mode("normal")
+        return True
+    except Exception:
+        return False
+
+
+def _delete_selected_lines(key:KeyEvent):
+    """Delete lines which have selection. Commands 'S', in visual mode 'X'."""
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+    try:
+        # X in visual mode: expand selection to cover full visual lines.
+        # gotoStartOfLine/gotoEndOfLine are view cursor methods, so use
+        # the view cursor to navigate to each end of the selection first.
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        sel_start = text_cursor.getStart()
+        sel_end   = text_cursor.getEnd()
+        cursor.gotoRange(sel_start, False)
+        cursor.gotoStartOfLine(False)
+        line_start = cursor.getStart()
+        cursor.gotoRange(sel_end, False)
+        cursor.gotoEndOfLine(False)
+        line_end = cursor.getStart()
+        text_cursor.gotoRange(line_start, False)
+        text_cursor.gotoRange(line_end, True)
+
+        text_cursor.setString("")
+
+        if key.char == "S":
+            _switch_to_insert("i")
+        else:
+            _goto_mode("normal")
+        return True
+    except Exception:
+        return False
+
+
 def _delete_and_replace(count:int, pending_keys, key_char:str, mode:str) -> bool:
     """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
-    if key_char in ("C", "D", "S"):
+    if mode == "normal" and key_char in ("c", "d"):
+        _add_pending_key(key_char)
+        return _goto_mode("pending")
+
+    if key_char in ("C", "D"):  # To end of line commands.
         cursor = _get_cursor()
         text_cursor = _get_text_cursor()
         if cursor is None or text_cursor is None:
@@ -1451,28 +1474,16 @@ def _delete_and_replace(count:int, pending_keys, key_char:str, mode:str) -> bool
         # collapse to pos 0 (char under cursor)
         cursor.gotoRange(text_cursor.getStart(), False)
         _to_end_of_line(True, count, None)
-        _copy_and_delete(True, True)
-        if key_char in ("C", "S"):
-            _goto_mode("insert")
-        else:
-            _goto_mode("normal")
-        return True
 
-    if mode == "normal" and pending_keys is None:
-        if key_char in ("c", "d"):
-            _add_pending_key(key_char)
-            _goto_mode("pending")
-            return True
-        return False
-
-    # Linewise delete/replace 'dd' and 'cc'.
-    if pending_keys in ("c", "d") and key_char == pending_keys:
+    # Linewise delete/replace 'dd', 'cc' and 'S'.
+    if (pending_keys in ("c", "d") and key_char == pending_keys) or key_char == "S":
         _to_start_of_line(False, False)
         _charwise_motion("j", count, True)
 
     _copy_and_delete(True, True)
 
-    if key_char == 'c' or pending_keys is not None and pending_keys[0] == "c":
+    if key_char in ('c', 'C', 'S') or \
+        pending_keys is not None and pending_keys[0] in ("c", "C"):
         _goto_mode("insert")
     else:
         _goto_mode("normal")
@@ -1490,8 +1501,7 @@ def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
         # collapse to pos 0 (char under cursor)
         cursor.gotoRange(text_cursor.getStart(), False)
         _to_end_of_line(True, count, None)
-        _copy_and_delete(True, False)
-        return True
+        return _copy_and_delete(True, False)
 
     if mode == "normal" and pending_keys is None:
         _set_position()
@@ -1505,6 +1515,7 @@ def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
             _charwise_motion("j", count, True)
 
     _copy_and_delete(True, False)
+
     position = _get_position()
     cursor = _get_cursor()
     if (position is not None and cursor is not None) and mode != "visual":
@@ -1618,7 +1629,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "u": lambda: _undo_and_redo(count),
                 "U": lambda: _undo_and_redo(count, True),
                 "s": lambda: _delete_characters(count, key, mode),
-                "S": lambda: _delete_and_replace(count, pending_keys, key.char, _get_mode()),
+                "S": lambda: _delete_selected_lines(key),
                 "x": lambda: _delete_characters(count, key, mode),
                 "X": lambda: _delete_characters(count, key, mode),
                 "y": lambda: _yank(count, pending_keys, key.char, mode),
@@ -1661,7 +1672,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 motions["0"] = lambda: _to_start_of_line(expand, False)
 
         return motions
-
     # ------------------------------------------
     def keyPressed(self, event):
         state = _state()
@@ -1771,7 +1781,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_action(lambda: _goto_mode("normal"))
         # Deliberately cancels operator pending mode.
         if _is_del_key(event):
-            return self._consume_action(lambda: _delete_characters(count, "x", mode))
+            return self._consume_action(lambda: _delete_characters(count, key, mode))
         if _is_insert_key(event):
             return self._consume_action(lambda: _switch_to_insert("i"))
 
