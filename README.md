@@ -75,7 +75,6 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 - For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank
   to clipboard but just delete.
 - `H` and `L` motions move cursor to start and end of page instead of screen.
-- Operators don't support `j` or `k`.
 - `Y` does same as `y$`.
 
 ## Known issues / missing features

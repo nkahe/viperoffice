@@ -446,19 +446,39 @@ def _focus_findbar() -> bool:
 
 
 # Commands 'h', 'j', 'k', 'l'.
-def _charwise_motion(cmd:str, count:int, expand:bool, mode) -> bool:
+def _hjkl_motion(cmd:str, count:int, expand:bool, mode) -> bool:
+    """Motion to left/right [count] characters for commands 'h' and 'l' or
+    [count] lines up and down with 'j' and 'k'.
+    """
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
         if cmd == "h":
             return bool(cursor.goLeft(count, expand))
+
         if cmd == "l":
             return bool(cursor.goRight(count, expand))
+
         if cmd == "j":
+            if mode == "pending":
+                _to_start_of_line(False, False)
+                count += 1
             return bool(cursor.goDown(count, expand))
+
         if cmd == "k":
+            if mode == "pending":
+                _to_end_of_line(False, 1)
+                # At a soft-wrap point the inter-word space sits at the start of
+                # the next visual line. Step past it so the selection includes it
+                # and doesn't get left behind as a leading space after deletion.
+                tc = _get_text_cursor()
+                if tc is not None and not tc.isEndOfParagraph():
+                    cursor.goRight(1, False)
+                _to_start_of_line(True, False)
+                count += 1
             return bool(cursor.goUp(count, expand))
+
     except Exception:
         return False
     return False
@@ -1478,7 +1498,7 @@ def _delete_and_replace(count:int, pending_keys, key_char:str, mode:str) -> bool
     # Linewise delete/replace 'dd', 'cc' and 'S'.
     if (pending_keys in ("c", "d") and key_char == pending_keys) or key_char == "S":
         _to_start_of_line(False, False)
-        _charwise_motion("j", count, True, mode)
+        _hjkl_motion("j", count, True, mode)
 
     _copy_and_delete(True, True)
 
@@ -1512,7 +1532,7 @@ def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
     # Linewise yanking 'yy'.
     elif pending_keys == "y" and key_char == "y":
             _to_start_of_line(False, False)
-            _charwise_motion("j", count, True, mode)
+            _hjkl_motion("j", count, True, mode)
 
     _copy_and_delete(True, False)
 
@@ -1610,9 +1630,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Available commands after "g" command.
         if "g" in (pending_keys or ""):
             actions = {
+                # Currently "g" has only motions.
             }
         else:
-            # "j" and "k" are here since operators don't support them.
             actions = {
                 "c": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
                 "C": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
@@ -1654,10 +1674,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             }
         else:
             motions = {
-                "j": lambda: _charwise_motion("j", count, expand, mode),
-                "k": lambda: _charwise_motion("k", count, expand, mode),
-                "h": lambda: _charwise_motion("h", count, expand, mode),
-                "l": lambda: _charwise_motion("l", count, expand, mode),
+                "h": lambda: _hjkl_motion("h", count, expand, mode),
+                "j": lambda: _hjkl_motion("j", count, expand, mode),
+                "k": lambda: _hjkl_motion("k", count, expand, mode),
+                "l": lambda: _hjkl_motion("l", count, expand, mode),
                 "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
                 "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
@@ -1762,7 +1782,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # Before count parsing.
         if _is_backspace_key(event):
-            return self._consume_action(lambda: _charwise_motion("h", count, False, mode))
+            return self._consume_action(lambda: _hjkl_motion("h", count, False, mode))
 
         if _is_function_key(event):
             return False
