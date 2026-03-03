@@ -1306,43 +1306,48 @@ def _leave_insert_to_normal():
     return _goto_mode("normal")
 
 
-def _switch_to_insert(cmd:str):
+def _insert_commands(cmd:str, mode="normal"):
     """For Normal mode commands 'a', 'I', 'A', 'o', 'O'."""
     try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+
         if cmd == "a" or cmd == "A":
             textCursor = _get_text_cursor()
-            cursor = _get_cursor()
             if cmd == "A":
+                if mode == "visual":
+                    if cursor is not None:
+                        cursor.gotoRange(cursor.getEnd(), False)
                 _to_end_of_line(False, 1, None)
             elif textCursor is not None and not textCursor.isEndOfParagraph():
                  cursor.goRight(1, False)
+            return _goto_mode("insert")
 
         elif cmd == "I":
+            if mode == "visual":
+                # Move to the line where the selection starts before going to line start
+                cursor.gotoRange(cursor.getStart(), False)
             _to_start_of_line(False, True)
+            return _goto_mode("insert")
 
-        elif cmd == "o":
-            cursor = _get_cursor()
-            if cursor is not None:
-                _to_end_of_line(False, 0, None)
-                cursor.goRight(1, False)
-                cursor.setString(chr(13))  # CR
-                if not cursor.isAtStartOfLine():
-                    cursor.setString(chr(13) + chr(13))
-                    cursor.goRight(1, False)
-
+        if cmd == "o":
+            _to_end_of_line(False, 0, None)
+            cursor.goRight(1, False)
         elif cmd == "O":
             _to_start_of_line(False, False)
-            cursor = _get_cursor()
-            if cursor is not None:
-                cursor.setString(chr(13))  # CR
-                if not cursor.isAtStartOfLine():
-                    cursor.goLeft(1, False)
-                    cursor.setString(chr(13) + chr(13))
-                    cursor.goRight(1, False)
+        else:
+            return False
+
+        cursor.setString(chr(13))  # CR
+        if not cursor.isAtStartOfLine():
+            cursor.goLeft(1, False)
+            cursor.setString(chr(13) + chr(13))
+            cursor.goRight(1, False)
+        return _goto_mode("insert")
 
     except Exception:
-        pass
-    _goto_mode("insert")
+        return False
 
 
 def _undo_and_redo(count=1, redo=False) -> bool:
@@ -1438,7 +1443,7 @@ def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
         text_cursor.setString("")
 
         if key.char == "s":
-            _switch_to_insert("i")
+            _insert_commands("i", mode)
         elif mode == "visual":
             _goto_mode("normal")
         return True
@@ -1472,7 +1477,7 @@ def _delete_selected_lines(key:KeyEvent):
         text_cursor.setString("")
 
         if key.char == "S":
-            _switch_to_insert("i")
+            _insert_commands("i")
         else:
             _goto_mode("normal")
         return True
@@ -1632,7 +1637,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     @staticmethod
-    def _normal_actions(key, count:int, pending_keys, expand):
+    def _normal_actions_keymap(key, count:int, pending_keys):
         """Build Normal-mode command dispatch map for actions."""
         mode = _get_mode()
         # Available commands after "g" command.
@@ -1648,11 +1653,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "D": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
                 "g": lambda: KeyHandler._g_command(pending_keys),
                 "i": lambda: _goto_mode("insert"),
-                "I": lambda: _switch_to_insert("I"),
-                "a": lambda: _switch_to_insert("a"),
-                "A": lambda: _switch_to_insert("A"),
-                "o": lambda: _switch_to_insert("o"),
-                "O": lambda: _switch_to_insert("O"),
+                "I": lambda: _insert_commands("I", mode),
+                "a": lambda: _insert_commands("a", mode),
+                "A": lambda: _insert_commands("A", mode),
+                "o": lambda: _insert_commands("o", mode),
+                "O": lambda: _insert_commands("O", mode),
                 "p": lambda: _paste(count, True),
                 "P": lambda: _paste(count, False),
                 "r": lambda: _replace_character(count, pending_keys, key, mode),
@@ -1671,7 +1676,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     # These can be used independently or with operators.
     @staticmethod
-    def _motions(key, expand, count:int, pending_keys, mode):
+    def _motions_keymap(key, expand, count:int, pending_keys, mode):
         """Build motion dispatch map for actions."""
         # Available motions after "g" command.
         if "g" in (pending_keys or ""):
@@ -1815,14 +1820,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_del_key(event):
             return self._consume_action(lambda: _delete_characters(count, key, mode))
         if _is_insert_key(event):
-            return self._consume_action(lambda: _switch_to_insert("i"))
+            return self._consume_action(lambda: _insert_commands("i", mode))
 
         return self._consume_action(None)
     # -----------------------------------------
 
     def _match_motions(self, key, count, pending_keys, mode):
         expand: bool = _get_mode() in ("visual", "pending")
-        motions = self._motions(key, expand, count, pending_keys, mode)
+        motions = self._motions_keymap(key, expand, count, pending_keys, mode)
         motion = motions.get(key.char)
         if motion is None:
             return None
@@ -1841,7 +1846,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def _match_commands(self, key, count, pending_keys):
         expand: bool = _get_mode() in ("visual", "pending")
-        normal_actions = self._normal_actions(key, count, pending_keys, expand)
+        normal_actions = self._normal_actions_keymap(key, count, pending_keys)
         action = normal_actions.get(key.char)
         if action is None:
             return None
