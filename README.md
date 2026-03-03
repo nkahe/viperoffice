@@ -47,13 +47,13 @@ Currently supported commands:
 - Replace: `r`
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`, `S`
 - Undo/redo: `u`, `C-r` / `U`
-- Copy/paste: `y`, `yy`, `Y`, `p`, `P` 
+- Copy/paste: `y`, `yy`, `Y`, `p`, `P`
 - Search: `/` (LibreOffice search bar)
 
-- Aliases `Ins` = i, `BS` = h 
+- Aliases `Ins` = i, `BS` = h, `C-c` = Esc in Insert mode, `y`in Visual mode.
 
 Supported Insert mode commands:
-- Switch to Normal mode: `Esc`, aliases: `C-[`, `C-c`
+- Switch to Normal mode: `Esc`, aliases: `C-[`, `C-c` copy in visual mode.
 
 Other shortcuts and keys are passed to LibreOffice.
 

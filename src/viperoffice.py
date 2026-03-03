@@ -1577,6 +1577,14 @@ def _replace_character(count:int, pending_keys, key:KeyEvent, mode) -> bool:
         return False
 
 
+def _ctrl_c_command(mode:str):
+    if mode == "normal":
+        _reset_pending_keys()
+    elif mode == "visual":
+        _copy_and_delete(True, False)
+    _goto_mode("normal")
+
+
 # --------------
 # Input handling
 # --------------
@@ -1605,7 +1613,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return True
 
     @staticmethod
-    def _normal_ctrl_actions(count):
+    def _normal_ctrl_actions(count, mode):
         b_code = int(getattr(Key, "B", 512))
         c_code = int(getattr(Key, "C", 514))
         d_code = int(getattr(Key, "D", 515))
@@ -1614,7 +1622,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         u_code = int(getattr(Key, "U", 532))
 
         actions = {
-            c_code: lambda: _reset_pending_keys(),
+            c_code: lambda: _ctrl_c_command(mode),
             b_code: lambda: _scroll_window(count, False, False),
             f_code: lambda: _scroll_window(count, True, False),
             d_code: lambda: _scroll_window(count, True, True),
@@ -1730,7 +1738,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # --- Keys with non-shift/AltGr modifiers -------
 
         if key.is_ctrl:
-            actions = self._normal_ctrl_actions(count)
+            actions = self._normal_ctrl_actions(count, mode)
             action = actions.get(key.code)
             if action is not None:
                 return self._consume_action(action)
