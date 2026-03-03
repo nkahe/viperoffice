@@ -43,14 +43,17 @@ def _state():
             "started": False,
             "enabled": False,
             # Current vi input mode. Can be currently "normal", "insert",
-            # "pending" or "visual".
+            # "pending" or "visual". "pending" is short for Operator pending
+            # mode. Happens after operator command "d", "c" or "y" and it's
+            # pending for motion.
             "mode": "normal",
             # Visible cursor. Type is XViewCursor UNO object.
             "view_cursor": None,
             # An optional number that may precede the command to multiply or
             # iterate the command. Type int.
             "count": 0,
-            # Pending commands like 'd' or 'dg'. Type str | None.
+            # Pending commands like 'd' or 'g'. Type str | None. Note that only
+            # operator commands result to operator pending mode.
             "pending_keys": None,
             "key_handler": None,
             # Saved cursor position for example position need to be restored
@@ -390,7 +393,8 @@ def _goto_mode(mode_name: str) -> bool:
     if mode_name == "normal":
         _reset_pending_keys()
         # When leaving visual mode, keep cursor at the caret (active) end.
-        if _get_mode() == "visual":
+        current_mode = _get_mode()
+        if current_mode == "visual":
             controller = _current_controller()
             text_cursor = _get_text_cursor()
             if controller is not None and text_cursor is not None:
@@ -398,7 +402,7 @@ def _goto_mode(mode_name: str) -> bool:
                 caret = _get_visual_caret_range(text_cursor)
                 _clear_visual_anchor()
                 text_cursor.gotoRange(caret, False)
-                text_cursor.goLeft(1, False)
+                # text_cursor.goLeft(1, False)
                 controller.select(text_cursor)
             else:
                 _clear_visual_anchor()
@@ -416,7 +420,7 @@ def _goto_mode(mode_name: str) -> bool:
             if mode_name == "visual":
                 # Save current position as anchor before expanding selection.
                 _set_visual_anchor(text_cursor.getStart())
-                text_cursor.goRight(1, True)
+                # text_cursor.goRight(1, True)
             controller.select(text_cursor)
 
         if mode_name == "pending":
@@ -1412,7 +1416,7 @@ def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
         return False
 
 
-def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
+def _delete_command(count:int, pending_keys, key_char:str, mode:str) -> bool:
     """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
     if key_char in ("C", "D", "S"):
         cursor = _get_cursor()
@@ -1429,24 +1433,25 @@ def _delete_command(count:int, pending_keys:str|None, key_char:str) -> bool:
             _goto_mode("normal")
         return True
 
-    if pending_keys is None:
+    if mode == "normal" and pending_keys is None:
         if key_char in ("c", "d"):
             _add_pending_key(key_char)
             _goto_mode("pending")
             return True
         return False
 
-    if pending_keys in ("d", "dg", "c"):
-        if key_char in ("d", "c") :  # 'dd', 'cc'
-            _to_start_of_line(False, False)
-            _charwise_motion("j", count, True)
-        _yank_and_delete(True, True)
-        if pending_keys[0] == "c":
-            _goto_mode("insert")
-        else:
-            _goto_mode("normal")
+    # Linewise delete/replace 'dd' and 'cc'.
+    if pending_keys in ("c", "d") and key_char == pending_keys:
+        _to_start_of_line(False, False)
+        _charwise_motion("j", count, True)
 
-    return False
+    _yank_and_delete(True, True)
+
+    if key_char == 'c' or pending_keys is not None and pending_keys[0] == "c":
+        _goto_mode("insert")
+    else:
+        _goto_mode("normal")
+    return True
 
 
 def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
@@ -1560,6 +1565,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     @staticmethod
     def _normal_actions(key, count:int, pending_keys, expand):
         """Build Normal-mode command dispatch map for actions."""
+        mode = _get_mode()
         # Available commands after "g" command.
         if "g" in (pending_keys or ""):
             actions = {
@@ -1567,10 +1573,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         else:
             # "j" and "k" are here since operators don't support them.
             actions = {
-                "c": lambda: _delete_command(count, pending_keys, key.char),
-                "C": lambda: _delete_command(count, pending_keys, key.char),
-                "d": lambda: _delete_command(count, pending_keys, key.char),
-                "D": lambda: _delete_command(count, pending_keys, key.char),
+                "c": lambda: _delete_command(count, pending_keys, key.char, mode),
+                "C": lambda: _delete_command(count, pending_keys, key.char, mode),
+                "d": lambda: _delete_command(count, pending_keys, key.char, mode),
+                "D": lambda: _delete_command(count, pending_keys, key.char, mode),
                 "g": lambda: KeyHandler._g_command(pending_keys),
                 "j": lambda: _charwise_motion("j", count, expand),
                 "k": lambda: _charwise_motion("k", count, expand),
@@ -1586,7 +1592,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "u": lambda: _undo_and_redo(count),
                 "U": lambda: _undo_and_redo(count, True),
                 "s": lambda: _delete_characters(count, False, True),
-                "S": lambda: _delete_command(count, pending_keys, key.char),
+                "S": lambda: _delete_command(count, pending_keys, key.char, _get_mode()),
                 "x": lambda: _delete_characters(count, False),
                 "X": lambda: _delete_characters(count, True),
                 "y": lambda: _y_command(count, pending_keys, key.char),
@@ -1738,7 +1744,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.is_escape:
             return self._consume_action(lambda: _goto_mode("normal"))
         # Deliberately cancels operator pending mode.
-        if _is_delete_key(event):
+        if _is_del_key(event):
             return self._consume_action(_delete_characters)
         if _is_insert_key(event):
             return self._consume_action(lambda: _switch_to_insert("i"))
@@ -1755,7 +1761,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # If operator is pending, add it to be done after motion.
         if "c" in (pending_keys or "") or "d" in (pending_keys or ""):
             return self._consume_action(motion,
-                lambda: _delete_command(count, pending_keys, key.char)
+                lambda: _delete_command(count, pending_keys, key.char, _get_mode())
             )
         elif "y" in (pending_keys or ""):
             return self._consume_action(motion,
@@ -1954,7 +1960,7 @@ def _is_insert_key(event):
         return False
 
 
-def _is_delete_key(event):
+def _is_del_key(event):
     try:
         return _key_code(event) == int(getattr(Key, "DELETE"))
     except Exception:
