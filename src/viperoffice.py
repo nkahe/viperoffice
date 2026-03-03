@@ -1458,7 +1458,7 @@ def _delete_command(count:int, pending_keys, key_char:str, mode:str) -> bool:
     return True
 
 
-def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
+def _y_command(count, pending_keys:str|None, key_char:str, mode) -> bool:
     """Yanks text {motion} moves over"""
     # msg(f"d-command: {pending_keys=} {key_char}")
     if key_char == "Y":
@@ -1472,31 +1472,32 @@ def _y_command(count, pending_keys:str|None, key_char:str) -> bool:
         _yank_and_delete(True, False)
         return True
 
-    if pending_keys is None:
+    if mode == "normal" and pending_keys is None:
         _set_position()
         _add_pending_key("y")
         _goto_mode("pending")
         return True
 
-    elif pending_keys in ("y", "yg"):
-        if key_char == "y" :  # 'yy'
+    # Linewise yanking 'yy'.
+    elif pending_keys == "y" and key_char == "y":
             _to_start_of_line(False, False)
             _charwise_motion("j", count, True)
-        _yank_and_delete(True, False)
-        position = _get_position()
-        cursor = _get_cursor()
-        if position is not None and cursor is not None:
-            # Keep yanked range visually selected briefly, then restore cursor.
-            # Use _set_mode instead of _goto_mode so the selection isn't
-            # collapsed immediately by _show_normal_cursor().
-            def _flash_restore():
-                cursor.gotoRange(position, False)
-                _show_normal_cursor()
-            threading.Timer(0.08, _flash_restore).start()
-            _reset_pending_keys()
-            _set_mode("normal")
-            return True
-    return False
+
+    _yank_and_delete(True, False)
+    position = _get_position()
+    cursor = _get_cursor()
+    if (position is not None and cursor is not None) and mode != "visual":
+        # Keep yanked range visually selected briefly, then restore cursor.
+        # Use _set_mode instead of _goto_mode so the selection isn't
+        # collapsed immediately by _show_normal_cursor().
+        def _flash_restore():
+            cursor.gotoRange(position, False)
+            _show_normal_cursor()
+        threading.Timer(0.08, _flash_restore).start()
+
+    _reset_pending_keys()
+    _set_mode("normal")
+    return True
 
 
 def _replace_character(count:int, pending_keys, key_char:str) -> bool:
@@ -1599,8 +1600,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "S": lambda: _delete_command(count, pending_keys, key.char, _get_mode()),
                 "x": lambda: _delete_characters(count, False),
                 "X": lambda: _delete_characters(count, True),
-                "y": lambda: _y_command(count, pending_keys, key.char),
-                "Y": lambda: _y_command(count, pending_keys, key.char),
+                "y": lambda: _y_command(count, pending_keys, key.char, mode),
+                "Y": lambda: _y_command(count, pending_keys, key.char, mode),
                 "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
             }
@@ -1769,7 +1770,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             )
         elif "y" in (pending_keys or ""):
             return self._consume_action(motion,
-                lambda: _y_command(count, pending_keys, key.char)
+                lambda: _y_command(count, pending_keys, key.char, _get_mode())
             )
         elif "g" in (pending_keys or ""):
             return self._consume_action(motion, lambda: _reset_pending_keys())
