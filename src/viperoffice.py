@@ -464,8 +464,8 @@ def _charwise_motion(cmd:str, count:int, expand:bool) -> bool:
     return False
 
 
-def _yank_and_delete(yank:bool, delete:bool) -> bool:
-    """Yank and/or delete current selection to clipboard."""
+def _copy_and_delete(yank:bool, delete:bool) -> bool:
+    """Copy and/or delete selection to clipboard."""
     try:
         if yank == False and delete == False:
             return False
@@ -527,8 +527,6 @@ def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
         if not first_non_blank:
             return bool(cursor.gotoStartOfLine(expand))
 
-        text_cursor = _get_text_cursor()
-
         # This variable represents the original line the cursor was on before
         # any of the following changes.
         old_line = cursor.getPosition().Y
@@ -541,6 +539,7 @@ def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
             cursor.goLeft(1, False)
 
         cursor.gotoStartOfLine(True)
+        text_cursor = _get_text_cursor()
         line_text = cursor.getString()
         cursor.gotoRange(text_cursor, False)
         cursor.gotoStartOfLine(expand)
@@ -1273,25 +1272,47 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
-# For commands 'x','X' and 's'.
-def _delete_characters(count=1, reverse=False, substitute=False) -> bool:
-    textCursor = _get_text_cursor()
-    if textCursor is None:
+def _delete_characters(count:int, key, mode:str) -> bool:
+    """Delete characters. Commands 'x','X' and 's'."""
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
         return False
     try:
-        textCursor.gotoRange(textCursor.getStart(), False)
-        if reverse is True:
-            textCursor.collapseToStart()
-            # At start of line
-            if not textCursor.goLeft(count, True):
+        if mode != "visual":
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            if key.char == "X":
+                text_cursor.collapseToStart()
+                # At start of line
+                if not text_cursor.goLeft(count, True):
+                    return False
+            # At end of line
+            elif not text_cursor.goRight(count, True):
                 return False
-        # At end of line
-        elif not textCursor.goRight(count, True):
-            return False
-        textCursor.setString("")
-        if substitute:
-            state = _state()
+
+        elif key.char == "X":
+            # X in visual mode: expand selection to cover full visual lines.
+            # gotoStartOfLine/gotoEndOfLine are view cursor methods, so use
+            # the view cursor to navigate to each end of the selection first.
+            cursor = _get_cursor()
+            if cursor is None:
+                return False
+            sel_start = text_cursor.getStart()
+            sel_end   = text_cursor.getEnd()
+            cursor.gotoRange(sel_start, False)
+            cursor.gotoStartOfLine(False)
+            line_start = cursor.getStart()
+            cursor.gotoRange(sel_end, False)
+            cursor.gotoEndOfLine(False)
+            line_end = cursor.getStart()
+            text_cursor.gotoRange(line_start, False)
+            text_cursor.gotoRange(line_end, True)
+
+        text_cursor.setString("")
+
+        if key.char == "s":
             _switch_to_insert("i")
+        elif mode == "visual":
+            _goto_mode("normal")
         return True
     except Exception:
         return False
@@ -1420,7 +1441,7 @@ def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
         return False
 
 
-def _delete_command(count:int, pending_keys, key_char:str, mode:str) -> bool:
+def _delete_and_replace(count:int, pending_keys, key_char:str, mode:str) -> bool:
     """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
     if key_char in ("C", "D", "S"):
         cursor = _get_cursor()
@@ -1430,7 +1451,7 @@ def _delete_command(count:int, pending_keys, key_char:str, mode:str) -> bool:
         # collapse to pos 0 (char under cursor)
         cursor.gotoRange(text_cursor.getStart(), False)
         _to_end_of_line(True, count, None)
-        _yank_and_delete(True, True)
+        _copy_and_delete(True, True)
         if key_char in ("C", "S"):
             _goto_mode("insert")
         else:
@@ -1449,7 +1470,7 @@ def _delete_command(count:int, pending_keys, key_char:str, mode:str) -> bool:
         _to_start_of_line(False, False)
         _charwise_motion("j", count, True)
 
-    _yank_and_delete(True, True)
+    _copy_and_delete(True, True)
 
     if key_char == 'c' or pending_keys is not None and pending_keys[0] == "c":
         _goto_mode("insert")
@@ -1458,8 +1479,8 @@ def _delete_command(count:int, pending_keys, key_char:str, mode:str) -> bool:
     return True
 
 
-def _y_command(count, pending_keys:str|None, key_char:str, mode) -> bool:
-    """Yanks text {motion} moves over"""
+def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
+    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y`."""
     # msg(f"d-command: {pending_keys=} {key_char}")
     if key_char == "Y":
         cursor = _get_cursor()
@@ -1469,7 +1490,7 @@ def _y_command(count, pending_keys:str|None, key_char:str, mode) -> bool:
         # collapse to pos 0 (char under cursor)
         cursor.gotoRange(text_cursor.getStart(), False)
         _to_end_of_line(True, count, None)
-        _yank_and_delete(True, False)
+        _copy_and_delete(True, False)
         return True
 
     if mode == "normal" and pending_keys is None:
@@ -1483,7 +1504,7 @@ def _y_command(count, pending_keys:str|None, key_char:str, mode) -> bool:
             _to_start_of_line(False, False)
             _charwise_motion("j", count, True)
 
-    _yank_and_delete(True, False)
+    _copy_and_delete(True, False)
     position = _get_position()
     cursor = _get_cursor()
     if (position is not None and cursor is not None) and mode != "visual":
@@ -1578,10 +1599,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         else:
             # "j" and "k" are here since operators don't support them.
             actions = {
-                "c": lambda: _delete_command(count, pending_keys, key.char, mode),
-                "C": lambda: _delete_command(count, pending_keys, key.char, mode),
-                "d": lambda: _delete_command(count, pending_keys, key.char, mode),
-                "D": lambda: _delete_command(count, pending_keys, key.char, mode),
+                "c": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
+                "C": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
+                "d": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
+                "D": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
                 "g": lambda: KeyHandler._g_command(pending_keys),
                 "j": lambda: _charwise_motion("j", count, expand),
                 "k": lambda: _charwise_motion("k", count, expand),
@@ -1596,12 +1617,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "r": lambda: _replace_character(count, pending_keys, key.char),
                 "u": lambda: _undo_and_redo(count),
                 "U": lambda: _undo_and_redo(count, True),
-                "s": lambda: _delete_characters(count, False, True),
-                "S": lambda: _delete_command(count, pending_keys, key.char, _get_mode()),
-                "x": lambda: _delete_characters(count, False),
-                "X": lambda: _delete_characters(count, True),
-                "y": lambda: _y_command(count, pending_keys, key.char, mode),
-                "Y": lambda: _y_command(count, pending_keys, key.char, mode),
+                "s": lambda: _delete_characters(count, key, mode),
+                "S": lambda: _delete_and_replace(count, pending_keys, key.char, _get_mode()),
+                "x": lambda: _delete_characters(count, key, mode),
+                "X": lambda: _delete_characters(count, key, mode),
+                "y": lambda: _yank(count, pending_keys, key.char, mode),
+                "Y": lambda: _yank(count, pending_keys, key.char, mode),
                 "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
             }
@@ -1750,7 +1771,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_action(lambda: _goto_mode("normal"))
         # Deliberately cancels operator pending mode.
         if _is_del_key(event):
-            return self._consume_action(_delete_characters)
+            return self._consume_action(lambda: _delete_characters(count, "x", mode))
         if _is_insert_key(event):
             return self._consume_action(lambda: _switch_to_insert("i"))
 
@@ -1766,11 +1787,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # If operator is pending, add it to be done after motion.
         if "c" in (pending_keys or "") or "d" in (pending_keys or ""):
             return self._consume_action(motion,
-                lambda: _delete_command(count, pending_keys, key.char, _get_mode())
+                lambda: _delete_and_replace(count, pending_keys, key.char, _get_mode())
             )
         elif "y" in (pending_keys or ""):
             return self._consume_action(motion,
-                lambda: _y_command(count, pending_keys, key.char, _get_mode())
+                lambda: _yank(count, pending_keys, key.char, _get_mode())
             )
         elif "g" in (pending_keys or ""):
             return self._consume_action(motion, lambda: _reset_pending_keys())
