@@ -446,7 +446,7 @@ def _focus_findbar() -> bool:
 
 
 # Commands 'h', 'j', 'k', 'l'.
-def _charwise_motion(cmd:str, count:int, expand:bool) -> bool:
+def _charwise_motion(cmd:str, count:int, expand:bool, mode) -> bool:
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -1478,7 +1478,7 @@ def _delete_and_replace(count:int, pending_keys, key_char:str, mode:str) -> bool
     # Linewise delete/replace 'dd', 'cc' and 'S'.
     if (pending_keys in ("c", "d") and key_char == pending_keys) or key_char == "S":
         _to_start_of_line(False, False)
-        _charwise_motion("j", count, True)
+        _charwise_motion("j", count, True, mode)
 
     _copy_and_delete(True, True)
 
@@ -1512,7 +1512,7 @@ def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
     # Linewise yanking 'yy'.
     elif pending_keys == "y" and key_char == "y":
             _to_start_of_line(False, False)
-            _charwise_motion("j", count, True)
+            _charwise_motion("j", count, True, mode)
 
     _copy_and_delete(True, False)
 
@@ -1532,7 +1532,7 @@ def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
     return True
 
 
-def _replace_character(count:int, pending_keys, key_char:str) -> bool:
+def _replace_character(count:int, pending_keys, key:KeyEvent, mode) -> bool:
     """Replace character(s) under cursor with {key_char}.
        With {count} replace {count} characters with {count} {key_char}.
     """
@@ -1546,9 +1546,12 @@ def _replace_character(count:int, pending_keys, key_char:str) -> bool:
         length = len(cursor.getString())
 
         if length > 1:
-            cursor.setString(key_char * length)
+            cursor.setString(key.char * length)
         else:
-            cursor.setString(key_char * count)
+            cursor.setString(key.char * count)
+
+        if mode == "visual":
+            _goto_mode("normal")
         return True
     except Exception:
         return False
@@ -1589,13 +1592,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         f_code = int(getattr(Key, "F", 517))
         r_code = int(getattr(Key, "R", 529))
         u_code = int(getattr(Key, "U", 532))
+
         actions = {
             c_code: lambda: _reset_pending_keys(),
             b_code: lambda: _scroll_window(count, False, False),
             f_code: lambda: _scroll_window(count, True, False),
             d_code: lambda: _scroll_window(count, True, True),
             u_code: lambda: _scroll_window(count, False, True),
-            r_code: lambda: _undo_and_redo(count, False),
+            r_code: lambda: _undo_and_redo(count, True),
         }
         return actions
 
@@ -1615,8 +1619,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "d": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
                 "D": lambda: _delete_and_replace(count, pending_keys, key.char, mode),
                 "g": lambda: KeyHandler._g_command(pending_keys),
-                "j": lambda: _charwise_motion("j", count, expand),
-                "k": lambda: _charwise_motion("k", count, expand),
                 "i": lambda: _goto_mode("insert"),
                 "I": lambda: _switch_to_insert("I"),
                 "a": lambda: _switch_to_insert("a"),
@@ -1625,8 +1627,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "O": lambda: _switch_to_insert("O"),
                 "p": lambda: _paste(count, True),
                 "P": lambda: _paste(count, False),
-                "r": lambda: _replace_character(count, pending_keys, key.char),
-                "u": lambda: _undo_and_redo(count),
+                "r": lambda: _replace_character(count, pending_keys, key, mode),
+                "u": lambda: _undo_and_redo(count, False),
                 "U": lambda: _undo_and_redo(count, True),
                 "s": lambda: _delete_characters(count, key, mode),
                 "S": lambda: _delete_selected_lines(key),
@@ -1641,7 +1643,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     # These can be used independently or with operators.
     @staticmethod
-    def _motions(key, expand, count:int, pending_keys):
+    def _motions(key, expand, count:int, pending_keys, mode):
         """Build motion dispatch map for actions."""
         # Available motions after "g" command.
         if "g" in (pending_keys or ""):
@@ -1652,8 +1654,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             }
         else:
             motions = {
-                "h": lambda: _charwise_motion("h", count, expand),
-                "l": lambda: _charwise_motion("l", count, expand),
+                "j": lambda: _charwise_motion("j", count, expand, mode),
+                "k": lambda: _charwise_motion("k", count, expand, mode),
+                "h": lambda: _charwise_motion("h", count, expand, mode),
+                "l": lambda: _charwise_motion("l", count, expand, mode),
                 "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
                 "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
@@ -1694,7 +1698,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         )
         # msg(f"{expand=} {pending_keys=} {key=}")
 
-        # Insert mode commands matching.
+        # All Insert mode matching.
         if mode == "insert":
             if key.is_escape or (key.is_ctrl and key.code == 514):  # C-c
                 return self._consume_action(_leave_insert_to_normal)
@@ -1703,24 +1707,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         pending_keys: str | None = _get_pending_keys()
         count: int = _get_count()
 
-        if pending_keys == "r":
-            if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
-                return self._consume_action(
-                    lambda: _replace_character(count, pending_keys, key.char)
-                )
-            _reset_pending_keys()
-            return True
-
-        # Count parsing
-        # - 1..9 always extend count
-        # - 0 extends count only after count has started
-        # Commands that can take count should be before this.
-        if _is_digit_char(key.char):
-            if key.char != "0" or _get_raw_count() > 0:
-                _add_to_count(int(key.char))
-                return self._consume_action(None)
-
-        # msg(f"mods: {mods}\nkey: {key}\n is_only_ctrl: {key['is_ctrl']}")
+        # --- Keys with non-shift/AltGr modifiers -------
 
         if key.is_ctrl:
             actions = self._normal_ctrl_actions(count)
@@ -1736,10 +1723,27 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if not bool(_is_altgr_char(event, key.char, key.code)):
                 return False
 
-        # ----- Keys without modifiers after this ----
+        # --- Keys without modifiers after this --------
+
+        if pending_keys == "r":
+            if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
+                return self._consume_action(
+                    lambda: _replace_character(count, pending_keys, key, mode)
+                )
+            _reset_pending_keys()
+            return True
+
+        # Count parsing
+        # - 1..9 always extend count
+        # - 0 extends count only after count has started
+        # Commands that can take count should be before this.
+        if _is_digit_char(key.char):
+            if key.char != "0" or _get_raw_count() > 0:
+                _add_to_count(int(key.char))
+                return self._consume_action(None)
 
         # Match and handle motions that support operators.
-        matched_motions = self._match_motions(key, count, pending_keys)
+        matched_motions = self._match_motions(key, count, pending_keys, mode)
         if matched_motions is not None:
             return matched_motions
 
@@ -1754,11 +1758,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _goto_mode("normal")
             return True
 
+        # ----- Non-character keys after this -----
+
         # Before count parsing.
         if _is_backspace_key(event):
-            return self._consume_action(lambda: _charwise_motion("h", count, False))
-
-        # ----- Non-character keys -----
+            return self._consume_action(lambda: _charwise_motion("h", count, False, mode))
 
         if _is_function_key(event):
             return False
@@ -1788,9 +1792,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return self._consume_action(None)
     # -----------------------------------------
 
-    def _match_motions(self, key, count, pending_keys):
+    def _match_motions(self, key, count, pending_keys, mode):
         expand: bool = _get_mode() in ("visual", "pending")
-        motions = self._motions(key, expand, count, pending_keys)
+        motions = self._motions(key, expand, count, pending_keys, mode)
         motion = motions.get(key.char)
         if motion is None:
             return None

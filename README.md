@@ -48,8 +48,9 @@ Currently supported commands:
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`, `S`
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P` 
+- Search: `/` (LibreOffice search bar)
 
-- Aliases: `/` = default search bar, `Ins` = i, `BS` = h 
+- Aliases `Ins` = i, `BS` = h 
 
 Supported Insert mode commands:
 - Switch to Normal mode: `Esc`, aliases: `C-[`, `C-c`
