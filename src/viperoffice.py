@@ -1331,6 +1331,9 @@ def _insert_commands(cmd:str, mode="normal"):
             _to_start_of_line(False, True)
             return _goto_mode("insert")
 
+        if cmd in ("o", "O") and mode == "visual":
+            return _go_to_other_end(mode)
+
         if cmd == "o":
             _to_end_of_line(False, 0, None)
             cursor.goRight(1, False)
@@ -1348,6 +1351,59 @@ def _insert_commands(cmd:str, mode="normal"):
 
     except Exception:
         return False
+
+
+# Based on Commit f33d46f from fedorov-ao/vibreoffice
+def _go_to_other_end(mode: str) -> bool:
+    """Go to the other end of highlighted text. Command 'o' / 'O' in visual mode.
+
+    The current cursor position becomes the start of the highlighted text and
+    the cursor is moved to the other end of the highlighted text. The highlighted
+    area remains the same.
+    """
+    if mode != "visual":
+        return False
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+
+    s = cursor.getString()
+    if not s:
+        return False
+
+    # Probe which end the caret is on by trying to extend right.
+    # - Selection grows  → caret was at the RIGHT (end).
+    # - Selection shrinks → caret was at the LEFT (start).
+    cursor.goRight(1, True)
+    caret_was_at_end = len(cursor.getString()) > len(s)
+
+    if caret_was_at_end:
+        # Undo probe to restore original selection, then rebuild right→left.
+        cursor.goLeft(1, True)
+        cursor.collapseToEnd()
+        cursor.goLeft(len(s), True)
+        for _ in range(10):   # small bounded correction for paragraph marks
+            if cursor.getString() == s:
+                break
+            cursor.goLeft(1, True)
+        new_tc = _get_text_cursor()
+        if new_tc is not None:
+            _set_visual_anchor(new_tc.getEnd())
+    else:
+        # Collapse to start, step back 1 to include the first character
+        # then rebuild left→right.
+        cursor.collapseToStart()
+        cursor.goLeft(1, False)
+        cursor.goRight(len(s), True)
+        for _ in range(10):
+            if cursor.getString() == s:
+                break
+            cursor.goRight(1, True)
+        new_tc = _get_text_cursor()
+        if new_tc is not None:
+            _set_visual_anchor(new_tc.getStart())
+
+    return True
 
 
 def _undo_and_redo(count=1, redo=False) -> bool:
