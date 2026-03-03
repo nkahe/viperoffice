@@ -42,7 +42,8 @@ def _state():
             # Has the extension been started. Will only be set to true.
             "started": False,
             "enabled": False,
-            # Current vi input mode. Can be currently "normal", "insert" or "pending".
+            # Current vi input mode. Can be currently "normal", "insert",
+            # "pending" or "visual".
             "mode": "normal",
             # Visible cursor. Type is XViewCursor UNO object.
             "view_cursor": None,
@@ -57,6 +58,9 @@ def _state():
             "cursor_position": None,
             "view_event_listener": None,
             "global_event_broadcaster": None,
+            # Anchor (fixed end) of visual mode selection. Saved when entering
+            # visual mode so motions know which end is the caret.
+            "visual_anchor": None,
         }
         setattr(builtins, key, state)
     return state
@@ -76,8 +80,16 @@ def _get_text_cursor():
         return None
 
 
+def _set_visual_anchor(anchor) -> None:
+    _state()["visual_anchor"] = anchor
+
+
+def _clear_visual_anchor() -> None:
+    _state()["visual_anchor"] = None
+
+
 def _set_mode(new_mode: str) -> bool:
-    if new_mode in ("normal", "insert", "pending"):
+    if new_mode in ("normal", "insert", "pending", "visual"):
         _state()["mode"] = new_mode
         _update_statusline()
         return True
@@ -86,6 +98,7 @@ def _set_mode(new_mode: str) -> bool:
 
 def _get_mode() -> str:
     return _state()["mode"]
+
 
 def _set_count(n: int):
     try:
@@ -206,10 +219,10 @@ def _get_frame():
     except Exception:
         return None
 
-
 # For debugging
 
 def _dbg(msg):
+    """Log [msg] to log file."""
     if not DEBUG:
         return
     try:
@@ -221,6 +234,7 @@ def _dbg(msg):
 
 
 def msg(text, title="ViperOffice"):
+    """Show [text] in a pop-up window for debugging."""
     try:
         controller = _current_controller()
         if controller is None:
@@ -347,24 +361,66 @@ def _show_insert_cursor():
         pass
 
 
+def _get_visual_caret_range(text_cursor):
+    """Return the caret (active/moving) end of the visual selection as an XTextRange.
+
+    LibreOffice's getStart()/getEnd() always return left/right ends regardless of
+    direction, so we compare against the saved anchor to determine which end is fixed.
+    - If anchor == getStart(): forward selection, caret is at getEnd().
+    - Otherwise: backward selection, caret is at getStart().
+    """
+    anchor = _state().get("visual_anchor")
+    if anchor is None:
+        return text_cursor.getEnd()
+    try:
+        text = text_cursor.getText()
+        probe = text.createTextCursorByRange(text_cursor.getStart())
+        probe.gotoRange(anchor, True)
+        if len(probe.getString()) == 0:
+            return text_cursor.getEnd()   # forward selection
+        else:
+            return text_cursor.getStart() # backward selection
+    except Exception:
+        return text_cursor.getEnd()
+
+
 # Sets mode handling cursor accordingly. In operator pending and visual modes
 #  cursor state is saved so it can be used by operator commands.
 def _goto_mode(mode_name: str) -> bool:
     if mode_name == "normal":
         _reset_pending_keys()
+        # When leaving visual mode, keep cursor at the caret (active) end.
+        if _get_mode() == "visual":
+            controller = _current_controller()
+            text_cursor = _get_text_cursor()
+            if controller is not None and text_cursor is not None:
+                # Use the saved anchor to find the caret end before clearing it.
+                caret = _get_visual_caret_range(text_cursor)
+                _clear_visual_anchor()
+                text_cursor.gotoRange(caret, False)
+                text_cursor.goLeft(1, False)
+                controller.select(text_cursor)
+            else:
+                _clear_visual_anchor()
         _show_normal_cursor()
+
     elif mode_name == "insert":
         _show_insert_cursor()
         _reset_pending_keys()
-    elif mode_name == "pending":
-        # _set_position()
+
+    elif mode_name in ("pending", "visual"):
         controller = _current_controller()
         text_cursor = _get_text_cursor()
         if controller is not None and text_cursor is not None:
-            # Deselect
             text_cursor.gotoRange(text_cursor.getStart(), False)
-            # Show selection
+            if mode_name == "visual":
+                # Save current position as anchor before expanding selection.
+                _set_visual_anchor(text_cursor.getStart())
+                text_cursor.goRight(1, True)
             controller.select(text_cursor)
+
+        if mode_name == "pending":
+            _show_normal_cursor()
     else:
         return False
     _set_mode(mode_name)
@@ -742,6 +798,16 @@ def _query_word_motion(spec, count:int, expand:bool=False):
         if not expand:
             # Normal mode motions must operate on a collapsed caret.
             text_cursor.gotoRange(text_cursor.getStart(), False)
+        else:
+            # Visual mode: scan from the caret (active/moving) end of the selection.
+            # _get_visual_caret_range uses the saved anchor to determine which end
+            # is fixed and which is the caret, regardless of selection direction.
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+            if spec.get("direction") == WORD_DIRECTION_BACKWARD:
+                # The caret range's right edge is C+1 chars from para start.
+                # Backward scans use offset = C (i = offset-1), so step left 1.
+                text_cursor.goLeft(1, False)
         if not _word_motion_once(
             text_cursor,
             expand,
@@ -962,7 +1028,7 @@ def _word_motion(
     spec,
     expand: bool,
     count: int = 1,
-    operator: str | None = None,
+    pending_keys: str | None = None,
 ) -> bool:
     """Run a word-motion command (e.g. `w`) and optionally apply an operator.
 
@@ -970,7 +1036,7 @@ def _word_motion(
         spec: Word motion specification (direction/target/big_word/etc.).
         expand: If True, keeps selection expanded while moving.
         count: Number of word motions to perform (minimum 1).
-        operator: Pending operator, or None for plain cursor motion.
+        pending_keys: pending keys, or None for plain cursor motion.
 
     Returns:
         True if cursor moved at least once, otherwise False.
@@ -979,7 +1045,7 @@ def _word_motion(
         if not _validate_word_motion_spec(spec):
             return False
         if expand:
-            if operator is not None:
+            if pending_keys is not None:
                 # Operator: query collapsed so start/end ranges are accurate.
                 result = _query_word_motion(spec, count, expand=False)
                 if not result.get("moved", False):
@@ -1034,8 +1100,13 @@ def _is_current_paragraph_empty(text_cursor) -> bool:
         return False
 
 
-def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool):
-    edge = text_cursor.getEnd() if expand else text_cursor.getStart()
+def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool, backward: bool = False):
+    if expand and backward:
+        edge = text_cursor.getStart()
+    elif expand:
+        edge = text_cursor.getEnd()
+    else:
+        edge = text_cursor.getStart()
     view_cursor.gotoRange(edge, expand)
 
 
@@ -1090,6 +1161,10 @@ def _sentences_forward(expand: bool, count: int = 1) -> bool:
     if text_cursor is None or cursor is None:
         return False
     try:
+        if expand:
+            # Collapse to the caret end so forward scan starts from the right place.
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
@@ -1129,7 +1204,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
     # From inside a sentence, first "(" should go to current sentence start.
     if not _is_at_sentence_start_heuristic(text_cursor):
         text_cursor.gotoStartOfSentence(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
         return True
 
     # Paragraph-boundary behavior matching logic.
@@ -1140,42 +1215,45 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
                 return False
             while _is_current_paragraph_empty(text_cursor):
                 if not text_cursor.gotoPreviousParagraph(expand):
-                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
                     return True
             text_cursor.gotoEndOfParagraph(expand)
             if not text_cursor.isStartOfParagraph():
                 text_cursor.goLeft(1, expand)
             text_cursor.gotoStartOfSentence(expand)
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
             return True
         else:
             if text_cursor.gotoPreviousParagraph(expand):
                 if _is_current_paragraph_empty(text_cursor):
-                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
                     return True
                 text_cursor.gotoEndOfParagraph(expand)
                 if not text_cursor.isStartOfParagraph():
                     text_cursor.goLeft(1, expand)
                 text_cursor.gotoStartOfSentence(expand)
-                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
                 return True
 
     text_cursor.gotoPreviousSentence(expand)
-    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
     if _same_pos(old_pos, cursor.getPosition()):
         if text_cursor.goLeft(1, expand):
             text_cursor.gotoPreviousSentence(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
     return True
 
 
-# Repeats "(" motion by count times.
+# Repeats '(' motion by count times.
 def _sentences_backwards(expand: bool, count: int = 1) -> bool:
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
         return False
     try:
+        if expand:
+            # In visual mode, scan from the caret (active) end, not the anchor.
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
@@ -1225,11 +1303,8 @@ def _leave_insert_to_normal():
     return _goto_mode("normal")
 
 
-# Commands 'a', 'I', 'A', 'o' and 'O'.
 def _switch_to_insert(cmd:str):
-    # Some stale handlers may still receive this same insert-transition key
-    # callback. Swallow one stale duplicate so the transition key does not get
-    # inserted as text.
+    """For Normal mode commands 'a', 'I', 'A', 'o', 'O'."""
     try:
         if cmd == "a" or cmd == "A":
             textCursor = _get_text_cursor()
@@ -1308,7 +1383,7 @@ def _scroll_window(count:int, forward:bool, halfpage=False) -> bool:
 
 
 def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
-    """Jump to start of page."""
+    """Motion to start or end of a page. Commands 'H' and 'L'."""
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -1483,21 +1558,22 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     @staticmethod
-    def _normal_actions(key, count:int, pending_keys):
+    def _normal_actions(key, count:int, pending_keys, expand):
         """Build Normal-mode command dispatch map for actions."""
         # Available commands after "g" command.
         if "g" in (pending_keys or ""):
             actions = {
             }
         else:
+            # "j" and "k" are here since operators don't support them.
             actions = {
                 "c": lambda: _delete_command(count, pending_keys, key.char),
                 "C": lambda: _delete_command(count, pending_keys, key.char),
                 "d": lambda: _delete_command(count, pending_keys, key.char),
                 "D": lambda: _delete_command(count, pending_keys, key.char),
                 "g": lambda: KeyHandler._g_command(pending_keys),
-                "j": lambda: _charwise_motion("j", count, False),  # Don't support operators.
-                "k": lambda: _charwise_motion("k", count, False),
+                "j": lambda: _charwise_motion("j", count, expand),
+                "k": lambda: _charwise_motion("k", count, expand),
                 "i": lambda: _goto_mode("insert"),
                 "I": lambda: _switch_to_insert("I"),
                 "a": lambda: _switch_to_insert("a"),
@@ -1515,6 +1591,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "X": lambda: _delete_characters(count, True),
                 "y": lambda: _y_command(count, pending_keys, key.char),
                 "Y": lambda: _y_command(count, pending_keys, key.char),
+                "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
             }
         return actions
@@ -1689,7 +1766,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return self._consume_action(motion)
 
     def _match_commands(self, key, count, pending_keys):
-        normal_actions = self._normal_actions(key, count, pending_keys)
+        expand: bool = _get_mode() in ("visual", "pending")
+        normal_actions = self._normal_actions(key, count, pending_keys, expand)
         action = normal_actions.get(key.char)
         if action is None:
             return None

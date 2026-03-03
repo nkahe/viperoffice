@@ -36,11 +36,11 @@ This will simply build the extension file from the template files in
 - For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
 they are similar in functionality.
 
-- Modes: Normal (+Operator pending), Insert.
+- Modes: Normal (+Operator pending), Insert, Visual.
 - Statusline with mode, count, pending command.
 
 Currently supported commands:
-- Insert: `i`, `I`, `a`, `A`, `o`, `O`.
+- Insert: `i`, `I`, `a`, `A`, `o`, `O`, Visual `v`.
 - Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `()`, `H`, `L`
 - Number count for most commands. Example `4j`, `3gg`, `d3gE`
 - Scrolling: `C-f`, `C-b`
