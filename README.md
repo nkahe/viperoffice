@@ -78,7 +78,6 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
-- Start and end of text which for example `G` and `gg` use, operate on *text container* like C-Home/End in LibreOffice. It's not necessarily start or end of a document. Container can be for example a text frame. Repeating command targets next text container.
 - For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank
   to clipboard but just delete.
 - `H` and `L` motions move cursor to start and end of page instead of screen.

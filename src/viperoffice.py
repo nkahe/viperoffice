@@ -455,7 +455,6 @@ def _focus_findbar() -> bool:
         return False
 
 
-# Commands 'h', 'j', 'k', 'l'.
 def _hjkl_motion(cmd:str, count:int, expand:bool, mode) -> bool:
     """Motion to left/right [count] characters for commands 'h' and 'l' or
     [count] lines up and down with 'j' and 'k'.
@@ -628,10 +627,12 @@ def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
         return False
     try:
         if raw_count == 0 and default_end:  # Command 'G'
-            cursor.gotoEnd(expand)
+            cursor.gotoRange(cursor.getText().getEnd(), expand)
+            # cursor.gotoEnd(expand)
             return True
 
-        cursor.gotoStart(expand) # Command 'gg'
+        cursor.jumpToFirstPage()  # Command 'gg'
+        # cursor.gotoStart(expand)
         if raw_count > 1:
             cursor.goDown(raw_count - 1, expand)
         return True
