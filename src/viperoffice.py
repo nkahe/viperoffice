@@ -57,11 +57,12 @@ def _state():
             # operator commands result to operator pending mode.
             "pending_keys": None,
             "key_handler": None,
-            # Saved cursor position for example position need to be restored
-            # after motion.
+            # Saved snapshot of cursor position in situations when the original
+            # position need to be restored after motion.
             "cursor_position": None,
             "view_event_listener": None,
             "global_event_broadcaster": None,
+            "mouse_listener": None,
             # Anchor (fixed end) of visual mode selection. Saved when entering
             # visual mode so motions know which end is the caret.
             "visual_anchor": None,
@@ -93,12 +94,14 @@ def _clear_visual_anchor() -> None:
 
 
 def _set_mode(new_mode: str) -> bool:
+    new_mode = new_mode.lower()
     if new_mode in ("normal", "insert", "pending", "visual"):
         _state()["mode"] = new_mode
         _update_statusline()
         return True
     else:
         return False
+
 
 def _get_mode() -> str:
     return _state()["mode"]
@@ -155,11 +158,10 @@ def _get_pending_keys() -> None|str:
 
 def _add_pending_key(new_key:str) -> bool:
     pending_keys = _state()["pending_keys"]
-    if pending_keys == None:
+    if pending_keys is None:
         _state()["pending_keys"] = new_key
     else:
         _state()["pending_keys"] = pending_keys + new_key
-
     _update_statusline()
     return True
 
@@ -225,7 +227,7 @@ def _get_frame():
 
 # For debugging
 
-def _dbg(msg):
+def _dbg(msg):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Log [msg] to log file."""
     if not DEBUG:
         return
@@ -237,7 +239,7 @@ def _dbg(msg):
         pass
 
 
-def msg(text, title="ViperOffice"):
+def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Show [text] in a pop-up window for debugging."""
     try:
         controller = _current_controller()
@@ -260,7 +262,7 @@ def msg(text, title="ViperOffice"):
         pass
 
 
-def _debug_cursor_state():
+def _debug_cursor_state():  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Show debug info about view cursor and text cursor ranges. For development use."""
     cursor = _get_cursor()
     if cursor is None:
@@ -280,8 +282,6 @@ def _debug_cursor_state():
         except Exception:
             lines.append("ViewCursor pos: unavailable")
         try:
-            vc_start = cursor.getStart()
-            vc_end   = cursor.getEnd()
             lines.append(f"ViewCursor collapsed: {cursor.isCollapsed()}")
             lines.append(f"ViewCursor at start of line: {cursor.isAtStartOfLine()}")
         except Exception:
@@ -337,52 +337,6 @@ def _update_statusline(controller=None):
         pass
 
 
-# Selects character right to cursor as Normal mode cursor.
-def _show_normal_cursor():
-    textCursor = _get_text_cursor()
-    controller = _current_controller()
-    if textCursor is None or controller is None:
-        return
-    try:
-        textCursor.gotoRange(textCursor.getStart(), False)
-        moved = textCursor.goRight(1, False)
-        if moved:
-            textCursor.goLeft(1, True)
-        controller.select(textCursor)
-    except Exception:
-        pass
-
-
-def _show_insert_cursor():
-    textCursor = _get_text_cursor()
-    controller = _current_controller()
-    if textCursor is None or controller is None:
-        return
-    try:
-        textCursor.gotoRange(textCursor.getStart(), False)
-        controller.select(textCursor)
-    except Exception:
-        pass
-
-
-def _show_visual_cursor():
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    controller = _current_controller()
-    if text_cursor is not None and controller is not None:
-        try:
-            # Make selection start at caret position if we have Normal mode cursor.
-            # Selection is bigger if Visual mode is started with mouse selection.
-            if len(cursor.getString()) == 1:
-                text_cursor.gotoRange(text_cursor.getStart(), False)
-                # Save current position as anchor before expanding selection.
-                _set_visual_anchor(text_cursor.getStart())
-                text_cursor.goRight(1, True)
-                controller.select(text_cursor)
-        except Exception:
-            pass
-
-
 def _get_visual_caret_range(text_cursor):
     """Return the caret (active/moving) end of the visual selection as an XTextRange.
 
@@ -406,18 +360,57 @@ def _get_visual_caret_range(text_cursor):
         return text_cursor.getEnd()
 
 
+def _show_cursor(mode:str):
+    """Style cursor depending on mode"""
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    controller = _current_controller()
+    if text_cursor is None or controller is None:
+        return False
+    mode = mode.lower()
+    try:
+        if mode in ("normal", "pending"):
+            # Select 1 character right side of caret as Normal mode cursor.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            moved = text_cursor.goRight(1, False)
+            if moved:
+                text_cursor.goLeft(1, True)
+
+        elif mode == "visual":
+            # Make selection start at caret position.
+            if len(cursor.getString()) == 1:  # if normal mode cursor
+                text_cursor.gotoRange(text_cursor.getStart(), False)
+                # Save current position as anchor before expanding selection.
+                _set_visual_anchor(text_cursor.getStart())
+                text_cursor.goRight(1, True)
+
+        elif mode == "insert":
+            # Use collapsed cursor.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+        else:
+            return False
+
+        controller.select(text_cursor)
+    except Exception:
+        return False
+
+
 # Sets mode handling cursor accordingly. In operator pending and visual modes
 #  cursor state is saved so it can be used by operator commands.
 def _goto_mode(new_mode: str) -> bool:
     current_mode = _get_mode()
-    new_mode = new_mode.lower()
     if new_mode == "normal":
         _reset_pending_keys()
         if current_mode == new_mode:
             return True
+        if current_mode == "insert":
+            cursor = _get_cursor()
+            if cursor is not None and not cursor.isAtStartOfLine():
+                # Mimics Vi/Vim cursor behavior.
+                cursor.goLeft(1, False)
 
-        # When leaving visual mode, keep cursor at the caret (active) end.
-        if current_mode == "visual":
+        # Make selection start where caret is in Normal mode.
+        elif current_mode == "visual":
             controller = _current_controller()
             text_cursor = _get_text_cursor()
             if controller is not None and text_cursor is not None:
@@ -429,18 +422,19 @@ def _goto_mode(new_mode: str) -> bool:
                 controller.select(text_cursor)
             else:
                 _clear_visual_anchor()
-        _show_normal_cursor()
+
+        _show_cursor("normal")
 
     elif new_mode == "insert":
         _reset_pending_keys()
-        _show_insert_cursor()
+        _show_cursor("insert")
 
     elif new_mode == "visual":
         _reset_pending_keys()
-        _show_visual_cursor()
+        _show_cursor("visual")
 
     elif new_mode == "pending":
-        _show_normal_cursor()
+        _show_cursor("pending")
     else:
         return False
     _set_mode(new_mode)
@@ -472,10 +466,8 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode) -> bool:
     try:
         if cmd == "h":
             return bool(cursor.goLeft(count, expand))
-
         if cmd == "l":
             return bool(cursor.goRight(count, expand))
-
         if cmd == "j":
             if mode == "pending":
                 _to_start_of_line(False, False)
@@ -503,16 +495,16 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode) -> bool:
 def _copy_and_delete(yank:bool, delete:bool) -> bool:
     """Copy and/or delete selection to clipboard."""
     try:
-        if yank == False and delete == False:
+        if not yank and not delete:
             return False
         text_cursor = _get_text_cursor()
-        if yank == True:
+        if not yank:
             dispatcher = _get_dispatcher()
             frame = _get_frame()
             if dispatcher is None or frame is None:
                 return False
             dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
-        if delete == True:
+        if delete:
             if text_cursor is not None:
                 text_cursor.setString("")
         return True
@@ -530,7 +522,7 @@ def _paste(count:int, after_cursor:bool):
 
     try:
         # msg(f"{after_cursor=} {text_cursor.isEndOfParagraph()=}")
-        if after_cursor == True and text_cursor.isEndOfParagraph() == False:
+        if after_cursor and not text_cursor.isEndOfParagraph():
             text_cursor.goRight(1, False)
 
         if mode == "normal":
@@ -548,7 +540,7 @@ def _paste(count:int, after_cursor:bool):
         for _ in range(count):
             dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
 
-        return True
+        _goto_mode("normal")
     except Exception:
         return False
 
@@ -635,7 +627,7 @@ def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
     if cursor is None:
         return False
     try:
-        if raw_count == 0 and default_end == True:  # Command 'G'
+        if raw_count == 0 and default_end:  # Command 'G'
             cursor.gotoEnd(expand)
             return True
 
@@ -860,6 +852,7 @@ def _query_word_motion(spec, count:int, expand:bool=False):
     # end_range = _clone_text_range(text_cursor)
     end_range = text_cursor.getEnd() if expand else _clone_text_range(text_cursor)
 
+    # Mostly for debugging.
     result = {
         "moved": moved_any,
         "steps_done": steps_done,
@@ -1226,7 +1219,6 @@ def _is_at_sentence_start_heuristic(text_cursor) -> bool:
         probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
         if probe.isStartOfParagraph():
             return True
-
         ch = ""
         while True:
             if not probe.goLeft(1, True):
@@ -1260,23 +1252,18 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
                 if not text_cursor.gotoPreviousParagraph(expand):
                     _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
                     return True
-            text_cursor.gotoEndOfParagraph(expand)
-            if not text_cursor.isStartOfParagraph():
-                text_cursor.goLeft(1, expand)
-            text_cursor.gotoStartOfSentence(expand)
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
-            return True
         else:
             if text_cursor.gotoPreviousParagraph(expand):
                 if _is_current_paragraph_empty(text_cursor):
                     _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
                     return True
-                text_cursor.gotoEndOfParagraph(expand)
-                if not text_cursor.isStartOfParagraph():
-                    text_cursor.goLeft(1, expand)
-                text_cursor.gotoStartOfSentence(expand)
-                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
-                return True
+
+        text_cursor.gotoEndOfParagraph(expand)
+        if not text_cursor.isStartOfParagraph():
+            text_cursor.goLeft(1, expand)
+        text_cursor.gotoStartOfSentence(expand)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        return True
 
     text_cursor.gotoPreviousSentence(expand)
     if _same_pos(old_pos, cursor.getPosition()):
@@ -1306,20 +1293,6 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return moved_any
     except Exception:
         return False
-
-
-# Commmand 'Esc',
-def _leave_insert_to_normal():
-    if _get_mode() == "normal":
-        return True
-    cursor = _get_cursor()
-    if cursor is not None:
-        try:
-            if not cursor.isAtStartOfLine():
-                cursor.goLeft(1, False)
-        except Exception:
-            pass
-    return _goto_mode("normal")
 
 
 def _insert_commands(cmd:str, mode="normal"):
@@ -1462,7 +1435,7 @@ def _scroll_window(count:int, forward:bool, halfpage=False) -> bool:
         return False
 
 
-def _jump_to_page(expand: bool, target: str, pending_keys: str | None) -> bool:
+def _jump_to_page(expand: bool, target: str) -> bool:
     """Motion to start or end of a page. Commands 'H' and 'L'."""
     try:
         cursor = _get_cursor()
@@ -1588,7 +1561,7 @@ def _delete_and_replace(count:int, pending_keys, key_char:str, mode:str) -> bool
 
 
 def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
-    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y`."""
+    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y'."""
     # msg(f"d-command: {pending_keys=} {key_char}")
     if key_char == "Y":
         cursor = _get_cursor()
@@ -1598,7 +1571,8 @@ def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
         # collapse to pos 0 (char under cursor)
         cursor.gotoRange(text_cursor.getStart(), False)
         _to_end_of_line(True, count, None)
-        return _copy_and_delete(True, False)
+        _copy_and_delete(True, False)
+        return True
 
     if mode == "normal" and pending_keys is None:
         _set_position()
@@ -1618,10 +1592,10 @@ def _yank(count, pending_keys:str|None, key_char:str, mode) -> bool:
     if (position is not None and cursor is not None) and mode != "visual":
         # Keep yanked range visually selected briefly, then restore cursor.
         # Use _set_mode instead of _goto_mode so the selection isn't
-        # collapsed immediately by _show_normal_cursor().
+        # collapsed immediately by _show_cursor("normal")().
         def _flash_restore():
             cursor.gotoRange(position, False)
-            _show_normal_cursor()
+            _show_cursor("normal")
         threading.Timer(0.08, _flash_restore).start()
 
     _reset_pending_keys()
@@ -1771,8 +1745,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, pending_keys),
                 "$": lambda: _to_end_of_line(expand, count, pending_keys),
                 "^": lambda: _to_start_of_line(expand, True),
-                "H": lambda: _jump_to_page(expand, "start", pending_keys),
-                "L": lambda: _jump_to_page(expand, "end", pending_keys),
+                "H": lambda: _jump_to_page(expand, "start"),
+                "L": lambda: _jump_to_page(expand, "end"),
                 "G": lambda: _to_line(expand, _get_raw_count(), True),
                 ")": lambda: _sentences_forward(expand, count),
                 "(": lambda: _sentences_backwards(expand, count),
@@ -1806,7 +1780,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # All Insert mode matching.
         if mode == "insert":
             if key.is_escape or (key.is_ctrl and key.code == 514):  # C-c
-                return self._consume_action(_leave_insert_to_normal)
+                return self._consume_action(lambda: _goto_mode("normal"))
             return False
 
         pending_keys: str | None = _get_pending_keys()
@@ -1896,7 +1870,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
-
     def _match_motions(self, key, count, pending_keys, mode):
         expand: bool = _get_mode() in ("visual", "pending")
         motions = self._motions_keymap(key, expand, count, pending_keys, mode)
@@ -1917,7 +1890,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return self._consume_action(motion)
 
     def _match_commands(self, key, count, pending_keys):
-        expand: bool = _get_mode() in ("visual", "pending")
         normal_actions = self._normal_actions_keymap(key, count, pending_keys)
         action = normal_actions.get(key.char)
         if action is None:
@@ -1944,7 +1916,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if not state["enabled"]:
             return False
         if state["mode"] == "normal":
-            _show_normal_cursor()
+            _show_cursor("normal")
             return True
         return False
 
@@ -2408,7 +2380,7 @@ def enable_viper_office():
     if controller is not None:
         state["view_cursor"] = controller.getViewCursor()
     _set_mode("normal")
-    _show_normal_cursor()
+    _show_cursor("normal")
 
 
 def disable_viper_office():
