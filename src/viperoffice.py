@@ -1278,6 +1278,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
         return True
 
     text_cursor.gotoPreviousSentence(expand)
+    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
     if _same_pos(old_pos, cursor.getPosition()):
         if text_cursor.goLeft(1, expand):
             text_cursor.gotoPreviousSentence(expand)
