@@ -39,7 +39,7 @@ This will simply build the extension file from the template files in
 
 Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`, Visual `v`.
-- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `()`, `H`, `L`
+- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `H`, `L`, `()`, `{}`
 - Number count for most commands. Example `10j`, `3gg`, `d4gE`
 - Scrolling: `C-f`, `C-b`
 - Replace: `r`
@@ -89,4 +89,3 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 For implemented features:
 
 - Insert/append commands currently don't take count.
-

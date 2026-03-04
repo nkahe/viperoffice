@@ -262,7 +262,7 @@ def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnused
         pass
 
 
-def _debug_cursor_state():  # noqa: F811  # pyright: ignore[reportUnusedFunction]
+def debug_cursor_state():  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Show debug info about view cursor and text cursor ranges. For development use."""
     cursor = _get_cursor()
     if cursor is None:
@@ -1169,6 +1169,91 @@ def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
     return moved
 
 
+def _to_previous_non_empty_paragraph(text_cursor, expand: bool) -> bool:
+    moved = False
+    while True:
+        if not text_cursor.gotoPreviousParagraph(expand):
+            break
+        moved = True
+        if not _is_current_paragraph_empty(text_cursor):
+            break
+    return moved
+
+
+def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
+    """Motion to next paragraph. Command '}'.
+
+    From a non-empty paragraph, moves to the start of the next paragraph
+    (which may itself be an empty separator line). From an empty separator
+    line, jumps past all consecutive empty lines to the first non-empty
+    paragraph start.
+    """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+    try:
+        if expand:
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if _is_current_paragraph_empty(text_cursor):
+                moved = _to_next_non_empty_paragraph(text_cursor, expand)
+            else:
+                moved = bool(text_cursor.gotoNextParagraph(expand))
+            if not moved:
+                # Last paragraph with no following empty line: move to end of it.
+                if not text_cursor.isEndOfParagraph():
+                    text_cursor.gotoEndOfParagraph(expand)
+                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                break
+            moved_any = True
+        if moved_any:
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return moved_any
+    except Exception:
+        return False
+
+
+def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
+    """Motion to previous paragraph. Command '{'.
+
+    From inside a paragraph, moves to the start of the current paragraph.
+    From the start of a non-empty paragraph, moves to the start of the
+    previous paragraph (which may be an empty separator line). From an
+    empty separator line, skips backward past all consecutive empty lines
+    to the start of the previous non-empty paragraph.
+    """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+    try:
+        if expand:
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if not text_cursor.isStartOfParagraph():
+                text_cursor.gotoStartOfParagraph(expand)
+                moved = True
+            elif _is_current_paragraph_empty(text_cursor):
+                moved = _to_previous_non_empty_paragraph(text_cursor, expand)
+            else:
+                moved = bool(text_cursor.gotoPreviousParagraph(expand))
+            if not moved:
+                break
+            moved_any = True
+        if moved_any:
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        return moved_any
+    except Exception:
+        return False
+
+
 def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
     # Implements one ")" motion with paragraph-edge handling.
     old_pos = cursor.getPosition()
@@ -1763,6 +1848,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "G": lambda: _to_line(expand, _get_raw_count(), True),
                 ")": lambda: _sentences_forward(expand, count),
                 "(": lambda: _sentences_backwards(expand, count),
+                "}": lambda: _paragraphs_forward(expand, count),
+                "{": lambda: _paragraphs_backward(expand, count),
             }
             if key.char == "0" and _get_raw_count() == 0:
                 motions["0"] = lambda: _to_start_of_line(expand, False)
@@ -2413,4 +2500,4 @@ def toggle_viper_office():
         enable_viper_office()
 
 
-g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office)
+g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office, debug_cursor_state)
