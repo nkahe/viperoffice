@@ -4,8 +4,9 @@ import builtins
 import datetime
 import threading
 import unohelper   # This project allow typings for the full LibreOffice API.
-from functools import lru_cache  # For compiling word specs.
+from functools import lru_cache
 from com.sun.star.awt import KeyModifier, XKeyHandler, Key, Rectangle
+from com.sun.star.awt import XMouseClickHandler
 from com.sun.star.document import XEventListener
 
 if TYPE_CHECKING:
@@ -364,6 +365,24 @@ def _show_insert_cursor():
         pass
 
 
+def _show_visual_cursor():
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    controller = _current_controller()
+    if text_cursor is not None and controller is not None:
+        try:
+            # Make selection start at caret position if we have Normal mode cursor.
+            # Selection is bigger if Visual mode is started with mouse selection.
+            if len(cursor.getString()) == 1:
+                text_cursor.gotoRange(text_cursor.getStart(), False)
+                # Save current position as anchor before expanding selection.
+                _set_visual_anchor(text_cursor.getStart())
+                text_cursor.goRight(1, True)
+                controller.select(text_cursor)
+        except Exception:
+            pass
+
+
 def _get_visual_caret_range(text_cursor):
     """Return the caret (active/moving) end of the visual selection as an XTextRange.
 
@@ -389,11 +408,15 @@ def _get_visual_caret_range(text_cursor):
 
 # Sets mode handling cursor accordingly. In operator pending and visual modes
 #  cursor state is saved so it can be used by operator commands.
-def _goto_mode(mode_name: str) -> bool:
-    if mode_name == "normal":
+def _goto_mode(new_mode: str) -> bool:
+    current_mode = _get_mode()
+    new_mode = new_mode.lower()
+    if new_mode == "normal":
         _reset_pending_keys()
+        if current_mode == new_mode:
+            return True
+
         # When leaving visual mode, keep cursor at the caret (active) end.
-        current_mode = _get_mode()
         if current_mode == "visual":
             controller = _current_controller()
             text_cursor = _get_text_cursor()
@@ -408,26 +431,19 @@ def _goto_mode(mode_name: str) -> bool:
                 _clear_visual_anchor()
         _show_normal_cursor()
 
-    elif mode_name == "insert":
-        _show_insert_cursor()
+    elif new_mode == "insert":
         _reset_pending_keys()
+        _show_insert_cursor()
 
-    elif mode_name in ("pending", "visual"):
-        controller = _current_controller()
-        text_cursor = _get_text_cursor()
-        if controller is not None and text_cursor is not None:
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            if mode_name == "visual":
-                # Save current position as anchor before expanding selection.
-                _set_visual_anchor(text_cursor.getStart())
-                # text_cursor.goRight(1, True)
-            controller.select(text_cursor)
+    elif new_mode == "visual":
+        _reset_pending_keys()
+        _show_visual_cursor()
 
-        if mode_name == "pending":
-            _show_normal_cursor()
+    elif new_mode == "pending":
+        _show_normal_cursor()
     else:
         return False
-    _set_mode(mode_name)
+    _set_mode(new_mode)
     return True
 
 
@@ -1927,13 +1943,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         state = _state()
         if not state["enabled"]:
             return False
-        # Keep normal cursor rendering for navigation releases, including
-        # Ctrl+Home/Ctrl+End where Ctrl would otherwise short-circuit below.
-        if state["mode"] == "normal" and _is_navigation_key(event):
-            _show_normal_cursor()
-            return False
-        if state["mode"] == "normal" and _is_function_key(event):
-            return False
         if state["mode"] == "normal":
             _show_normal_cursor()
             return True
@@ -2193,6 +2202,13 @@ def _detach_controller(controller):
             controller.removeKeyHandler(state["key_handler"])
         except Exception:
             break
+    listener = state.get("mouse_listener")
+    if listener is not None:
+        try:
+            controller.removeMouseClickHandler(listener)
+        except Exception:
+            pass
+        state["mouse_listener"] = None
 
 
 def _attach_key_handler_to_all_views():
@@ -2211,6 +2227,13 @@ def _attach_controller(controller):
         controller.addKeyHandler(state["key_handler"])
     except Exception:
         pass
+    if state.get("mouse_listener") is None:
+        listener = MouseSelectionListener()
+        try:
+            controller.addMouseClickHandler(listener)
+            state["mouse_listener"] = listener
+        except Exception:
+            pass
 
 
 def _show_normal_cursor_for_controller(controller):
@@ -2238,6 +2261,35 @@ def _show_insert_cursor_for_controller(controller):
         controller.select(textCursor)
     except Exception:
         pass
+
+
+class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
+    """Switches to visual mode when user selects text with the mouse.
+
+    XMouseClickHandler is added to the controller via addMouseClickHandler
+    and receives mouse events from the document editing area.
+    Returns False to not consume the event (pass through to LibreOffice).
+    """
+
+    def mouseReleased(self, event):
+        state = _state()
+        if not state["enabled"] or state["mode"] == "visual":
+            return False
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        try:
+            if len(cursor.getString()) > 0:
+                _goto_mode("visual")
+        except Exception:
+            pass
+        return False
+
+    def mousePressed(self, event):
+        return False
+
+    def disposing(self, event):
+        return None
 
 
 class ViewEventListener(unohelper.Base, XEventListener):

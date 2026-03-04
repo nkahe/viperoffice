@@ -33,11 +33,9 @@ This will simply build the extension file from the template files in
 
 ## Features
 
-- For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
-they are similar in functionality.
-
+- Multi-window support.
 - Modes: Normal (+Operator pending), Insert, Visual.
-- Statusline with mode, count, pending command.
+- Statusline with mode, count, pending commands.
 
 Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`, Visual `v`.
@@ -50,12 +48,21 @@ Currently supported commands:
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
 - Search: `/` (LibreOffice search bar)
 
-- Aliases `Ins` = i, `BS` = h, `C-c` = Esc in Insert mode, `y`in Visual mode.
+- In Visual mode you can swap cursor position to other end of selection with `o`.
 
 Supported Insert mode commands:
-- Switch to Normal mode: `Esc`, aliases: `C-[`, `C-c` copy in visual mode.
+- Switch to Normal mode: `Esc`, aliases `C-[` and `C-c`. 
+
+Aliases:
+- `Ins` = i, `BS` = h, `C-c` copy in Visual mode.
+
+Mouse:
+- Mouse selection switches to Visual mode.
 
 Other shortcuts and keys are passed to LibreOffice.
+
+For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
+they are similar in functionality.
 
 ## Shortcuts for enabling and disabling
 
