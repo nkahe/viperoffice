@@ -195,7 +195,7 @@ def _current_doc():
         return None
 
 
-def _current_controller():
+def _get_controller():
     doc = _current_doc()
     if doc is None:
         return None
@@ -217,7 +217,7 @@ def _get_dispatcher():
 
 def _get_frame():
     try:
-        controller = _current_controller()
+        controller = _get_controller()
         if controller is None:
             return None
         frame = controller.getFrame()
@@ -242,7 +242,7 @@ def _dbg(msg):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
 def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Show [text] in a pop-up window for debugging."""
     try:
-        controller = _current_controller()
+        controller = _get_controller()
         if controller is None:
             return
         parent = controller.getFrame().getContainerWindow()
@@ -314,7 +314,7 @@ def _debug_cursor_state():  # noqa: F811  # pyright: ignore[reportUnusedFunction
 
 def _update_statusline(controller=None):
     if controller is None:
-        controller = _current_controller()
+        controller = _get_controller()
     if controller is None:
         return
     try:
@@ -364,7 +364,7 @@ def _show_cursor(mode:str):
     """Style cursor depending on mode"""
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
-    controller = _current_controller()
+    controller = _get_controller()
     if text_cursor is None or controller is None:
         return False
     mode = mode.lower()
@@ -411,14 +411,14 @@ def _goto_mode(new_mode: str) -> bool:
 
         # Make selection start where caret is in Normal mode.
         elif current_mode == "visual":
-            controller = _current_controller()
+            controller = _get_controller()
             text_cursor = _get_text_cursor()
             if controller is not None and text_cursor is not None:
                 # Use the saved anchor to find the caret end before clearing it.
                 caret = _get_visual_caret_range(text_cursor)
                 _clear_visual_anchor()
                 text_cursor.gotoRange(caret, False)
-                # text_cursor.goLeft(1, False)
+                text_cursor.goLeft(1, False)
                 controller.select(text_cursor)
             else:
                 _clear_visual_anchor()
@@ -498,7 +498,7 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
         if not yank and not delete:
             return False
         text_cursor = _get_text_cursor()
-        if not yank:
+        if yank:
             dispatcher = _get_dispatcher()
             frame = _get_frame()
             if dispatcher is None or frame is None:
@@ -527,7 +527,7 @@ def _paste(count:int, after_cursor:bool):
 
         if mode == "normal":
             text_cursor.gotoRange(text_cursor.getStart(), False)
-            controller = _current_controller()
+            controller = _get_controller()
             if controller is None:
                 return False
             controller.select(text_cursor)
@@ -607,8 +607,8 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
             new_y = new_y()
 
         if pending_keys is None:
-            # LibreOffice can place cursor at next line start; move left back
-            # to previous line end unless this was an empty-line no-op.
+            # LibreOffice can place cursor visually at next line start; move left
+            # back to previous line end unless this was an empty-line no-op.
             if cursor.isAtStartOfLine() and old_y != new_y:
                 cursor.goLeft(1, expand)
         return True
@@ -874,7 +874,19 @@ def _apply_motion_result(result, expand:bool) -> bool:
     if cursor is None or end_range is None:
         return False
     try:
+        if expand and _state().get("visual_anchor") is None:
+            # Pending mode: collapse to start_range (P) first so the selection
+            # starts at the block cursor char, not at P+1 (the anchor side).
+            start = result.get("start_range")
+            if start is not None:
+                cursor.gotoRange(start, False)
         cursor.gotoRange(end_range, expand)
+        if expand and _state().get("visual_anchor") is None and result.get("inclusive"):
+            # Pending mode with an inclusive motion (e.g. e/E/ge/gE):
+            # _query_word_motion ran with expand=False so the +1 inclusive offset
+            # in _word_motion_once_forward never fired. Extend one more char to
+            # include the last character of the word.
+            cursor.goRight(1, True)
     except Exception:
         return False
     return True
@@ -2326,7 +2338,7 @@ def _stop_view_event_listener():
 
 def _activate_for_current_view():
     state = _state()
-    controller = _current_controller()
+    controller = _get_controller()
     if controller is None:
         return
     _state()["view_cursor"] = controller.getViewCursor()
@@ -2376,7 +2388,7 @@ def enable_viper_office():
         _initialize()
     state["enabled"] = True
     _activate_for_current_view()
-    controller = _current_controller()
+    controller = _get_controller()
     if controller is not None:
         state["view_cursor"] = controller.getViewCursor()
     _set_mode("normal")
