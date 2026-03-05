@@ -1,10 +1,9 @@
 from __future__ import annotations
-from typing import Any, Callable, Final, NamedTuple, TYPE_CHECKING
+from typing import Any, Final, NamedTuple, TYPE_CHECKING
 import builtins
 import datetime
 import threading
 import unohelper   # This project allow typings for the full LibreOffice API.
-from functools import lru_cache
 from com.sun.star.awt import KeyModifier, XKeyHandler, Key, Rectangle
 from com.sun.star.awt import XMouseClickHandler
 from com.sun.star.document import XEventListener
@@ -28,9 +27,13 @@ if "XSCRIPTCONTEXT" not in globals():
 
 DEBUG = False
 
-# Keywords are used in searching and recognizing with many commands like "w".
-# For more info see Vim's help for 'iskeyword'.
-ISKEYWORD: Final[str] = "@,48-57,_,192-255"
+# Additional characters which are considered to be a part of word for word
+# motions w, b, e, ge. Alphabets are always included. "chars" are written
+# together like: "chars": "_,."
+ISWORD = {
+    "digits": True,
+    "chars": "_",
+}
 
 # Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
 MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 3
@@ -631,7 +634,6 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
         return False
 
 
-# NOTE: 'Text container' is not same as document. Can be for example a text frame.
 def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
     """Go to line [count] motion. Commands 'G' and 'gg'.
     Other args:
@@ -656,55 +658,20 @@ def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
         return False
 
 
-# ISKEYWORD is constant, so compile checker once and reuse for word motions.
-@lru_cache(maxsize=1)
-def _compile_iskeyword_checker() -> Callable[[str], bool]:
-    spec = ISKEYWORD
-    ranges = []
-    singles = set()
-    include_alpha = False
-
-    try:
-        tokens = [token.strip() for token in str(spec).split(",") if token.strip()]
-        for token in tokens:
-            if token == "@":
-                include_alpha = True
-                continue
-            if "-" in token and token.count("-") == 1:
-                start_s, end_s = token.split("-", 1)
-                start_i = int(start_s)
-                end_i = int(end_s)
-                if start_i > end_i:
-                    start_i, end_i = end_i, start_i
-                ranges.append((start_i, end_i))
-                continue
-            if len(token) == 1:
-                singles.add(token)
-    except Exception:
-        include_alpha = True
-        ranges = [(48, 57), (192, 255)]
-        singles = {"_"}
-
-    def _is_keyword_char(ch):
-        if ch in singles:
-            return True
-        if include_alpha and ch.isalpha():
-            return True
-        o = ord(ch)
-        for start_i, end_i in ranges:
-            if start_i <= o <= end_i:
-                return True
-        return False
-
-    return _is_keyword_char
+def _is_keyword_char(ch: str) -> bool:
+    if ch.isalpha():
+        return True
+    if ISWORD.get("digits") and ch.isdigit():
+        return True
+    return ch in str(ISWORD.get("chars", ""))
 
 
-def _word_char_class(ch, is_keyword_char, big_word: bool = False):
+def _word_char_class(ch, big_word: bool = False):
     if ch == " " or ch == "\t" or ch == "\n":
         return "blank"
     if big_word:
         return "other"
-    if is_keyword_char(ch):
+    if _is_keyword_char(ch):
         return "keyword"
     return "other"
 
@@ -724,63 +691,63 @@ def _current_paragraph_text_and_offset(text_cursor):
 
 
 # Word motion specs.
-WORD_DIRECTION_FORWARD = "forward"
-WORD_DIRECTION_BACKWARD = "backward"
-WORD_TARGET_START = "start"
-WORD_TARGET_END = "end"
+FORWARD = "forward"
+BACKWARD = "backward"
+START = "start"
+END = "end"
 
 _WORD_MOTION_W = {
-    "direction": WORD_DIRECTION_FORWARD,
-    "target": WORD_TARGET_START,
+    "direction": FORWARD,
+    "target": START,
     "big_word": False,
     "cross_empty": True,
     "inclusive": False,
 }
 _WORD_MOTION_B = {
-    "direction": WORD_DIRECTION_BACKWARD,
-    "target": WORD_TARGET_START,
+    "direction": BACKWARD,
+    "target": START,
     "big_word": False,
     "cross_empty": True,
     "inclusive": False,
 }
 _WORD_MOTION_BIG_B = {
-    "direction": WORD_DIRECTION_BACKWARD,
-    "target": WORD_TARGET_START,
+    "direction": BACKWARD,
+    "target": START,
     "big_word": True,
     "cross_empty": True,
     "inclusive": False,
 }
 _WORD_MOTION_E = {
-    "direction": WORD_DIRECTION_FORWARD,
-    "target": WORD_TARGET_END,
+    "direction": FORWARD,
+    "target": END,
     "big_word": False,
     "cross_empty": False,
     "inclusive": True,
 }
 _WORD_MOTION_BIG_E = {
-    "direction": WORD_DIRECTION_FORWARD,
-    "target": WORD_TARGET_END,
+    "direction": FORWARD,
+    "target": END,
     "big_word": True,
     "cross_empty": False,
     "inclusive": True,
 }
 _WORD_MOTION_GE = {
-    "direction": WORD_DIRECTION_BACKWARD,
-    "target": WORD_TARGET_END,
+    "direction": BACKWARD,
+    "target": END,
     "big_word": False,
     "cross_empty": True,
     "inclusive": True,
 }
 _WORD_MOTION_G_BIG_E = {
-    "direction": WORD_DIRECTION_BACKWARD,
-    "target": WORD_TARGET_END,
+    "direction": BACKWARD,
+    "target": END,
     "big_word": True,
     "cross_empty": True,
     "inclusive": True,
 }
 _WORD_MOTION_BIG_W = {
-    "direction": WORD_DIRECTION_FORWARD,
-    "target": WORD_TARGET_START,
+    "direction": FORWARD,
+    "target": START,
     "big_word": True,
     "cross_empty": True,
     "inclusive": False,
@@ -794,9 +761,9 @@ def _validate_word_motion_spec(spec) -> bool:
     for key in required:
         if key not in spec:
             return False
-    if spec["direction"] not in (WORD_DIRECTION_FORWARD, WORD_DIRECTION_BACKWARD):
+    if spec["direction"] not in (FORWARD, BACKWARD):
         return False
-    if spec["target"] not in (WORD_TARGET_START, WORD_TARGET_END):
+    if spec["target"] not in (START, END):
         return False
     return True
 
@@ -826,10 +793,6 @@ def _clone_text_range(text_cursor):
         return None
 
 
-def _range_xy(rng):
-    return _pos_xy(rng)
-
-
 def _query_word_motion(spec, count:int, expand:bool=False):
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -837,10 +800,8 @@ def _query_word_motion(spec, count:int, expand:bool=False):
         return _normalize_motion_range({"moved": False})
 
     steps = max(1, int(count))
-    is_keyword_char = _compile_iskeyword_checker()
     start_range = _clone_text_range(text_cursor)
     moved_any = False
-    steps_done = 0
 
     for _ in range(steps):
         if not expand:
@@ -852,32 +813,21 @@ def _query_word_motion(spec, count:int, expand:bool=False):
             # is fixed and which is the caret, regardless of selection direction.
             caret = _get_visual_caret_range(text_cursor)
             text_cursor.gotoRange(caret, False)
-            if spec.get("direction") == WORD_DIRECTION_BACKWARD:
+            if spec.get("direction") == BACKWARD:
                 # The caret range's right edge is C+1 chars from para start.
                 # Backward scans use offset = C (i = offset-1), so step left 1.
                 text_cursor.goLeft(1, False)
-        if not _word_motion_once(
-            text_cursor,
-            expand,
-            is_keyword_char,
-            spec,
-        ):
+        if not _word_motion_once(text_cursor, expand, spec):
             break
         moved_any = True
-        steps_done += 1
 
     # end_range = _clone_text_range(text_cursor)
     end_range = text_cursor.getEnd() if expand else _clone_text_range(text_cursor)
 
-    # Mostly for debugging.
     result = {
         "moved": moved_any,
-        "steps_done": steps_done,
-        "start_pos": _range_xy(start_range),
-        "end_pos": _range_xy(end_range),
         "start_range": start_range,
         "end_range": end_range,
-        "direction": spec.get("direction"),
         "inclusive": bool(spec.get("inclusive", False)),
     }
     return _normalize_motion_range(result)
@@ -929,82 +879,82 @@ def _goto_previous_paragraph_with_policy(text_cursor, expand:bool, cross_empty:b
     return True
 
 
-def _scan_forward_word_target(paragraph_text, offset, is_keyword_char, spec):
+def _scan_forward_word_target(paragraph_text, offset, spec):
     length = len(paragraph_text)
     if offset >= length:
         return None
 
     classify = _word_char_class
     big_word = bool(spec.get("big_word", False))
-    target = spec.get("target", WORD_TARGET_START)
+    target = spec.get("target", START)
     i = offset
 
-    if target == WORD_TARGET_START:
-        cls = classify(paragraph_text[i], is_keyword_char, big_word)
+    if target == START:
+        cls = classify(paragraph_text[i], big_word)
         if cls == "blank":
-            while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+            while i < length and classify(paragraph_text[i], big_word) == "blank":
                 i += 1
             return i
-        while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == cls:
+        while i < length and classify(paragraph_text[i], big_word) == cls:
             i += 1
-        while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+        while i < length and classify(paragraph_text[i], big_word) == "blank":
             i += 1
         return i
 
-    if target == WORD_TARGET_END:
+    if target == END:
         # For "e": if on non-blank, advance once so repeated `e` progresses.
-        if classify(paragraph_text[i], is_keyword_char, big_word) != "blank":
+        if classify(paragraph_text[i], big_word) != "blank":
             i += 1
         # Then skip blanks and land on last char of the next word.
-        while i < length and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+        while i < length and classify(paragraph_text[i], big_word) == "blank":
             i += 1
         if i >= length:
             return None
-        cls = classify(paragraph_text[i], is_keyword_char, big_word)
-        while i + 1 < length and classify(paragraph_text[i + 1], is_keyword_char, big_word) == cls:
+        cls = classify(paragraph_text[i], big_word)
+        while i + 1 < length and classify(paragraph_text[i + 1], big_word) == cls:
             i += 1
         return i
 
     return None
 
 
-def _scan_backward_word_target(paragraph_text, offset, is_keyword_char, spec):
+def _scan_backward_word_target(paragraph_text, offset, spec):
     length = len(paragraph_text)
     if length == 0 or offset <= 0:
         return None
 
     classify = _word_char_class
     big_word = bool(spec.get("big_word", False))
-    target = spec.get("target", WORD_TARGET_START)
+    target = spec.get("target", START)
     i = min(offset - 1, length - 1)
 
-    if target == WORD_TARGET_END:
+    if target == END:
         # ge/gE: skip current word chars backward, then skip blanks,
         # landing on the last char of the previous word.
-        cls = classify(paragraph_text[i], is_keyword_char, big_word)
+        cls = classify(paragraph_text[i], big_word)
         if cls != "blank":
-            while i >= 0 and classify(paragraph_text[i], is_keyword_char, big_word) == cls:
+            while i >= 0 and classify(paragraph_text[i], big_word) == cls:
                 i -= 1
-        while i >= 0 and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+        while i >= 0 and classify(paragraph_text[i], big_word) == "blank":
             i -= 1
         return i if i >= 0 else None
 
     # Skip trailing blanks when scanning backward.
-    while i >= 0 and classify(paragraph_text[i], is_keyword_char, big_word) == "blank":
+    while i >= 0 and classify(paragraph_text[i], big_word) == "blank":
         i -= 1
     if i < 0:
         return None
 
-    if target == WORD_TARGET_START:
-        cls = classify(paragraph_text[i], is_keyword_char, big_word)
-        while i - 1 >= 0 and classify(paragraph_text[i - 1], is_keyword_char, big_word) == cls:
+    if target == START:
+        cls = classify(paragraph_text[i], big_word)
+        while i - 1 >= 0 and classify(paragraph_text[i - 1], big_word) == cls:
             i -= 1
         return i
 
     return None
 
 
-def _word_motion_once_forward(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
+def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
     cross_empty = bool(spec.get("cross_empty", True))
     paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
     length = len(paragraph_text)
@@ -1015,13 +965,13 @@ def _word_motion_once_forward(text_cursor, expand: bool, is_keyword_char, spec) 
     if offset >= length:
         return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
 
-    next_offset = _scan_forward_word_target(paragraph_text, offset, is_keyword_char, spec)
+    next_offset = _scan_forward_word_target(paragraph_text, offset, spec)
 
     if next_offset is not None and next_offset < length:
         text_cursor.gotoStartOfParagraph(False)
         move = next_offset
         # e/E are inclusive: include the char at next_offset in the selection.
-        if expand and spec.get("target") == WORD_TARGET_END:
+        if expand and spec.get("target") == END:
             move = next_offset + 1
         if move > 0:
             text_cursor.goRight(move, expand)
@@ -1030,7 +980,7 @@ def _word_motion_once_forward(text_cursor, expand: bool, is_keyword_char, spec) 
     return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
 
 
-def _word_motion_once_backward(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
+def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
     cross_empty = bool(spec.get("cross_empty", True))
     paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
     length = len(paragraph_text)
@@ -1046,7 +996,7 @@ def _word_motion_once_backward(text_cursor, expand: bool, is_keyword_char, spec)
             return True
         offset = length
 
-    prev_offset = _scan_backward_word_target(paragraph_text, offset, is_keyword_char, spec)
+    prev_offset = _scan_backward_word_target(paragraph_text, offset, spec)
     if prev_offset is not None and 0 <= prev_offset < length:
         text_cursor.gotoStartOfParagraph(False)
         if prev_offset > 0:
@@ -1059,7 +1009,7 @@ def _word_motion_once_backward(text_cursor, expand: bool, is_keyword_char, spec)
     length = len(paragraph_text)
     if length == 0:
         return True
-    prev_offset = _scan_backward_word_target(paragraph_text, length, is_keyword_char, spec)
+    prev_offset = _scan_backward_word_target(paragraph_text, length, spec)
     if prev_offset is None:
         return False
     text_cursor.gotoStartOfParagraph(False)
@@ -1068,33 +1018,26 @@ def _word_motion_once_backward(text_cursor, expand: bool, is_keyword_char, spec)
     return True
 
 
-def _word_motion_once(text_cursor, expand: bool, is_keyword_char, spec) -> bool:
+def _word_motion_once(text_cursor, expand: bool, spec) -> bool:
     """Execute one step for a configured word motion.
 
     Args:
         text_cursor: Model text cursor used for paragraph and offset operations.
-        cursor: View cursor that must be synchronized after movement.
         expand: If True, keeps selection expanded while moving.
-        is_keyword_char: Predicate that classifies chars as keyword chars.
         spec: Motion config (direction/target/big_word/empty-line policy).
 
     Returns:
         True if cursor advanced, otherwise False.
     """
-    direction = spec.get("direction", WORD_DIRECTION_FORWARD)
-    if direction == WORD_DIRECTION_FORWARD:
-        return _word_motion_once_forward(text_cursor, expand, is_keyword_char, spec)
-    if direction == WORD_DIRECTION_BACKWARD:
-        return _word_motion_once_backward(text_cursor, expand, is_keyword_char, spec)
+    direction = spec.get("direction", FORWARD)
+    if direction == FORWARD:
+        return _word_motion_once_forward(text_cursor, expand, spec)
+    if direction == BACKWARD:
+        return _word_motion_once_backward(text_cursor, expand, spec)
     return False
 
 
-def _word_motion(
-    spec,
-    expand: bool,
-    count: int = 1,
-    pending_keys: str | None = None,
-) -> bool:
+def _word_motion( spec, expand: bool, count: int, mode: str) -> bool:
     """Run a word-motion command (e.g. `w`) and optionally apply an operator.
 
     Args:
@@ -1110,7 +1053,7 @@ def _word_motion(
         if not _validate_word_motion_spec(spec):
             return False
         if expand:
-            if pending_keys is not None:
+            if mode == "pending":
                 # Operator: query collapsed so start/end ranges are accurate.
                 result = _query_word_motion(spec, count, expand=False)
                 if not result.get("moved", False):
@@ -1868,8 +1811,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if "g" in (pending_keys or ""):
             motions = {
                 "g": lambda: _to_line(expand, _get_raw_count(), False),
-                "e": lambda: _word_motion(_WORD_MOTION_GE, expand, count, pending_keys),
-                "E": lambda: _word_motion(_WORD_MOTION_G_BIG_E, expand, count, pending_keys)
+                "e": lambda: _word_motion(_WORD_MOTION_GE, expand, count, mode),
+                "E": lambda: _word_motion(_WORD_MOTION_G_BIG_E, expand, count, mode)
             }
         else:
             motions = {
@@ -1877,12 +1820,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "j": lambda: _hjkl_motion("j", count, expand, mode),
                 "k": lambda: _hjkl_motion("k", count, expand, mode),
                 "l": lambda: _hjkl_motion("l", count, expand, mode),
-                "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, pending_keys),
-                "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, pending_keys),
-                "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, pending_keys),
-                "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, pending_keys),
-                "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, pending_keys),
-                "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, pending_keys),
+                "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
+                "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
+                "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
+                "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
+                "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
+                "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
                 "$": lambda: _to_end_of_line(expand, count, pending_keys),
                 "^": lambda: _to_start_of_line(expand, True),
                 "H": lambda: _jump_to_page(expand, "start"),
