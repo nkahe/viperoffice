@@ -787,23 +787,30 @@ def _to_end_of_line(expand:bool, count:int, pending_keys:str|None=None) -> bool:
 
 def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
     """Go to line [count] motion. Commands 'G' and 'gg'.
-    Other args:
-    default_end: bool  To default to end of text container if no count given.
-                       else default of start of text container.
+    Args:
+
+    expand: bool       Expand selection
+    raw_count: int     Move to line [count].
+    default_end: bool  To default to end of text document if no count given.
+                       else default of start of text document.
     """
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
         if raw_count == 0 and default_end:  # Command 'G'
-            cursor.gotoRange(cursor.getText().getEnd(), expand)
-            # cursor.gotoEnd(expand)
-            return True
+            target = cursor.getText().getEnd()
+        else:
+            target = cursor.getText().getStart()  # Command 'gg'
 
-        cursor.jumpToFirstPage()  # Command 'gg'
-        # cursor.gotoStart(expand)
+        anchor = _state().get("visual_anchor") if expand else None
+        if anchor is not None:
+            _set_visual_selection(cursor, anchor, target)
+        else:
+            cursor.gotoRange(target, expand)
+
         if raw_count > 1:
-            cursor.goDown(raw_count - 1, expand)
+            cursor.goDown(raw_count - 1, expand)  # [count]G/gg
         return True
     except Exception:
         return False
