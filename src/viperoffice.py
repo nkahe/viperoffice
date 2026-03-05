@@ -72,6 +72,7 @@ def _state():
             # Anchor (fixed end) of visual mode selection. Saved when entering
             # visual mode so motions know which end is the caret.
             "visual_anchor": None,
+            "visual_caret": None,
         }
         setattr(builtins, key, state)
     return state
@@ -95,8 +96,21 @@ def _set_visual_anchor(anchor) -> None:
     _state()["visual_anchor"] = anchor
 
 
+def _set_visual_caret(caret) -> None:
+    _state()["visual_caret"] = caret
+
+
+def _get_visual_caret():
+    return _state().get("visual_caret")
+
+
 def _clear_visual_anchor() -> None:
     _state()["visual_anchor"] = None
+    _clear_visual_caret()
+
+
+def _clear_visual_caret() -> None:
+    _state()["visual_caret"] = None
 
 
 def _set_mode(new_mode: str) -> bool:
@@ -379,6 +393,142 @@ def _get_visual_caret_range(text_cursor):
         return text_cursor.getEnd()
 
 
+def _range_length_between(left_range, right_range) -> int:
+    if left_range is None or right_range is None:
+        return 0
+    try:
+        if _range_starts_before(right_range, left_range):
+            left_range, right_range = right_range, left_range
+        text = left_range.getText()
+        span = text.createTextCursorByRange(left_range)
+        span.gotoRange(right_range, True)
+        return len(span.getString())
+    except Exception:
+        return 0
+
+
+def _range_starts_before(range_a, range_b) -> bool:
+    if range_a is None or range_b is None:
+        return False
+    try:
+        text = range_a.getText()
+        # compareRegionStarts returns 1 when range_a starts before range_b.
+        return text.compareRegionStarts(range_a, range_b) == 1
+    except Exception:
+        return False
+
+
+def _range_ends_before(range_a, range_b) -> bool:
+    if range_a is None or range_b is None:
+        return False
+    try:
+        text = range_a.getText()
+        return text.compareRegionEnds(range_a, range_b) == 1
+    except Exception:
+        return False
+
+
+def _try_go_left(cursor, distance: int) -> bool:
+    if cursor is None or distance <= 0:
+        return False
+    moved = False
+    hide_cursor = False
+    try:
+        visible_before = None
+        try:
+            visible_before = cursor.isVisible()
+        except Exception:
+            visible_before = None
+        if visible_before:
+            cursor.setVisible(False)
+            hide_cursor = True
+        moved = cursor.goLeft(distance, True)
+    except Exception:
+        moved = False
+    finally:
+        if hide_cursor:
+            cursor.setVisible(True)
+    return moved
+
+
+def _try_go_right(cursor, distance: int) -> bool:
+    if cursor is None or distance <= 0:
+        return False
+    moved = False
+    hide_cursor = False
+    try:
+        visible_before = None
+        try:
+            visible_before = cursor.isVisible()
+        except Exception:
+            visible_before = None
+        if visible_before:
+            cursor.setVisible(False)
+            hide_cursor = True
+        moved = cursor.goRight(distance, True)
+    except Exception:
+        moved = False
+    finally:
+        if hide_cursor:
+            cursor.setVisible(True)
+    return moved
+
+
+def _set_visual_selection(cursor, anchor, new_caret):
+    """Rebuild visual selection between fixed anchor and new caret position.
+
+    gotoRange(pos, True) on a view cursor only moves the RIGHT end, so we always
+    expand rightward: collapse to the leftmost of (anchor, new_caret) first, then
+    expand right to the other. This handles direction changes (crossing the anchor).
+    """
+    try:
+        text = anchor.getText()
+        # Expand anchor → new_caret to cover both positions, then check which
+        # endpoint is the anchor. If anchor is the left end, new_caret is to the
+        # right (forward); otherwise new_caret is to the left (backward).
+        span = text.createTextCursorByRange(anchor.getStart())
+        span.gotoRange(new_caret, True)
+        left_check = text.createTextCursorByRange(span.getStart())
+        left_check.gotoRange(anchor.getStart(), True)
+        anchor_is_left = len(left_check.getString()) == 0
+        previous_caret = _get_visual_caret()
+
+        if anchor_is_left:
+            new_length = _range_length_between(anchor, new_caret)
+            prev_length = _range_length_between(anchor, previous_caret) if previous_caret is not None else 0
+            if previous_caret is not None and _range_ends_before(previous_caret, new_caret):
+                delta = new_length - prev_length
+                if delta > 0 and _try_go_right(cursor, delta):
+                    _set_visual_caret(new_caret)
+                    return
+            # Rebuild selection for first expansion or when incremental path fails.
+            cursor.gotoRange(anchor, False)
+            cursor.gotoRange(new_caret, True)
+            _set_visual_caret(new_caret)
+            return
+
+        if _range_starts_before(new_caret, anchor):
+            prev_length = _range_length_between(previous_caret, anchor) if previous_caret is not None else 0
+            new_length = _range_length_between(new_caret, anchor)
+            if previous_caret is not None and _range_starts_before(new_caret, previous_caret):
+                delta = prev_length - new_length
+                if delta > 0 and _try_go_left(cursor, delta):
+                    _set_visual_caret(new_caret)
+                    return
+
+            cursor.gotoRange(anchor, False)
+            distance = _range_length_between(new_caret, anchor)
+            if _try_go_left(cursor, distance):
+                _set_visual_caret(new_caret)
+                return
+
+        # Fallback: collapse directly to the requested caret range.
+        _set_visual_caret(None)
+        cursor.gotoRange(new_caret, True)
+    except Exception:
+        pass
+
+
 def _show_cursor(mode:str):
     """Style cursor depending on mode"""
     text_cursor = _get_text_cursor()
@@ -402,6 +552,7 @@ def _show_cursor(mode:str):
                 # Save current position as anchor before expanding selection.
                 _set_visual_anchor(text_cursor.getStart())
                 text_cursor.goRight(1, True)
+                _set_visual_caret(text_cursor.getEnd())
 
         elif mode == "insert":
             # Use collapsed cursor.
@@ -841,14 +992,32 @@ def _apply_motion_result(result, expand:bool) -> bool:
     if cursor is None or end_range is None:
         return False
     try:
-        if expand and _state().get("visual_anchor") is None:
-            # Pending mode: collapse to start_range (P) first so the selection
-            # starts at the block cursor char, not at P+1 (the anchor side).
-            start = result.get("start_range")
-            if start is not None:
-                cursor.gotoRange(start, False)
-        cursor.gotoRange(end_range, expand)
-        if expand and _state().get("visual_anchor") is None and result.get("inclusive"):
+        # old HEAD
+        # if expand and _state().get("visual_anchor") is None:
+        #     # Pending mode: collapse to start_range (P) first so the selection
+        #     # starts at the block cursor char, not at P+1 (the anchor side).
+        #     start = result.get("start_range")
+        #     if start is not None:
+        #         cursor.gotoRange(start, False)
+        # cursor.gotoRange(end_range, expand)
+        # if expand and _state().get("visual_anchor") is None and result.get("inclusive"):
+        if not expand:
+            return cursor.gotoRange(end_range, False)
+
+        anchor = _state().get("visual_anchor")
+        if anchor is not None:
+            # Visual mode: use _set_visual_selection so direction changes
+            # (crossing the anchor) work correctly in both directions.
+            _set_visual_selection(cursor, anchor, end_range)
+            return True
+
+        # Pending mode: collapse to start_range (P) first so the selection
+        # starts at the block cursor char, not at P+1 (the anchor side).
+        start = result.get("start_range")
+        if start is not None:
+            cursor.gotoRange(start, False)
+        cursor.gotoRange(end_range, True)
+        if result.get("inclusive"):
             # Pending mode with an inclusive motion (e.g. e/E/ge/gE):
             # _query_word_motion ran with expand=False so the +1 inclusive offset
             # in _word_motion_once_forward never fired. Extend one more char to
@@ -1115,7 +1284,16 @@ def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool, bac
         edge = text_cursor.getEnd()
     else:
         edge = text_cursor.getStart()
-    view_cursor.gotoRange(edge, expand)
+# <<<<<<< HEAD
+    # view_cursor.gotoRange(edge, expand)
+# =======
+    anchor = _state().get("visual_anchor") if expand else None
+    if anchor is not None:
+        # Visual mode: use _set_visual_selection so direction changes work correctly.
+        _set_visual_selection(view_cursor, anchor, edge)
+    else:
+        view_cursor.gotoRange(edge, expand)
+# >>>>>>> b88f406 (Experimental visual selection updating.)
 
 
 def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
