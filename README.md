@@ -41,7 +41,7 @@ Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`, Visual `v`.
 - Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `H`, `L`, `()`, `{}`
 - Number count for most commands. Example `10j`, `3gg`, `d4gE`
-- Scrolling: `C-f`, `C-b`
+- Scrolling: `C-f`, `C-b`, `C-d`, `C-u`
 - Replace: `r`
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`, `S`
 - Undo/redo: `u`, `C-r` / `U`

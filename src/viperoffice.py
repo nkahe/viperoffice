@@ -35,6 +35,9 @@ ISKEYWORD: Final[str] = "@,48-57,_,192-255"
 # Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
 MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 3
 
+# How many lines should C-d and C-u scroll.
+SCROLL: Final[int] = 21
+
 def _state():
     key = "_vipereoffice_state"
     state = getattr(builtins, key, None)
@@ -183,6 +186,19 @@ def _set_position() -> bool:
 
 def _get_position():
     return _state()["cursor_position"]
+
+
+def _get_scroll() -> int:
+    """Lines to scroll with C-b and C-u commands."""
+    default = 20
+    try:
+        lines_to_scroll = int(SCROLL)
+        if 1 <= lines_to_scroll <= 99:
+            return lines_to_scroll
+    except Exception:
+        pass
+    return default
+
 
 # ------------------------
 # General helper functions
@@ -1512,16 +1528,20 @@ def _undo_and_redo(count=1, redo=False) -> bool:
         return False
 
 
-def _scroll_window(count:int, forward:bool, halfpage=False) -> bool:
-    """Scroll window by one page. Commands 'C-f' (forward) and 'C-b' (backward).
+def _scroll_window(expand:bool, count:int, forward:bool, mode:str, lines:int|None=None) -> bool:
+    """Scroll window. Commands 'C-f', 'C-b', 'C-u', 'C-d'.
     """
     try:
         cursor = _get_cursor()
         if cursor is None:
             return False
-        if halfpage:
-            pass
-            return False
+        if lines:
+            if forward:
+                for _ in range(count):
+                    _hjkl_motion("j", lines, expand, mode)
+            else:
+                for _ in range(count):
+                    _hjkl_motion("k", lines, expand, mode)
         else:
             if forward:
                 for _ in range(count):
@@ -1529,13 +1549,14 @@ def _scroll_window(count:int, forward:bool, halfpage=False) -> bool:
             else:
                 for _ in range(count):
                     cursor.screenUp()
-            return True
+        return True
     except Exception:
         return False
 
 
-def _jump_to_page(expand: bool, target: str) -> bool:
+def _jump_to_page(expand: bool, target: str, count:int=1) -> bool:
     """Motion to start or end of a page. Commands 'H' and 'L'."""
+    target = target.lower()
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -1549,7 +1570,6 @@ def _jump_to_page(expand: bool, target: str) -> bool:
                 cursor.gotoRange(new_pos, True)
             else:
                 cursor.jumpToStartOfPage()
-            return True
         elif target == "end":
             if expand:
                 anchor = cursor.getStart()
@@ -1559,7 +1579,27 @@ def _jump_to_page(expand: bool, target: str) -> bool:
                 cursor.gotoRange(new_pos, True)
             else:
                 cursor.jumpToEndOfPage()
-        return False
+        elif target == "next":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToNextPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToNextPage()
+        elif target == "previous":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToPreviousPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToPreviousPage()
+        else:
+            return False
+        return True
     except Exception:
         return False
 
@@ -1763,21 +1803,22 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return True
 
     @staticmethod
-    def _normal_ctrl_actions(count, mode):
+    def _normal_ctrl_actions(expand, count, mode):
         b_code = int(getattr(Key, "B", 512))
         c_code = int(getattr(Key, "C", 514))
         d_code = int(getattr(Key, "D", 515))
         f_code = int(getattr(Key, "F", 517))
         r_code = int(getattr(Key, "R", 529))
         u_code = int(getattr(Key, "U", 532))
+        scroll_count = _get_scroll()
 
         actions = {
+            b_code: lambda: _scroll_window(expand, count, False, mode, False),
             c_code: lambda: _ctrl_c_command(mode),
-            b_code: lambda: _scroll_window(count, False, False),
-            f_code: lambda: _scroll_window(count, True, False),
-            d_code: lambda: _scroll_window(count, True, True),
-            u_code: lambda: _scroll_window(count, False, True),
+            d_code: lambda: _scroll_window(expand, count, True, mode, scroll_count),
+            f_code: lambda: _scroll_window(expand, count, True, mode, False),
             r_code: lambda: _undo_and_redo(count, True),
+            u_code: lambda: _scroll_window(expand, count, False, mode, scroll_count),
         }
         return actions
 
@@ -1886,11 +1927,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         pending_keys: str | None = _get_pending_keys()
         count: int = _get_count()
+        expand: bool = _get_mode() in ("visual", "pending")
 
         # --- Keys with non-shift/AltGr modifiers -------
 
         if key.is_ctrl:
-            actions = self._normal_ctrl_actions(count, mode)
+            actions = self._normal_ctrl_actions(expand, count, mode)
             action = actions.get(key.code)
             if action is not None:
                 return self._consume_action(action)
