@@ -189,6 +189,13 @@ def _reset_pending_keys():
     _state()["pending_keys"] = None
     _update_statusline()
 
+def _reset_prefix():
+    """Reset "a" or "i" text-object prefix."""
+    pending_keys = _state()["pending_keys"]
+    if pending_keys is None or pending_keys not in ("a", "i"):
+        return False
+    _state()["pending_keys"] = pending_keys[:-1]
+
 
 def _set_position() -> bool:
     """Save current view cursor position"""
@@ -1913,6 +1920,13 @@ def _ctrl_c_command(mode:str):
     _goto_mode("normal")
 
 
+def _sentence_text_object(expand, count, key, mode):
+    msg("sentence object")
+    _reset_count()
+    _goto_mode("normal")
+    return True
+
+
 # --------------
 # Input handling
 # --------------
@@ -2036,6 +2050,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return motions
 
+
+    @staticmethod
+    def _text_objects_keymap(expand, count:int, key, mode):
+        text_objects = {
+            "as": lambda: _sentence_text_object(expand, count, key, mode)
+        }
+
+        return text_objects
+
     @staticmethod
     def _navigation_keys(expand, count, mode):
         backspace = int(Key.BACKSPACE)
@@ -2105,7 +2128,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Pass other non-shift modified shortcuts through, except characters
         # made with AltGr.
         if _has_non_shift_modifier(event):
-            if not bool(_is_altgr_char(event, key.char, key.code)):
+            if not bool(_is_altgr_char(event, key)):
                 return False
 
         # --- Keys without modifiers after this --------
@@ -2133,15 +2156,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif nav is not None:
             key = KeyEvent(char=nav, code=key.code, pending=key.pending)
 
+        if mode in ("pending", "visual"):
+            matched_object = self._match_text_objects(key, expand, count, mode)
+            if matched_object is not None:
+                return matched_object
+
         # Match and handle motions that support operators.
         matched_motions = self._match_motions(key, count, mode)
         if matched_motions is not None:
             return matched_motions
-
-        # # Match navigations keys like arrow keys, Home, End etc.
-        # matched_keys = self._match_navigation_keys(key, count, pending_keys, mode)
-        # if matched_keys is not None:
-        #     return matched_keys
 
         # Match and handle non-motion commands.
         matched_commands = self._match_commands(key, count)
@@ -2177,13 +2200,41 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
-    # def _match_navigation_keys(self, key, count, pending_keys, mode):
-    #     expand: bool = _get_mode() in ("visual", "pending")
-    #     motions = self._navigation_keys(key, expand, count, pending_keys, mode)
-    #     motion = motions.get(key.code)
-    #     if motion is None:
-    #         return None
-    #     return self._consume_action(motion)
+
+    def _match_text_objects(self, key, expand, count, mode):
+        # Key after "a" or "i"
+        if key.pending is not None and key.pending[-1] in ("a", "i"):
+            # if key.char in ("w", "W", "s", "p"):  <- added later.
+            if key.char in ("s"):
+                text_objects = self._text_objects_keymap(expand, count, key, mode)
+                # msg(f"text-object matched: {object}")
+                text_object = text_objects.get(key.pending[-1] + key.char)
+                return self._consume_action(text_object)
+
+            # Not valid key, cancel
+            else:
+                if mode == "pending":
+                    _reset_count()
+                    _goto_mode("normal")
+                elif mode == "visual":
+                    _reset_pending_keys()
+            return True
+
+        if key.char in ("a", "i"):
+            if key.pending is None or key.pending in ("d", "c", "y"):
+                _add_pending_key(key.char)
+
+            # Not valid key, cancel
+            elif mode == "pending":
+                _reset_count()
+                _goto_mode("normal")
+            elif mode == "visual":
+                _reset_prefix()
+            return True
+
+        return None
+
+# key.pending[-1] not in ("a", "i")
 
     def _match_motions(self, key, count, mode):
         expand: bool = _get_mode() in ("visual", "pending")
@@ -2348,8 +2399,8 @@ def _is_ctrl_shift(mods):
     )
 
 
-def _is_altgr_char(event, key_char, key_code) -> bool:
-    if not (isinstance(key_char, str) and len(key_char) == 1 and ord(key_char) >= 32):
+def _is_altgr_char(event, key) -> bool:
+    if not (isinstance(key.char, str) and len(key.char) == 1 and ord(key.char) >= 32):
         return False
     mods = _event_modifiers(event)
     mod2 = getattr(KeyModifier, "MOD2", 0)
@@ -2357,7 +2408,7 @@ def _is_altgr_char(event, key_char, key_code) -> bool:
     # Treat AltGr as text-producing modified input. In this environment these
     # events arrive with key_code == 0 (e.g. AltGr+4 -> "$"), while normal
     # Ctrl/Alt shortcuts have concrete key codes.
-    return bool(mods & mod2) and not bool(mods & mod3) and key_code == 0
+    return bool(mods & mod2) and not bool(mods & mod3) and key.code == 0
 
 
 def _key_code(event):
