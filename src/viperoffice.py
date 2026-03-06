@@ -1446,8 +1446,8 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
     return True
 
 
-# Repeats ")" motion by count times.
 def _sentences_forward(expand: bool, count: int = 1) -> bool:
+    """Sentences forward motion."""
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -1921,10 +1921,17 @@ def _ctrl_c_command(mode:str):
 
 
 def _sentence_text_object(expand, count, key, mode):
-    msg("sentence object")
-    _reset_count()
-    _goto_mode("normal")
-    return True
+    """Text object "as": select a sentence (pending/visual modes)."""
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+
+    if not _is_at_sentence_start_heuristic(text_cursor):
+        if not _sentences_backwards(False, 1):
+            return False
+
+    return _sentences_forward(expand, count)
 
 
 # --------------
@@ -2209,8 +2216,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 text_objects = self._text_objects_keymap(expand, count, key, mode)
                 # msg(f"text-object matched: {object}")
                 text_object = text_objects.get(key.pending[-1] + key.char)
-                return self._consume_action(text_object)
 
+                if "c" in (key.pending or "") or "d" in (key.pending or ""):
+                    return self._consume_action(text_object,
+                        lambda: _delete_and_replace(count, key, _get_mode())
+                    )
+                elif "y" in (key.pending or ""):
+                    return self._consume_action(text_object,
+                        lambda: _yank(count, key, _get_mode())
+                    )
+                return self._consume_action(text_object)
             # Not valid key, cancel
             else:
                 if mode == "pending":
