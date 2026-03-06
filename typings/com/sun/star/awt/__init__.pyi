@@ -28,6 +28,7 @@ class Key:
     HOME: int
     END: int
     DELETE: int
+    BACKSPACE: int
 
 
 class Rectangle:

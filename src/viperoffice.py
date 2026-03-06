@@ -2025,6 +2025,29 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 motions["0"] = lambda: _to_start_of_line(expand, False)
 
         return motions
+
+
+    @staticmethod
+    def _navigation_keys(key):
+        backspace = int(Key.BACKSPACE)
+        left      = int(Key.LEFT)
+        right     = int(Key.RIGHT)
+        up        = int(Key.UP)
+        down      = int(Key.DOWN)
+        home      = int(Key.HOME)
+        end       = int(Key.END)
+        # pageup    = int(Key.PAGEUP)
+        # pagedown  = int(Key.PAGEDOWN)
+
+        return {
+            backspace: "h",
+            left:      "h",
+            right:     "l",
+            up:        "k",
+            down:      "j",
+            home:      "0",
+            end:       "$",
+        }
     # ------------------------------------------
     def keyPressed(self, event):
         state = _state()
@@ -2092,13 +2115,24 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _add_to_count(int(key.char))
                 return self._consume_action(None)
 
+
+        nav_char = self._navigation_keys(key).get(key.code)
+        if nav_char is not None:
+            key = KeyEvent(char=nav_char, code=key.code, is_ctrl=key.is_ctrl, is_escape=key.is_escape, pending=key.pending)
+
+
         # Match and handle motions that support operators.
-        matched_motions = self._match_motions(key, count, pending_keys, mode)
+        matched_motions = self._match_motions(key, count, mode)
         if matched_motions is not None:
             return matched_motions
 
+        # # Match navigations keys like arrow keys, Home, End etc.
+        # matched_keys = self._match_navigation_keys(key, count, pending_keys, mode)
+        # if matched_keys is not None:
+        #     return matched_keys
+
         # Match and handle non-motion commands.
-        matched_commands = self._match_commands(key, count, pending_keys)
+        matched_commands = self._match_commands(key, count)
         if matched_commands is not None:
             return matched_commands
 
@@ -2125,12 +2159,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _set_mode("normal")
             return True
 
-        # TODO: bind navigation keys to movement functions so count can be used.
-        if _is_navigation_key(event):
-            if pending_keys is not None:
-                _reset_pending_keys()
-                _set_mode("normal")
-            return False
         if key.is_escape:
             return self._consume_action(lambda: _goto_mode("normal"))
         # Deliberately cancels operator pending mode.
@@ -2141,9 +2169,17 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
-    def _match_motions(self, key, count, pending_keys, mode):
+    # def _match_navigation_keys(self, key, count, pending_keys, mode):
+    #     expand: bool = _get_mode() in ("visual", "pending")
+    #     motions = self._navigation_keys(key, expand, count, pending_keys, mode)
+    #     motion = motions.get(key.code)
+    #     if motion is None:
+    #         return None
+    #     return self._consume_action(motion)
+
+    def _match_motions(self, key, count, mode):
         expand: bool = _get_mode() in ("visual", "pending")
-        motions = self._motions_keymap(key, expand, count, pending_keys, mode)
+        motions = self._motions_keymap(key, expand, count, mode)
         motion = motions.get(key.char)
         if motion is None:
             return None
@@ -2329,11 +2365,6 @@ def _is_escape(key_code, is_ctrl):
     )
 
 
-def _is_navigation_key(event):
-    # LibreOffice key codes: Home/End/Left/Right/Up/Down/PageUp/PageDown.
-    return _key_code(event) in (1024, 1025, 1026, 1027, 1028, 1029, 1030, 1031)
-
-
 def _is_insert_key(event):
     try:
         return _key_code(event) == int(getattr(Key, "INSERT"))
@@ -2346,13 +2377,6 @@ def _is_del_key(event):
         return _key_code(event) == int(getattr(Key, "DELETE"))
     except Exception:
         return False
-
-
-def _is_backspace_key(event):
-    try:
-        return _key_code(event) == int(getattr(Key, "BACKSPACE"))
-    except Exception:
-        return _key_code(event) == 1283
 
 
 def _is_function_key(event):
