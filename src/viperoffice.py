@@ -1151,8 +1151,10 @@ def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
     if next_offset is not None and next_offset < length:
         text_cursor.gotoStartOfParagraph(False)
         move = next_offset
-        # e/E are inclusive: include the char at next_offset in the selection.
-        if expand and spec.get("target") == END:
+        # In expand mode, include the character at next_offset in the selection:
+        # - e/E (target=END): include the last char of the word.
+        # - w/W (target=START): include the first char of the next word.
+        if expand and spec.get("target") in (END, START):
             move = next_offset + 1
         if move > 0:
             text_cursor.goRight(move, expand)
