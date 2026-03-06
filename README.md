@@ -35,6 +35,9 @@ This will simply build the extension file from the template files in
 
 - Multi-window support.
 - Modes: Normal (+Operator pending), Insert, Visual.
+- Custom Word, WORD, sentence and paragraph motions which match closely Vi(m)'s.
+- Most command can take number count and use it like Vi(m).
+- Passthrough of not-used shortcuts so most of LibreOffice's shortcuts are still available.
 - Statusline with mode, count, pending commands.
 
 Currently supported commands:
@@ -50,16 +53,14 @@ Currently supported commands:
 
 - In Visual mode you can swap cursor position to other end of selection with `o`.
 
-Supported Insert mode commands:
-- Switch to Normal mode: `Esc`, aliases `C-[` and `C-c`. 
-
 Aliases:
-- `Ins` = i, `BS` = h, `C-c` copy in Visual mode.
+- `Ins` = i, `BS` = h, `C-c` copy in Visual mode, navigation keys are mapped to equivalent motions.
 
 Mouse:
-- Mouse selection switches to Visual mode.
+- Mouse selection in Normal mode switch to Visual mode.
 
-Other shortcuts and keys are passed to LibreOffice.
+Insert mode commands:
+- Switch to Normal mode: `Esc` or with alias `C-[`. 
 
 For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
 they are similar in functionality.
@@ -82,6 +83,7 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
   to clipboard but just delete.
 - `H` and `L` motions move cursor to start and end of page instead of screen.
 - `Y` does same as `y$`.
+- `C-d` and `C-u` default scrolling of 20 lines, which can be changed with extension's global variable `SCROLL`.
 
 ## Known issues / missing features
 
