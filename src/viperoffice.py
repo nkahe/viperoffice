@@ -1678,12 +1678,15 @@ def _scroll_window(expand:bool, count:int, forward:bool, mode:str, lines:int|Non
                 for _ in range(count):
                     _hjkl_motion("k", lines, expand, mode)
         else:
+            anchor = _state().get("visual_anchor") if expand else None
             if forward:
                 for _ in range(count):
                     cursor.screenDown()
             else:
                 for _ in range(count):
                     cursor.screenUp()
+            if anchor is not None:
+                _set_visual_selection(cursor, anchor, cursor.getStart())
         return True
     except Exception:
         return False
@@ -2033,9 +2036,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return motions
 
-
     @staticmethod
-    def _navigation_keys():
+    def _navigation_keys(expand, count, mode):
         backspace = int(Key.BACKSPACE)
         left      = int(Key.LEFT)
         right     = int(Key.RIGHT)
@@ -2043,9 +2045,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         down      = int(Key.DOWN)
         home      = int(Key.HOME)
         end       = int(Key.END)
-        # pageup    = int(Key.PAGEUP)
-        # pagedown  = int(Key.PAGEDOWN)
+        pageup    = int(Key.PAGEUP)
+        pagedown  = int(Key.PAGEDOWN)
 
+        # Navigation keys are mapped to motions so they can take count, be used
+        # with operators and for pageup/pagedown handle selection.
         return {
             backspace: "h",
             left:      "h",
@@ -2054,6 +2058,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             down:      "j",
             home:      "0",
             end:       "$",
+            pageup:    lambda: _scroll_window(expand, count, False, mode, False),
+            pagedown:  lambda: _scroll_window(expand, count, True, mode, False),
         }
     # ------------------------------------------
     def keyPressed(self, event):
@@ -2121,9 +2127,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _add_to_count(int(key.char))
                 return self._consume_action(None)
 
-        nav_char = self._navigation_keys().get(key.code)
-        if nav_char is not None:
-            key = KeyEvent(char=nav_char, code=key.code, pending=key.pending)
+        nav = self._navigation_keys(expand, count, mode).get(key.code)
+        if callable(nav):
+            return self._consume_action(nav)
+        elif nav is not None:
+            key = KeyEvent(char=nav, code=key.code, pending=key.pending)
 
         # Match and handle motions that support operators.
         matched_motions = self._match_motions(key, count, mode)
