@@ -1346,8 +1346,23 @@ def _to_previous_non_empty_paragraph(text_cursor, expand: bool) -> bool:
     return moved
 
 
+def _move_to_empty_block_start(text_cursor) -> bool:
+    if not _is_current_paragraph_empty(text_cursor):
+        return False
+    text_cursor.gotoStartOfParagraph(False)
+    while True:
+        if not text_cursor.gotoPreviousParagraph(False):
+            text_cursor.gotoStartOfParagraph(False)
+            return True
+        if not _is_current_paragraph_empty(text_cursor):
+            text_cursor.gotoNextParagraph(False)
+            text_cursor.gotoStartOfParagraph(False)
+            return True
+        text_cursor.gotoStartOfParagraph(False)
+
+
 def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
-    """Motion to next paragraph. Command '}'.
+    """Motion to for [count] paragraphs forward. Command '}'.
 
     From a non-empty paragraph, moves to the start of the next paragraph
     (which may itself be an empty separator line). From an empty separator
@@ -1384,7 +1399,7 @@ def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
 
 
 def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
-    """Motion to previous paragraph. Command '{'.
+    """Motion for [count] paragraphs backward. Command '{'.
 
     From inside a paragraph, moves to the start of the current paragraph.
     From the start of a non-empty paragraph, moves to the start of the
@@ -1420,7 +1435,7 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
+def _to_next_sentence(text_cursor, cursor, expand: bool, include_whitespace: bool = True) -> bool:
     # Implements one ")" motion with paragraph-edge handling.
     old_pos = cursor.getPosition()
 
@@ -1455,7 +1470,7 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
     return True
 
 
-def _sentences_forward(expand: bool, count: int = 1) -> bool:
+def _sentences_forward(expand: bool, count: int, include_whitespace: bool = True) -> bool:
     """Sentences forward motion."""
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -1471,7 +1486,7 @@ def _sentences_forward(expand: bool, count: int = 1) -> bool:
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _to_next_sentence(text_cursor, cursor, expand):
+            if not _to_next_sentence(text_cursor, cursor, expand, include_whitespace):
                 break
             moved_any = True
         return moved_any
@@ -1563,7 +1578,7 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _sentence_text_object(expand, count, key, mode):
+def _sentence_text_object(expand, count, key, mode, include_whitespace:bool = True):
     """Text object "as": select a sentence (pending/visual modes)."""
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -1574,7 +1589,7 @@ def _sentence_text_object(expand, count, key, mode):
         if not _is_at_sentence_start_heuristic(text_cursor):
             if not _sentences_backwards(False, 1):
                 return False
-        return _sentences_forward(expand, count)
+        return _sentences_forward(expand, count, include_whitespace)
 
     if mode != "visual":
         return False
@@ -1607,6 +1622,24 @@ def _sentence_text_object(expand, count, key, mode):
     _reset_count()
     return moved
 
+
+def _paragraph_text_object(expand, count, key, mode, include_whitespace:bool = True):
+    """Text object "ip": select a paragraph (pending/visual modes)."""
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+
+    if mode == "pending":
+        if _is_current_paragraph_empty(text_cursor):
+            _move_to_empty_block_start(text_cursor)
+            cursor.gotoRange(text_cursor.getStart(), False)
+        elif not text_cursor.isStartOfParagraph():
+            if not _paragraphs_backward(False, 1):
+                return False
+        return _paragraphs_forward(expand, count)
+    else:
+        return False
 
 
 def _insert_commands(cmd:str, mode="normal"):
@@ -2104,7 +2137,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     @staticmethod
     def _text_objects_keymap(expand, count:int, key, mode):
         text_objects = {
-            "as": lambda: _sentence_text_object(expand, count, key, mode)
+            "as": lambda: _sentence_text_object(expand, count, key, mode, True),
+            "is": lambda: _sentence_text_object(expand, count, key, mode, False),
+            "ip": lambda: _paragraph_text_object(expand, count, key, mode, False),
         }
 
         return text_objects
@@ -2255,7 +2290,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Key after "a" or "i"
         if key.pending is not None and key.pending[-1] in ("a", "i"):
             # if key.char in ("w", "W", "s", "p"):  <- added later.
-            if key.char in ("s"):
+            if key.char in ("s", "p"):
                 text_objects = self._text_objects_keymap(expand, count, key, mode)
                 # msg(f"text-object matched: {object}")
                 text_object = text_objects.get(key.pending[-1] + key.char)
