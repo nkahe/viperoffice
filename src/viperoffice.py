@@ -1361,6 +1361,29 @@ def _move_to_empty_block_start(text_cursor) -> bool:
         text_cursor.gotoStartOfParagraph(False)
 
 
+def _consume_empty_block_forward(text_cursor):
+    end_range = None
+    while True:
+        text_cursor.gotoEndOfParagraph(False)
+        end_range = text_cursor.getEnd()
+        if not text_cursor.gotoNextParagraph(False):
+            text_cursor.gotoStartOfParagraph(False)
+            return end_range, False
+        if not _is_current_paragraph_empty(text_cursor):
+            text_cursor.gotoStartOfParagraph(False)
+            return end_range, True
+
+
+def _extend_selection_over_empty_block_break(text_cursor, cursor) -> bool:
+    if not text_cursor.gotoPreviousParagraph(False):
+        return False
+    text_cursor.gotoEndOfParagraph(False)
+    cursor.gotoRange(text_cursor.getEnd(), True)
+    cursor.goRight(1, True)
+    text_cursor.gotoNextParagraph(False)
+    return True
+
+
 def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
     """Motion to for [count] paragraphs forward. Command '}'.
 
@@ -1623,21 +1646,51 @@ def _sentence_text_object(expand, count, key, mode, include_whitespace:bool = Tr
     return moved
 
 
-def _paragraph_text_object(expand, count, key, mode, include_whitespace:bool = True):
-    """Text object "ip": select a paragraph (pending/visual modes)."""
+def _paragraph_text_object(expand, count, key, mode):
+    """Text objects "ip"/"ap": select a paragraph (pending/visual modes)."""
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
         return False
 
     if mode == "pending":
-        if _is_current_paragraph_empty(text_cursor):
+        is_around = key.pending is not None and key.pending[-1] == "a"
+        started_empty = _is_current_paragraph_empty(text_cursor)
+        if started_empty:
             _move_to_empty_block_start(text_cursor)
             cursor.gotoRange(text_cursor.getStart(), False)
         elif not text_cursor.isStartOfParagraph():
             if not _paragraphs_backward(False, 1):
                 return False
-        return _paragraphs_forward(expand, count)
+
+        moved = _paragraphs_forward(expand, count)
+        if not moved:
+            return False
+
+        text_cursor = _get_text_cursor()
+        if text_cursor is None:
+            return False
+
+        if started_empty:
+            if not _is_current_paragraph_empty(text_cursor):
+                _extend_selection_over_empty_block_break(text_cursor, cursor)
+            if not is_around:
+                return True
+            if not _is_current_paragraph_empty(text_cursor):
+                text_cursor.gotoEndOfParagraph(False)
+                cursor.gotoRange(text_cursor.getEnd(), True)
+            return True
+
+        if not is_around:
+            return True
+
+        if _is_current_paragraph_empty(text_cursor):
+            end_range, has_next = _consume_empty_block_forward(text_cursor)
+            if end_range is not None:
+                cursor.gotoRange(end_range, True)
+                if has_next:
+                    cursor.goRight(1, True)
+        return True
     else:
         return False
 
@@ -1922,7 +1975,8 @@ def _delete_and_replace(count:int, key:KeyEvent, mode:str) -> bool:
     # Linewise delete/replace 'dd', 'cc' and 'S'.
     if (key.pending in ("c", "d") and key.char == key.pending) or key.char == "S":
         _to_start_of_line(False, False)
-        _hjkl_motion("j", count, True, mode)
+        cursor = _get_cursor()
+        cursor.goDown(count, True)
 
     _copy_and_delete(True, True)
 
@@ -2139,7 +2193,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         text_objects = {
             "as": lambda: _sentence_text_object(expand, count, key, mode, True),
             "is": lambda: _sentence_text_object(expand, count, key, mode, False),
-            "ip": lambda: _paragraph_text_object(expand, count, key, mode, False),
+            "ip": lambda: _paragraph_text_object(expand, count, key, mode),
+            "ap": lambda: _paragraph_text_object(expand, count, key, mode),
         }
 
         return text_objects
@@ -2697,17 +2752,17 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
             return False
         anchor = state.get("mouse_press_anchor")
         cursor = _get_cursor()
-        print(f"mouseReleased: cursor={cursor}, anchor={anchor}")
-        if cursor is not None and anchor is not None:
-            try:
-                dist = _range_length_between(anchor, cursor.getStart())
-                print(f"mouseReleased: dist={dist}")
-                if dist == 0:
-                    print("mouseReleased: same position (click, no drag)")
-                else:
-                    print("mouseReleased: different position (drag selection)")
-            except Exception as e:
-                print(f"mouseReleased: comparison error {e}")
+        # print(f"mouseReleased: cursor={cursor}, anchor={anchor}")
+        # if cursor is not None and anchor is not None:
+            # try:
+                # dist = _range_length_between(anchor, cursor.getStart())
+                # print(f"mouseReleased: dist={dist}")
+                # if dist == 0:
+                    # print("mouseReleased: same position (click, no drag)")
+                # else:
+                    # print("mouseReleased: different position (drag selection)")
+            # except Exception as e:
+            #     print(f"mouseReleased: comparison error {e}")
         _reset_count()
         _reset_pending_keys()
         _set_mode("visual")
