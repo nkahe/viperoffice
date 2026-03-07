@@ -71,7 +71,6 @@ def _state():
             # Anchor (fixed end) of visual mode selection. Saved when entering
             # visual mode so motions know which end is the caret.
             "visual_anchor": None,
-            "visual_caret": None,
         }
         setattr(builtins, key, state)
     return state
@@ -95,21 +94,8 @@ def _set_visual_anchor(anchor) -> None:
     _state()["visual_anchor"] = anchor
 
 
-def _set_visual_caret(caret) -> None:
-    _state()["visual_caret"] = caret
-
-
-def _get_visual_caret():
-    return _state().get("visual_caret")
-
-
 def _clear_visual_anchor() -> None:
     _state()["visual_anchor"] = None
-    _clear_visual_caret()
-
-
-def _clear_visual_caret() -> None:
-    _state()["visual_caret"] = None
 
 
 def _set_mode(new_mode: str) -> bool:
@@ -514,13 +500,10 @@ def _set_visual_selection(cursor, anchor, new_caret):
         if anchor_is_left:
             _ensure_visual_caret(cursor, True)
             new_length = _range_length_between(anchor, new_caret)
-            # Use the live cursor's right end for prev_length instead of the stored
-            # _visual_caret, which may be stale if selection was extended via code
-            # paths that bypass _set_visual_selection.
             try:
                 current_right = cursor.getEnd()
             except Exception:
-                current_right = _get_visual_caret()
+                current_right = None
             prev_length = _range_length_between(anchor, current_right) if current_right is not None else 0
             # Only use incremental goRight when extending an existing forward selection
             # (prev_length > 0). When prev_length == 0 the cursor's right end equals
@@ -529,45 +512,38 @@ def _set_visual_selection(cursor, anchor, new_caret):
             if prev_length > 0 and current_right is not None and _range_ends_before(current_right, new_caret):
                 delta = new_length - prev_length
                 if delta > 0 and _try_go_right(cursor, delta):
-                    _set_visual_caret(new_caret)
                     return
             # Rebuild selection for first expansion, direction change, or when
             # incremental path fails.
             cursor.gotoRange(anchor, False)
             cursor.gotoRange(new_caret, True)
-            _set_visual_caret(new_caret)
             return
 
         if _range_starts_before(new_caret, anchor):
             _ensure_visual_caret(cursor, False)
-            # Use the live cursor's left end for prev_length.
             try:
                 current_left = cursor.getStart()
             except Exception:
-                current_left = _get_visual_caret()
+                current_left = None
             prev_length = _range_length_between(current_left, anchor) if current_left is not None else 0
             new_length = _range_length_between(new_caret, anchor)
             if current_left is not None and _range_starts_before(new_caret, current_left):
                 delta = prev_length - new_length
                 if delta > 0 and _try_go_left(cursor, delta):
-                    _set_visual_caret(new_caret)
                     return
 
             cursor.gotoRange(anchor, False)
             distance = _range_length_between(new_caret, anchor)
             if _try_go_left(cursor, distance):
-                _set_visual_caret(new_caret)
                 return
 
         # Fallback: collapse directly to the requested caret range.
-        _set_visual_caret(None)
         cursor.gotoRange(new_caret, True)
     except Exception:
         pass
 
-
+# Sets cursor style and save cursor position info.
 def _show_cursor(mode:str):
-    """Style cursor depending on mode"""
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     controller = _get_controller()
@@ -583,16 +559,15 @@ def _show_cursor(mode:str):
                 text_cursor.goLeft(1, True)
 
         elif mode == "visual":
-            # Collapse cursor so selection starts at predictable point unless selection is
-            # already bigger than normal mode cursor which means it was started with
-            # mouse selection.
-            # FIXME: try get correct placement in that situation.
+            # Coming from Normal mode (1-char cursor): collapse and re-select so
+            # anchor and caret are known and caret is placed right side of
+            # old Normal mode cursor where selection anchor point is.
             if len(cursor.getString()) == 1:
                 text_cursor.gotoRange(text_cursor.getStart(), False)
-                # Save current position as anchor before expanding selection.
                 _set_visual_anchor(text_cursor.getStart())
                 text_cursor.goRight(1, True)
-                _set_visual_caret(text_cursor.getEnd())
+            else:
+                pass
 
         elif mode == "insert":
             # Use collapsed cursor.
