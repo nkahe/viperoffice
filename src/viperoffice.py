@@ -1305,16 +1305,12 @@ def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool, bac
         edge = text_cursor.getEnd()
     else:
         edge = text_cursor.getStart()
-# <<<<<<< HEAD
-    # view_cursor.gotoRange(edge, expand)
-# =======
     anchor = _state().get("visual_anchor") if expand else None
     if anchor is not None:
         # Visual mode: use _set_visual_selection so direction changes work correctly.
         _set_visual_selection(view_cursor, anchor, edge)
     else:
         view_cursor.gotoRange(edge, expand)
-# >>>>>>> b88f406 (Experimental visual selection updating.)
 
 
 def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
@@ -1424,8 +1420,10 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
         return moved
 
+    print(f"_to_next_sentence: before gotoNextSentence, tc={repr(text_cursor.getString()[:30])}, expand={expand}")
     text_cursor.gotoNextSentence(expand)
     _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+    print(f"_to_next_sentence: after sync, tc_str={repr(text_cursor.getString()[:30])}, same_pos={_same_pos(old_pos, cursor.getPosition())}, old_pos={_pos_xy(old_pos)}, new_pos={_pos_xy(cursor.getPosition())}")
 
     # Some backends land on the paragraph end marker first; skip that stop.
     if text_cursor.isEndOfParagraph() and not _is_current_paragraph_empty(text_cursor):
@@ -1455,8 +1453,10 @@ def _sentences_forward(expand: bool, count: int = 1) -> bool:
     try:
         if expand:
             # Collapse to the caret end so forward scan starts from the right place.
+            print(f"_sentences_forward: tc before collapse={repr(text_cursor.getString()[:40])}, len={len(text_cursor.getString())}")
             caret = _get_visual_caret_range(text_cursor)
             text_cursor.gotoRange(caret, False)
+            print(f"_sentences_forward: tc after collapse={repr(text_cursor.getString()[:40])}")
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
