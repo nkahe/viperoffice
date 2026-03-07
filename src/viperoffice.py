@@ -480,6 +480,19 @@ def _try_go_right(cursor, distance: int) -> bool:
     return moved
 
 
+def _ensure_visual_caret(cursor, at_end: bool) -> None:
+    """Ensure view cursor caret is on the requested selection end without changing selection."""
+    if cursor is None:
+        return
+    try:
+        if at_end:
+            cursor.gotoRange(cursor.getEnd(), True)
+        else:
+            cursor.gotoRange(cursor.getStart(), True)
+    except Exception:
+        pass
+
+
 def _set_visual_selection(cursor, anchor, new_caret):
     """Rebuild visual selection between fixed anchor and new caret position.
 
@@ -499,6 +512,7 @@ def _set_visual_selection(cursor, anchor, new_caret):
         anchor_is_left = len(left_check.getString()) == 0
 
         if anchor_is_left:
+            _ensure_visual_caret(cursor, True)
             new_length = _range_length_between(anchor, new_caret)
             # Use the live cursor's right end for prev_length instead of the stored
             # _visual_caret, which may be stale if selection was extended via code
@@ -525,6 +539,7 @@ def _set_visual_selection(cursor, anchor, new_caret):
             return
 
         if _range_starts_before(new_caret, anchor):
+            _ensure_visual_caret(cursor, False)
             # Use the live cursor's left end for prev_length.
             try:
                 current_left = cursor.getStart()
