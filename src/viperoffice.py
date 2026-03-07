@@ -71,6 +71,7 @@ def _state():
             # Anchor (fixed end) of visual mode selection. Saved when entering
             # visual mode so motions know which end is the caret.
             "visual_anchor": None,
+            "mouse_press_anchor": None
         }
         setattr(builtins, key, state)
     return state
@@ -560,15 +561,16 @@ def _show_cursor(mode:str):
 
         elif mode == "visual":
             # Coming from Normal mode (1-char cursor): collapse and re-select so
-            # anchor and caret are known and caret is placed right side of
-            # old Normal mode cursor where selection anchor point is.
+            # anchor and caret are known.
             if len(cursor.getString()) == 1:
                 text_cursor.gotoRange(text_cursor.getStart(), False)
                 _set_visual_anchor(text_cursor.getStart())
                 text_cursor.goRight(1, True)
-            else:
-                pass
-
+            # else:
+                # Mouse selection: use the saved press position as anchor.
+                # press_anchor = _state().pop("mouse_press_anchor", None)
+                # if press_anchor is not None:
+                #     _set_visual_anchor(press_anchor)
         elif mode == "insert":
             # Use collapsed cursor.
             text_cursor.gotoRange(text_cursor.getStart(), False)
@@ -1561,6 +1563,52 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
+def _sentence_text_object(expand, count, key, mode):
+    """Text object "as": select a sentence (pending/visual modes)."""
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+
+    if mode == "pending":
+        if not _is_at_sentence_start_heuristic(text_cursor):
+            if not _sentences_backwards(False, 1):
+                return False
+        return _sentences_forward(expand, count)
+
+    if mode != "visual":
+        return False
+
+    # Without selection, current and possible next sentences are selected.
+    selection_len = len(cursor.getString())
+    if selection_len <= 1:      # Cursor len at start of Visual mode is 1.
+        if not _is_at_sentence_start_heuristic(text_cursor):
+            if not _sentences_backwards(False, 1):
+                return False
+        # After moving back without selection, re-anchor at sentence start
+        # so _sentences_forward expands from there, not from the original
+        # mid-sentence position.
+        new_tc = _get_text_cursor()
+        if new_tc is not None:
+            _set_visual_anchor(new_tc.getStart())
+        moved =_sentences_forward(expand, count)
+
+    else:
+        # With selection, it's direction defines which direction sentences are
+        # going to get selected from cursor point.
+        anchor = _state().get("visual_anchor")
+        caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
+        if caret_before_anchor:
+            moved = _sentences_backwards(expand, count)
+        else:
+            moved = _sentences_forward(expand, count)
+
+    _reset_pending_keys()
+    _reset_count()
+    return moved
+
+
+
 def _insert_commands(cmd:str, mode="normal"):
     """For Normal mode commands 'a', 'I', 'A', 'o', 'O'."""
     try:
@@ -1927,20 +1975,6 @@ def _ctrl_c_command(mode:str):
     elif mode == "visual":
         _copy_and_delete(True, False)
     _goto_mode("normal")
-
-
-def _sentence_text_object(expand, count, key, mode):
-    """Text object "as": select a sentence (pending/visual modes)."""
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
-        return False
-
-    if not _is_at_sentence_start_heuristic(text_cursor):
-        if not _sentences_backwards(False, 1):
-            return False
-
-    return _sentences_forward(expand, count)
 
 
 # --------------
@@ -2624,19 +2658,40 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
 
     def mouseReleased(self, event):
         state = _state()
-        if not state["enabled"] or state["mode"] == "visual":
+        if not state["enabled"]:
             return False
+        anchor = state.get("mouse_press_anchor")
         cursor = _get_cursor()
-        if cursor is None:
-            return False
-        try:
-            if len(cursor.getString()) > 0:
-                _goto_mode("visual")
-        except Exception:
-            pass
+        print(f"mouseReleased: cursor={cursor}, anchor={anchor}")
+        if cursor is not None and anchor is not None:
+            try:
+                dist = _range_length_between(anchor, cursor.getStart())
+                print(f"mouseReleased: dist={dist}")
+                if dist == 0:
+                    print("mouseReleased: same position (click, no drag)")
+                else:
+                    print("mouseReleased: different position (drag selection)")
+            except Exception as e:
+                print(f"mouseReleased: comparison error {e}")
+        _reset_count()
+        _reset_pending_keys()
+        _set_mode("visual")
         return False
 
     def mousePressed(self, event):
+        state = _state()
+        if not state["enabled"]:
+            return False
+        # Save cursor position at press time as the future visual anchor.
+        cursor = _get_cursor()
+        # text_cursor.collapseToEnd()
+        # Doesn't yet work.
+        if cursor is not None:
+            try:
+                state["mouse_press_anchor"] = cursor.getStart()
+            except Exception:
+                pass
+                # _state()["mouse_press_anchor"] = None
         return False
 
     def disposing(self, event):

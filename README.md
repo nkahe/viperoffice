@@ -50,6 +50,7 @@ Currently supported commands:
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
 - Search: `/` (LibreOffice search bar)
+- Text-objects: `as`
 
 - In Visual mode you can swap cursor position to other end of selection with `o`.
 
@@ -72,15 +73,16 @@ You can set your own shortcuts to enable, disable or toggle enabling of this ext
 Open Tools -> Customize. In `Categories` under Application Macros -> My Macros -> ViperOffice -> ViperOffice. List has functions:
 enable_viper_office, disable_viper_office, toggle_viper_office
 
-Select function, in `Shortcut keys` select key for it and click `Assign`. Click `Save` to save settings and `OK` to finish.
+Select function, in `Shortcut keys` select key for it and click `Assign`. You can click `Save` to save settings and `OK` to finish.
 
 
 ## Known differences to Vi/(Neo)vim
 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
 - Movement keys will wrap to the next line.
-- For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank
-  to clipboard but just delete.
+- For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank to clipboard but just delete.
+- Paragraph motions `{}` stop at start of paragraphs in addition to possible
+  first empty line between them.
 - `H` and `L` motions move cursor to start and end of page instead of screen.
 - `Y` does same as `y$`.
 - `C-d` and `C-u` default scrolling of 20 lines, which can be changed with extension's global variable `SCROLL`.
@@ -89,4 +91,5 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. Click 
 
 For implemented features:
 
+- 
 - Insert/append commands currently don't take count.
