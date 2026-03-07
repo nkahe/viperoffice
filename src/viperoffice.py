@@ -497,26 +497,42 @@ def _set_visual_selection(cursor, anchor, new_caret):
         left_check = text.createTextCursorByRange(span.getStart())
         left_check.gotoRange(anchor.getStart(), True)
         anchor_is_left = len(left_check.getString()) == 0
-        previous_caret = _get_visual_caret()
 
         if anchor_is_left:
             new_length = _range_length_between(anchor, new_caret)
-            prev_length = _range_length_between(anchor, previous_caret) if previous_caret is not None else 0
-            if previous_caret is not None and _range_ends_before(previous_caret, new_caret):
+            # Use the live cursor's right end for prev_length instead of the stored
+            # _visual_caret, which may be stale if selection was extended via code
+            # paths that bypass _set_visual_selection.
+            try:
+                current_right = cursor.getEnd()
+            except Exception:
+                current_right = _get_visual_caret()
+            prev_length = _range_length_between(anchor, current_right) if current_right is not None else 0
+            # Only use incremental goRight when extending an existing forward selection
+            # (prev_length > 0). When prev_length == 0 the cursor's right end equals
+            # the anchor, meaning the current selection was backward (caret left of
+            # anchor); goRight from the caret would overshoot, so rebuild instead.
+            if prev_length > 0 and current_right is not None and _range_ends_before(current_right, new_caret):
                 delta = new_length - prev_length
                 if delta > 0 and _try_go_right(cursor, delta):
                     _set_visual_caret(new_caret)
                     return
-            # Rebuild selection for first expansion or when incremental path fails.
+            # Rebuild selection for first expansion, direction change, or when
+            # incremental path fails.
             cursor.gotoRange(anchor, False)
             cursor.gotoRange(new_caret, True)
             _set_visual_caret(new_caret)
             return
 
         if _range_starts_before(new_caret, anchor):
-            prev_length = _range_length_between(previous_caret, anchor) if previous_caret is not None else 0
+            # Use the live cursor's left end for prev_length.
+            try:
+                current_left = cursor.getStart()
+            except Exception:
+                current_left = _get_visual_caret()
+            prev_length = _range_length_between(current_left, anchor) if current_left is not None else 0
             new_length = _range_length_between(new_caret, anchor)
-            if previous_caret is not None and _range_starts_before(new_caret, previous_caret):
+            if current_left is not None and _range_starts_before(new_caret, current_left):
                 delta = prev_length - new_length
                 if delta > 0 and _try_go_left(cursor, delta):
                     _set_visual_caret(new_caret)
@@ -552,8 +568,11 @@ def _show_cursor(mode:str):
                 text_cursor.goLeft(1, True)
 
         elif mode == "visual":
-            # Make selection start at caret position.
-            if len(cursor.getString()) == 1:  # if normal mode cursor
+            # Collapse cursor so selection starts at predictable point unless selection is
+            # already bigger than normal mode cursor which means it was started with
+            # mouse selection.
+            # FIXME: try get correct placement in that situation.
+            if len(cursor.getString()) == 1:
                 text_cursor.gotoRange(text_cursor.getStart(), False)
                 # Save current position as anchor before expanding selection.
                 _set_visual_anchor(text_cursor.getStart())
