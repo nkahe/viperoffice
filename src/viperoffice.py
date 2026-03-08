@@ -974,8 +974,8 @@ def _to_end_of_line(expand:bool, count:int, key=None) -> bool:
         return False
 
 
-def _delete_selected_lines(key:KeyEvent):
-    """Delete lines which have selection. Commands 'S' and in visual mode 'X'."""
+def _delete_and_replace_lines(key:KeyEvent):
+    """Delete/replaces lines which have selection. Commands 'S' and in visual mode 'X'."""
     text_cursor = _get_text_cursor()
     if text_cursor is None:
         return False
@@ -1067,7 +1067,7 @@ def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
         return False
     try:
         if mode == "visual" and key.char == "X":
-            _delete_selected_lines(key)
+            _delete_and_replace_lines(key)
 
         if mode != "visual":
             text_cursor.gotoRange(text_cursor.getStart(), False)
@@ -2010,6 +2010,66 @@ def _extend_selection_over_trailing_empty_block(text_cursor, cursor):
         cursor.gotoRange(end_after or end_range, True)
 
 
+def _extend_selection_over_leading_empty_block(text_cursor, cursor):
+    if not text_cursor.gotoPreviousParagraph(False):
+        return
+    if not _is_current_paragraph_empty(text_cursor):
+        text_cursor.gotoNextParagraph(False)
+        return
+    _move_to_empty_block_start(text_cursor)
+    cursor.gotoRange(text_cursor.getStart(), True)
+    text_cursor.gotoNextParagraph(False)
+
+
+def _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty):
+    if started_empty:
+        if not _is_current_paragraph_empty(text_cursor):
+            _extend_selection_after_empty_block(text_cursor, cursor)
+        if not is_around:
+            return True
+        if not _is_current_paragraph_empty(text_cursor):
+            _extend_selection_to_paragraph_end(text_cursor, cursor)
+        return True
+
+    if not is_around:
+        return True
+
+    if _is_current_paragraph_empty(text_cursor):
+        _extend_selection_over_trailing_empty_block(text_cursor, cursor)
+    return True
+
+
+def _select_ap_units_forward_visual(cursor, count: int, started_empty: bool) -> bool:
+    steps = max(1, int(count))
+    moved = False
+    for i in range(steps):
+        if not _paragraphs_forward(True, 1):
+            break
+        moved = True
+        text_cursor = _get_text_cursor()
+        if text_cursor is None:
+            return False
+        if i == 0 and started_empty:
+            _post_adjust_paragraph_text_object(text_cursor, cursor, True, True)
+        elif _is_current_paragraph_empty(text_cursor):
+            _extend_selection_over_trailing_empty_block(text_cursor, cursor)
+    return moved
+
+
+def _select_ap_units_backward_visual(cursor, count: int) -> bool:
+    steps = max(1, int(count))
+    moved = False
+    for _ in range(steps):
+        if not _paragraphs_backward(True, 1):
+            break
+        moved = True
+        text_cursor = _get_text_cursor()
+        if text_cursor is None:
+            return False
+        _extend_selection_over_leading_empty_block(text_cursor, cursor)
+    return moved
+
+
 def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
     """Motion to for [count] paragraphs forward. Command '}'.
 
@@ -2085,42 +2145,91 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
 
 
 def _paragraph_text_object(expand, count, key, mode):
-    """Text objects "ip"/"ap": select a paragraph (pending/visual modes)."""
+    """Text objects "ip"/"ap": select paragraphs (pending/visual modes).
+
+    ip: inner paragraph is either a text paragraph or a contiguous empty-line block.
+    ap: a paragraph is text plus trailing empty lines (forward) or leading empty
+    lines (backward in visual mode).
+    """
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
         return False
-    if mode != "pending":
+
+    if mode == "pending":
+        is_around = key.pending is not None and key.pending[-1] == "a"
+        started_empty = _is_current_paragraph_empty(text_cursor)
+        if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
+            return False
+
+        moved = _paragraphs_forward(expand, count)
+        if not moved:
+            return False
+
+        text_cursor = _get_text_cursor()
+        if text_cursor is None:
+            return False
+        return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
+
+    if mode != "visual":
         return False
 
     is_around = key.pending is not None and key.pending[-1] == "a"
-    started_empty = _is_current_paragraph_empty(text_cursor)
-    if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
-        return False
+    selection_len = len(cursor.getString())
+    select_backwards = False
 
-    moved = _paragraphs_forward(expand, count)
+    # No extended selection -> select from start of current paragraph.
+    if selection_len <= 1:
+        started_empty = _is_current_paragraph_empty(text_cursor)
+        if started_empty:
+            _move_to_empty_block_start(text_cursor)
+        else:
+            text_cursor.gotoStartOfParagraph(False)
+        _set_visual_anchor(text_cursor.getStart())
+        cursor.gotoRange(text_cursor.getStart(), False)
+
+    # Extended selection -> select from cursor point.
+    else:
+        anchor = _state().get("visual_anchor")
+        caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
+        if caret_before_anchor:
+            select_backwards = True
+
+        text_cursor = _get_text_cursor()
+        if text_cursor is None:
+            return False
+        caret = _get_visual_caret_range(text_cursor)
+        text_cursor.gotoRange(caret, False)
+        started_empty = _is_current_paragraph_empty(text_cursor)
+        if started_empty:
+            _move_to_empty_block_start(text_cursor)
+            cursor.gotoRange(text_cursor.getStart(), True)
+
+    if select_backwards:
+        if is_around:
+            moved = _select_ap_units_backward_visual(cursor, count)
+        else:
+            moved = _paragraphs_backward(True, count)
+    elif is_around:
+        moved = _select_ap_units_forward_visual(cursor, count, started_empty)
+        if not moved:
+            return False
+        return True
+    else:
+        moved = _paragraphs_forward(True, count)
+
     if not moved:
         return False
-
     text_cursor = _get_text_cursor()
     if text_cursor is None:
         return False
 
-    if started_empty:
-        if not _is_current_paragraph_empty(text_cursor):
-            _extend_selection_after_empty_block(text_cursor, cursor)
-        if not is_around:
+    if select_backwards:
+        if is_around:
             return True
-        if not _is_current_paragraph_empty(text_cursor):
-            _extend_selection_to_paragraph_end(text_cursor, cursor)
         return True
 
-    if not is_around:
-        return True
-
-    if _is_current_paragraph_empty(text_cursor):
-        _extend_selection_over_trailing_empty_block(text_cursor, cursor)
-    return True
+    return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
 
 
 # --------------
@@ -2198,7 +2307,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "u": lambda: _undo_and_redo(count, False),
                 "U": lambda: _undo_and_redo(count, True),
                 "s": lambda: _delete_characters(count, key, mode),
-                "S": lambda: _delete_selected_lines(key),
+                "S": lambda: _delete_and_replace_lines(key),
                 "x": lambda: _delete_characters(count, key, mode),
                 "X": lambda: _delete_characters(count, key, mode),
                 "y": lambda: _yank(count, key, mode),
@@ -2246,17 +2355,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return motions
 
-
-    @staticmethod
-    def _text_objects_keymap(expand, count:int, key, mode):
-        text_objects = {
-            "as": lambda: _sentence_text_object(expand, count, key, mode, True),
-            "is": lambda: _sentence_text_object(expand, count, key, mode, False),
-            "ip": lambda: _paragraph_text_object(expand, count, key, mode),
-            "ap": lambda: _paragraph_text_object(expand, count, key, mode),
-        }
-
-        return text_objects
 
     @staticmethod
     def _navigation_keys(expand, count, mode):
@@ -2399,6 +2497,17 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
+
+    @staticmethod
+    def _text_objects_keymap(expand, count:int, key, mode):
+        text_objects = {
+            "as": lambda: _sentence_text_object(expand, count, key, mode, True),
+            "is": lambda: _sentence_text_object(expand, count, key, mode, False),
+            "ip": lambda: _paragraph_text_object(expand, count, key, mode),
+            "ap": lambda: _paragraph_text_object(expand, count, key, mode),
+        }
+
+        return text_objects
 
     def _match_text_objects(self, key, expand, count, mode):
         # Key after "a" or "i"

@@ -49,8 +49,8 @@ Currently supported commands:
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`, `S`
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
+- Text-objects: `as`, `ip`, `ap`
 - Search: `/` (LibreOffice search bar)
-- Text-objects: `as`, operator pending: `ip`, `ap`
 
 - In Visual mode you can swap cursor position to other end of selection with `o`.
 
