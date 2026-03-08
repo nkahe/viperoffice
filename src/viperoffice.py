@@ -39,6 +39,8 @@ MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 3
 
 # How many lines should C-d and C-u scroll.
 SCROLL: Final[int] = 21
+# Guard for paragraph scans to avoid malformed cursor loops freezing the UI.
+PARAGRAPH_SCAN_LIMIT: Final[int] = 10000
 
 def _state():
     key = "_viperoffice_state"
@@ -542,6 +544,7 @@ def _set_visual_selection(cursor, anchor, new_caret):
         cursor.gotoRange(new_caret, True)
     except Exception:
         pass
+
 
 # Sets cursor style and save cursor position info.
 def _show_cursor(mode:str):
@@ -1324,9 +1327,14 @@ def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool, bac
         view_cursor.gotoRange(edge, expand)
 
 
+def _paragraph_scan_steps(limit: int = PARAGRAPH_SCAN_LIMIT):
+    # Guard against malformed cursor loops freezing the UI.
+    return range(limit)
+
+
 def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
     moved = False
-    while True:
+    for _ in _paragraph_scan_steps():
         if not text_cursor.gotoNextParagraph(expand):
             break
         moved = True
@@ -1337,7 +1345,7 @@ def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
 
 def _to_previous_non_empty_paragraph(text_cursor, expand: bool) -> bool:
     moved = False
-    while True:
+    for _ in _paragraph_scan_steps():
         if not text_cursor.gotoPreviousParagraph(expand):
             break
         moved = True
@@ -1350,7 +1358,7 @@ def _move_to_empty_block_start(text_cursor) -> bool:
     if not _is_current_paragraph_empty(text_cursor):
         return False
     text_cursor.gotoStartOfParagraph(False)
-    while True:
+    for _ in _paragraph_scan_steps():
         if not text_cursor.gotoPreviousParagraph(False):
             text_cursor.gotoStartOfParagraph(False)
             return True
@@ -1359,11 +1367,12 @@ def _move_to_empty_block_start(text_cursor) -> bool:
             text_cursor.gotoStartOfParagraph(False)
             return True
         text_cursor.gotoStartOfParagraph(False)
+    return False
 
 
 def _consume_empty_block_forward(text_cursor):
     end_range = None
-    while True:
+    for _ in _paragraph_scan_steps():
         text_cursor.gotoEndOfParagraph(False)
         end_range = text_cursor.getEnd()
         if not text_cursor.gotoNextParagraph(False):
@@ -1372,6 +1381,7 @@ def _consume_empty_block_forward(text_cursor):
         if not _is_current_paragraph_empty(text_cursor):
             text_cursor.gotoStartOfParagraph(False)
             return end_range, True
+    return end_range, False
 
 
 def _range_after_paragraph_break(text_range):
@@ -1383,6 +1393,36 @@ def _range_after_paragraph_break(text_range):
     except Exception:
         pass
     return None
+
+
+def _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty) -> bool:
+    if started_empty:
+        _move_to_empty_block_start(text_cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        return True
+    if text_cursor.isStartOfParagraph():
+        return True
+    return _paragraphs_backward(False, 1)
+
+
+def _extend_selection_after_empty_block(text_cursor, cursor):
+    if text_cursor.gotoPreviousParagraph(False):
+        text_cursor.gotoEndOfParagraph(False)
+        end_after = _range_after_paragraph_break(text_cursor.getEnd())
+        if end_after is not None:
+            cursor.gotoRange(end_after, True)
+
+
+def _extend_selection_to_paragraph_end(text_cursor, cursor):
+    text_cursor.gotoEndOfParagraph(False)
+    cursor.gotoRange(text_cursor.getEnd(), True)
+
+
+def _extend_selection_over_trailing_empty_block(text_cursor, cursor):
+    end_range, has_next = _consume_empty_block_forward(text_cursor)
+    if end_range is not None:
+        end_after = _range_after_paragraph_break(end_range) if has_next else end_range
+        cursor.gotoRange(end_after or end_range, True)
 
 
 def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
@@ -1658,12 +1698,8 @@ def _paragraph_text_object(expand, count, key, mode):
 
     is_around = key.pending is not None and key.pending[-1] == "a"
     started_empty = _is_current_paragraph_empty(text_cursor)
-    if started_empty:
-        _move_to_empty_block_start(text_cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-    elif not text_cursor.isStartOfParagraph():
-        if not _paragraphs_backward(False, 1):
-            return False
+    if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
+        return False
 
     moved = _paragraphs_forward(expand, count)
     if not moved:
@@ -1675,26 +1711,18 @@ def _paragraph_text_object(expand, count, key, mode):
 
     if started_empty:
         if not _is_current_paragraph_empty(text_cursor):
-            if text_cursor.gotoPreviousParagraph(False):
-                text_cursor.gotoEndOfParagraph(False)
-                end_after = _range_after_paragraph_break(text_cursor.getEnd())
-                if end_after is not None:
-                    cursor.gotoRange(end_after, True)
+            _extend_selection_after_empty_block(text_cursor, cursor)
         if not is_around:
             return True
         if not _is_current_paragraph_empty(text_cursor):
-            text_cursor.gotoEndOfParagraph(False)
-            cursor.gotoRange(text_cursor.getEnd(), True)
+            _extend_selection_to_paragraph_end(text_cursor, cursor)
         return True
 
     if not is_around:
         return True
 
     if _is_current_paragraph_empty(text_cursor):
-        end_range, has_next = _consume_empty_block_forward(text_cursor)
-        if end_range is not None:
-            end_after = _range_after_paragraph_break(end_range) if has_next else end_range
-            cursor.gotoRange(end_after or end_range, True)
+        _extend_selection_over_trailing_empty_block(text_cursor, cursor)
     return True
 
 
