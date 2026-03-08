@@ -16,6 +16,7 @@ class KeyEvent(NamedTuple):
     code: int
     pending: str | None
 
+
 # ------------
 # Global state
 # ------------
@@ -212,9 +213,9 @@ def _get_scroll() -> int:
     return default
 
 
-# ------------------------
-# General helper functions
-# ------------------------
+# -----------------
+# Utility functions
+# -----------------
 
 def _current_doc():
     try:
@@ -334,9 +335,9 @@ def debug_cursor_state():  # noqa: F811  # pyright: ignore[reportUnusedFunction]
         msg(f"Error: {e}", "ViperOffice cursor debug")
 
 
-# ------------
-# Editor
-# ------------
+# ------------------
+# UI and input modes
+# ------------------
 
 # Functions to manipulate view and model (document).
 
@@ -364,6 +365,103 @@ def _update_statusline(controller=None):
         # Non-fatal for status update.
         pass
 
+
+# Sets cursor style and save cursor position info.
+def _show_cursor(mode:str):
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    controller = _get_controller()
+    if text_cursor is None or controller is None:
+        return False
+    mode = mode.lower()
+    try:
+        if mode in ("normal", "pending"):
+            # Select 1 character right side of caret as Normal mode cursor.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            moved = text_cursor.goRight(1, False)
+            if moved:
+                text_cursor.goLeft(1, True)
+
+        elif mode == "visual":
+            # Coming from Normal mode (1-char cursor): collapse and re-select so
+            # anchor and caret are known.
+            if len(cursor.getString()) == 1:
+                text_cursor.gotoRange(text_cursor.getStart(), False)
+                _set_visual_anchor(text_cursor.getStart())
+                text_cursor.goRight(1, True)
+            # else:
+                # Mouse selection: use the saved press position as anchor.
+                # press_anchor = _state().pop("mouse_press_anchor", None)
+                # if press_anchor is not None:
+                #     _set_visual_anchor(press_anchor)
+        elif mode == "insert":
+            # Use collapsed cursor.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+        else:
+            return False
+
+        controller.select(text_cursor)
+    except Exception:
+        return False
+
+
+# Sets mode handling cursor accordingly. In operator pending and visual modes
+#  cursor state is saved so it can be used by operator commands.
+def _goto_mode(new_mode: str) -> bool:
+    current_mode = _get_mode()
+    if new_mode == "normal":
+        _reset_pending_keys()
+        if current_mode == new_mode:
+            return True
+        if current_mode == "insert":
+            cursor = _get_cursor()
+            if cursor is not None and not cursor.isAtStartOfLine():
+                # Mimics Vi/Vim cursor behavior.
+                cursor.goLeft(1, False)
+
+        # Make selection start where caret is in Normal mode.
+        elif current_mode == "visual":
+            controller = _get_controller()
+            text_cursor = _get_text_cursor()
+            if controller is not None and text_cursor is not None:
+                # Use the saved anchor to find the caret end before clearing it.
+                caret = _get_visual_caret_range(text_cursor)
+                _clear_visual_anchor()
+                text_cursor.gotoRange(caret, False)
+                text_cursor.goLeft(1, False)
+                controller.select(text_cursor)
+            else:
+                _clear_visual_anchor()
+
+        _show_cursor("normal")
+
+    elif new_mode == "insert":
+        _reset_pending_keys()
+        _show_cursor("insert")
+
+    elif new_mode == "visual":
+        _reset_pending_keys()
+        _show_cursor("visual")
+
+    elif new_mode == "pending":
+        _show_cursor("pending")
+    else:
+        return False
+    _set_mode(new_mode)
+    return True
+
+
+def _ctrl_c_command(mode:str):
+    if mode == "normal":
+        _reset_pending_keys()
+    elif mode == "visual":
+        _copy_and_delete(True, False)
+    _goto_mode("normal")
+
+
+# --------------------
+# Cursor and selection
+# --------------------
 
 def _get_visual_caret_range(text_cursor):
     """Return the caret (active/moving) end of the visual selection as an XTextRange.
@@ -482,6 +580,37 @@ def _ensure_visual_caret(cursor, at_end: bool) -> None:
         pass
 
 
+def _pos_xy(pos):
+    if pos is None:
+        return (None, None)
+    x = getattr(pos, "X", None)
+    y = getattr(pos, "Y", None)
+    if callable(x):
+        x = x()
+    if callable(y):
+        y = y()
+    return (x, y)
+
+
+def _same_pos(a, b):
+    return _pos_xy(a) == _pos_xy(b)
+
+
+def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool, backward: bool = False):
+    if expand and backward:
+        edge = text_cursor.getStart()
+    elif expand:
+        edge = text_cursor.getEnd()
+    else:
+        edge = text_cursor.getStart()
+    anchor = _state().get("visual_anchor") if expand else None
+    if anchor is not None:
+        # Visual mode: use _set_visual_selection so direction changes work correctly.
+        _set_visual_selection(view_cursor, anchor, edge)
+    else:
+        view_cursor.gotoRange(edge, expand)
+
+
 def _set_visual_selection(cursor, anchor, new_caret):
     """Rebuild visual selection between fixed anchor and new caret position.
 
@@ -546,89 +675,171 @@ def _set_visual_selection(cursor, anchor, new_caret):
         pass
 
 
-# Sets cursor style and save cursor position info.
-def _show_cursor(mode:str):
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    controller = _get_controller()
-    if text_cursor is None or controller is None:
+# Based on Commit f33d46f from fedorov-ao/vibreoffice
+def _go_to_other_end(mode: str) -> bool:
+    """Move cursor to the other end of highlighted text. Command 'o' / 'O' in visual mode.
+
+    The current cursor position becomes the start of the highlighted text and
+    the cursor is moved to the other end of the highlighted text. The highlighted
+    area remains the same.
+    """
+    if mode != "visual":
         return False
-    mode = mode.lower()
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+
+    s = cursor.getString()
+    if not s:
+        return False
+
+    # Probe which end the caret is on by trying to extend right.
+    # - Selection grows  → caret was at the RIGHT (end).
+    # - Selection shrinks → caret was at the LEFT (start).
+    cursor.goRight(1, True)
+    caret_was_at_end = len(cursor.getString()) > len(s)
+
+    if caret_was_at_end:
+        # Undo probe to restore original selection, then rebuild right→left.
+        cursor.goLeft(1, True)
+        cursor.collapseToEnd()
+        cursor.goLeft(len(s), True)
+        for _ in range(10):   # small bounded correction for paragraph marks
+            if cursor.getString() == s:
+                break
+            cursor.goLeft(1, True)
+        new_tc = _get_text_cursor()
+        if new_tc is not None:
+            _set_visual_anchor(new_tc.getEnd())
+    else:
+        # Collapse to start, step back 1 to include the first character
+        # then rebuild left→right.
+        cursor.collapseToStart()
+        cursor.goLeft(1, False)
+        cursor.goRight(len(s), True)
+        for _ in range(10):
+            if cursor.getString() == s:
+                break
+            cursor.goRight(1, True)
+        new_tc = _get_text_cursor()
+        if new_tc is not None:
+            _set_visual_anchor(new_tc.getStart())
+
+    return True
+
+
+# ----------------------
+# Navigating in document
+# ----------------------
+
+def _scroll_window(expand:bool, count:int, forward:bool, mode:str, lines:int|None=None) -> bool:
+    """Scroll window. Commands 'C-f', 'C-b', 'C-u', 'C-d'.
+    """
     try:
-        if mode in ("normal", "pending"):
-            # Select 1 character right side of caret as Normal mode cursor.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            moved = text_cursor.goRight(1, False)
-            if moved:
-                text_cursor.goLeft(1, True)
-
-        elif mode == "visual":
-            # Coming from Normal mode (1-char cursor): collapse and re-select so
-            # anchor and caret are known.
-            if len(cursor.getString()) == 1:
-                text_cursor.gotoRange(text_cursor.getStart(), False)
-                _set_visual_anchor(text_cursor.getStart())
-                text_cursor.goRight(1, True)
-            # else:
-                # Mouse selection: use the saved press position as anchor.
-                # press_anchor = _state().pop("mouse_press_anchor", None)
-                # if press_anchor is not None:
-                #     _set_visual_anchor(press_anchor)
-        elif mode == "insert":
-            # Use collapsed cursor.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-        else:
+        cursor = _get_cursor()
+        if cursor is None:
             return False
-
-        controller.select(text_cursor)
+        if lines:
+            if forward:
+                for _ in range(count):
+                    _hjkl_motion("j", lines, expand, mode)
+            else:
+                for _ in range(count):
+                    _hjkl_motion("k", lines, expand, mode)
+        else:
+            anchor = _state().get("visual_anchor") if expand else None
+            if forward:
+                for _ in range(count):
+                    cursor.screenDown()
+            else:
+                for _ in range(count):
+                    cursor.screenUp()
+            if anchor is not None:
+                _set_visual_selection(cursor, anchor, cursor.getStart())
+        return True
     except Exception:
         return False
 
 
-# Sets mode handling cursor accordingly. In operator pending and visual modes
-#  cursor state is saved so it can be used by operator commands.
-def _goto_mode(new_mode: str) -> bool:
-    current_mode = _get_mode()
-    if new_mode == "normal":
-        _reset_pending_keys()
-        if current_mode == new_mode:
-            return True
-        if current_mode == "insert":
-            cursor = _get_cursor()
-            if cursor is not None and not cursor.isAtStartOfLine():
-                # Mimics Vi/Vim cursor behavior.
-                cursor.goLeft(1, False)
+def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
+    """Go to line [count] motion. Commands 'G' and 'gg'.
+    Args:
 
-        # Make selection start where caret is in Normal mode.
-        elif current_mode == "visual":
-            controller = _get_controller()
-            text_cursor = _get_text_cursor()
-            if controller is not None and text_cursor is not None:
-                # Use the saved anchor to find the caret end before clearing it.
-                caret = _get_visual_caret_range(text_cursor)
-                _clear_visual_anchor()
-                text_cursor.gotoRange(caret, False)
-                text_cursor.goLeft(1, False)
-                controller.select(text_cursor)
-            else:
-                _clear_visual_anchor()
-
-        _show_cursor("normal")
-
-    elif new_mode == "insert":
-        _reset_pending_keys()
-        _show_cursor("insert")
-
-    elif new_mode == "visual":
-        _reset_pending_keys()
-        _show_cursor("visual")
-
-    elif new_mode == "pending":
-        _show_cursor("pending")
-    else:
+    expand: bool       Expand selection
+    raw_count: int     Move to line [count].
+    default_end: bool  To default to end of text document if no count given.
+                       else default of start of text document.
+    """
+    cursor = _get_cursor()
+    if cursor is None:
         return False
-    _set_mode(new_mode)
-    return True
+    try:
+        if raw_count == 0 and default_end:  # Command 'G'
+            target = cursor.getText().getEnd()
+        else:
+            target = cursor.getText().getStart()  # Command 'gg'
+
+        anchor = _state().get("visual_anchor") if expand else None
+        if anchor is not None:
+            _set_visual_selection(cursor, anchor, target)
+        else:
+            cursor.gotoRange(target, expand)
+
+        if raw_count > 1:
+            cursor.goDown(raw_count - 1, expand)  # [count]G/gg
+        return True
+    except Exception:
+        return False
+
+
+def _jump_to_page(expand: bool, target: str, count:int=1) -> bool:
+    """Motion to start or end of a page. Commands 'H' and 'L'."""
+    target = target.lower()
+    try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        if target == "start":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToStartOfPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToStartOfPage()
+        elif target == "end":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToEndOfPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToEndOfPage()
+        elif target == "next":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToNextPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToNextPage()
+        elif target == "previous":
+            if expand:
+                anchor = cursor.getStart()
+                cursor.jumpToPreviousPage()
+                new_pos = cursor.getStart()
+                cursor.gotoRange(anchor, False)
+                cursor.gotoRange(new_pos, True)
+            else:
+                cursor.jumpToPreviousPage()
+        else:
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def _focus_findbar() -> bool:
@@ -645,9 +856,13 @@ def _focus_findbar() -> bool:
         return False
 
 
+# ------------------
+# Lines
+# ------------------
+
 def _hjkl_motion(cmd:str, count:int, expand:bool, mode) -> bool:
-    """Motion to left/right [count] characters for commands 'h' and 'l' or
-    [count] lines up and down with 'j' and 'k'.
+    """Motion to left/right [count] characters for commands 'h' and 'l' and
+    [count] lines up and down for commands 'j' and 'k'.
     """
     cursor = _get_cursor()
     if cursor is None:
@@ -683,59 +898,6 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode) -> bool:
     except Exception:
         return False
     return False
-
-
-def _copy_and_delete(yank:bool, delete:bool) -> bool:
-    """Copy and/or delete selection to clipboard."""
-    try:
-        if not yank and not delete:
-            return False
-        text_cursor = _get_text_cursor()
-        if yank:
-            dispatcher = _get_dispatcher()
-            frame = _get_frame()
-            if dispatcher is None or frame is None:
-                return False
-            dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
-        if delete:
-            if text_cursor is not None:
-                text_cursor.setString("")
-        return True
-    except Exception:
-        return False
-
-
-def _paste(count:int, after_cursor:bool):
-    """Paste text from clipboard after or before cursor {count} times."""
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    mode = _get_mode()
-    if text_cursor is None or cursor is None:
-        return False
-
-    try:
-        # msg(f"{after_cursor=} {text_cursor.isEndOfParagraph()=}")
-        if after_cursor and not text_cursor.isEndOfParagraph():
-            text_cursor.goRight(1, False)
-
-        if mode == "normal":
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            controller = _get_controller()
-            if controller is None:
-                return False
-            controller.select(text_cursor)
-
-        dispatcher = _get_dispatcher()
-        frame = _get_frame()
-        if dispatcher is None or frame is None:
-            return False
-
-        for _ in range(count):
-            dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
-
-        _goto_mode("normal")
-    except Exception:
-        return False
 
 
 def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
@@ -781,7 +943,8 @@ def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
 
 
 def _to_end_of_line(expand:bool, count:int, key=None) -> bool:
-    """Motion to end of line. Command '$' """
+    """Motion to end of line and optionally [count -1 ] lines down.
+       Command '$'. """
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -811,68 +974,302 @@ def _to_end_of_line(expand:bool, count:int, key=None) -> bool:
         return False
 
 
-def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
-    """Go to line [count] motion. Commands 'G' and 'gg'.
-    Args:
-
-    expand: bool       Expand selection
-    raw_count: int     Move to line [count].
-    default_end: bool  To default to end of text document if no count given.
-                       else default of start of text document.
-    """
-    cursor = _get_cursor()
-    if cursor is None:
+def _delete_selected_lines(key:KeyEvent):
+    """Delete lines which have selection. Commands 'S' and in visual mode 'X'."""
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
         return False
     try:
-        if raw_count == 0 and default_end:  # Command 'G'
-            target = cursor.getText().getEnd()
-        else:
-            target = cursor.getText().getStart()  # Command 'gg'
+        # X in visual mode: expand selection to cover full visual lines.
+        # gotoStartOfLine/gotoEndOfLine are view cursor methods, so use
+        # the view cursor to navigate to each end of the selection first.
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        sel_start = text_cursor.getStart()
+        sel_end   = text_cursor.getEnd()
+        cursor.gotoRange(sel_start, False)
+        cursor.gotoStartOfLine(False)
+        line_start = cursor.getStart()
+        cursor.gotoRange(sel_end, False)
+        cursor.gotoEndOfLine(False)
+        line_end = cursor.getStart()
+        text_cursor.gotoRange(line_start, False)
+        text_cursor.gotoRange(line_end, True)
+        text_cursor.setString("")
 
-        anchor = _state().get("visual_anchor") if expand else None
-        if anchor is not None:
-            _set_visual_selection(cursor, anchor, target)
+        if key.char == "S":
+            _insert_commands("i")
         else:
-            cursor.gotoRange(target, expand)
-
-        if raw_count > 1:
-            cursor.goDown(raw_count - 1, expand)  # [count]G/gg
+            _goto_mode("normal")
         return True
     except Exception:
         return False
 
 
-def _is_keyword_char(ch: str) -> bool:
-    if ch.isalpha():
+# ------------------
+# Character editing
+# ------------------
+
+# Insert, delete, replace characters
+
+def _insert_commands(cmd:str, mode="normal"):
+    """For Normal mode commands 'a', 'I', 'A', 'o', 'O'."""
+    try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+
+        if cmd == "a" or cmd == "A":
+            textCursor = _get_text_cursor()
+            if cmd == "A":
+                if mode == "visual":
+                    if cursor is not None:
+                        cursor.gotoRange(cursor.getEnd(), False)
+                _to_end_of_line(False, 1, None)
+            elif textCursor is not None and not textCursor.isEndOfParagraph():
+                 cursor.goRight(1, False)
+            return _goto_mode("insert")
+
+        elif cmd == "I":
+            if mode == "visual":
+                # Move to the line where the selection starts before going to line start
+                cursor.gotoRange(cursor.getStart(), False)
+            _to_start_of_line(False, True)
+            return _goto_mode("insert")
+
+        if cmd in ("o", "O") and mode == "visual":
+            return _go_to_other_end(mode)
+
+        if cmd == "o":
+            _to_end_of_line(False, 0, None)
+            cursor.goRight(1, False)
+        elif cmd == "O":
+            _to_start_of_line(False, False)
+        else:
+            return False
+
+        cursor.setString(chr(13))  # CR
+        if not cursor.isAtStartOfLine():
+            cursor.goLeft(1, False)
+            cursor.setString(chr(13) + chr(13))
+            cursor.goRight(1, False)
+        return _goto_mode("insert")
+
+    except Exception:
+        return False
+
+
+def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
+    """Delete single characters. Commands 'x','X' and 's'."""
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+    try:
+        if mode == "visual" and key.char == "X":
+            _delete_selected_lines(key)
+
+        if mode != "visual":
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            if key.char == "X":
+                text_cursor.collapseToStart()
+                # At start of line
+                if not text_cursor.goLeft(count, True):
+                    return False
+            # At end of line
+            elif not text_cursor.goRight(count, True):
+                return False
+
+        text_cursor.setString("")
+        if key.char == "s":
+            _insert_commands("i", mode)
+        elif mode == "visual":
+            _goto_mode("normal")
         return True
-    if ISWORD.get("digits") and ch.isdigit():
+    except Exception:
+        return False
+
+
+def _replace_characters(count:int, key:KeyEvent, mode) -> bool:
+    """Replace character(s) under cursor with {key_char}.
+       With count replace [count] characters with [count] {key_char}.
+       Command 'r'.
+    """
+    if key.pending is None:
+        _add_pending_key("r")
         return True
-    return ch in str(ISWORD.get("chars", ""))
+
+    _reset_pending_keys()
+    try:
+        cursor = _get_cursor()
+        length = len(cursor.getString())
+
+        if length > 1:
+            cursor.setString(key.char * length)
+        else:
+            cursor.setString(key.char * count)
+
+        if mode == "visual":
+            _goto_mode("normal")
+        return True
+    except Exception:
+        return False
 
 
-def _word_char_class(ch, big_word: bool = False):
-    if ch == " " or ch == "\t" or ch == "\n":
-        return "blank"
-    if big_word:
-        return "other"
-    if _is_keyword_char(ch):
-        return "keyword"
-    return "other"
+# -----------------------
+# Operators and clipboard
+# -----------------------
+
+def _delete_and_replace(count:int, key:KeyEvent, mode:str) -> bool:
+    """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
+    if mode == "normal" and key.char in ("c", "d"):
+        _add_pending_key(key.char)
+        return _goto_mode("pending")
+
+    if key.char in ("C", "D"):  # To end of line commands.
+        cursor = _get_cursor()
+        text_cursor = _get_text_cursor()
+        if cursor is None or text_cursor is None:
+            return False
+        # collapse to pos 0 (char under cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        _to_end_of_line(True, count, None)
+
+    # Linewise delete/replace 'dd', 'cc' and 'S'.
+    if (key.pending in ("c", "d") and key.char == key.pending) or key.char == "S":
+        _to_start_of_line(False, False)
+        cursor = _get_cursor()
+        cursor.goDown(count, True)
+
+    _copy_and_delete(True, True)
+
+    if key.char in ('c', 'C', 'S') or \
+        key.pending is not None and key.pending[0] in ("c", "C"):
+        _goto_mode("insert")
+    else:
+        _goto_mode("normal")
+    return True
 
 
-# Offset means cursor position relative to start of paragraph.
-def _current_paragraph_text_and_offset(text_cursor):
-    text_obj = text_cursor.getText()
-    para = text_obj.createTextCursorByRange(text_cursor.getStart())
-    para.gotoStartOfParagraph(False)
-    para.gotoEndOfParagraph(True)
-    paragraph_text = para.getString()
+def _yank(count, key, mode) -> bool:
+    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y'."""
+    if key.char == "Y":
+        cursor = _get_cursor()
+        text_cursor = _get_text_cursor()
+        if cursor is None or text_cursor is None:
+            return False
+        # collapse to pos 0 (char under cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        _to_end_of_line(True, count, None)
+        _copy_and_delete(True, False)
+        return True
 
-    offset_cursor = text_obj.createTextCursorByRange(text_cursor.getStart())
-    offset_cursor.gotoStartOfParagraph(True)
-    offset = len(offset_cursor.getString())
-    return paragraph_text, offset
+    if mode == "normal" and key.pending is None:
+        _set_position()
+        _add_pending_key("y")
+        _goto_mode("pending")
+        return True
 
+    # Linewise yanking 'yy'.
+    elif key.pending == "y" and key.char == "y":
+            _to_start_of_line(False, False)
+            _hjkl_motion("j", count, True, mode)
+
+    _copy_and_delete(True, False)
+
+    position = _get_position()
+    cursor = _get_cursor()
+    if (position is not None and cursor is not None) and mode != "visual":
+        # Keep yanked range visually selected briefly, then restore cursor.
+        # Use _set_mode instead of _goto_mode so the selection isn't
+        # collapsed immediately by _show_cursor("normal")().
+        def _flash_restore():
+            if key.char != "h":
+                cursor.gotoRange(position, False)
+            _show_cursor("normal")
+        threading.Timer(0.08, _flash_restore).start()
+
+    _reset_pending_keys()
+    _set_mode("normal")
+    return True
+
+
+def _copy_and_delete(yank:bool, delete:bool) -> bool:
+    """Copy and/or delete selection to clipboard."""
+    try:
+        if not yank and not delete:
+            return False
+        text_cursor = _get_text_cursor()
+        if yank:
+            dispatcher = _get_dispatcher()
+            frame = _get_frame()
+            if dispatcher is None or frame is None:
+                return False
+            dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
+        if delete:
+            if text_cursor is not None:
+                text_cursor.setString("")
+        return True
+    except Exception:
+        return False
+
+
+def _paste(count:int, after_cursor:bool):
+    """Paste text from clipboard after or before cursor {count} times.
+       Commands 'p' and 'P'.
+    """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    mode = _get_mode()
+    if text_cursor is None or cursor is None:
+        return False
+
+    try:
+        # msg(f"{after_cursor=} {text_cursor.isEndOfParagraph()=}")
+        if after_cursor and not text_cursor.isEndOfParagraph():
+            text_cursor.goRight(1, False)
+
+        if mode == "normal":
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            controller = _get_controller()
+            if controller is None:
+                return False
+            controller.select(text_cursor)
+
+        dispatcher = _get_dispatcher()
+        frame = _get_frame()
+        if dispatcher is None or frame is None:
+            return False
+
+        for _ in range(count):
+            dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
+
+        _goto_mode("normal")
+    except Exception:
+        return False
+
+
+def _undo_and_redo(count=1, redo=False) -> bool:
+    """Undo or redo changes. Commands 'u' and 'C-r'."""
+    doc = _current_doc()
+    if doc is None:
+        return False
+    try:
+        if redo:
+            for _ in range(count):
+                doc.getUndoManager().redo()
+        else:
+            for _ in range(count):
+                doc.getUndoManager().undo()
+        return True
+    except Exception:
+        # Non-fatal when no more undo actions exist.
+        return False
+
+
+# ------------------
+# Word motions
+# ------------------
 
 # Word motion specs.
 FORWARD = "forward"
@@ -952,13 +1349,22 @@ def _validate_word_motion_spec(spec) -> bool:
     return True
 
 
-def _cursor_xy(cursor):
-    if cursor is None:
-        return (None, None)
-    try:
-        return _pos_xy(cursor.getPosition())
-    except Exception:
-        return (None, None)
+def _is_keyword_char(ch: str) -> bool:
+    if ch.isalpha():
+        return True
+    if ISWORD.get("digits") and ch.isdigit():
+        return True
+    return ch in str(ISWORD.get("chars", ""))
+
+
+def _word_char_class(ch, big_word: bool = False):
+    if ch == " " or ch == "\t" or ch == "\n":
+        return "blank"
+    if big_word:
+        return "other"
+    if _is_keyword_char(ch):
+        return "keyword"
+    return "other"
 
 
 def _normalize_motion_range(result, for_operator:bool = False):
@@ -1015,70 +1421,6 @@ def _query_word_motion(spec, count:int, expand:bool=False):
         "inclusive": bool(spec.get("inclusive", False)),
     }
     return _normalize_motion_range(result)
-
-
-def _apply_motion_result(result, expand:bool) -> bool:
-    if not isinstance(result, dict) or not result.get("moved", False):
-        return False
-    end_range = result.get("end_range")
-    cursor = _get_cursor()
-    if cursor is None or end_range is None:
-        return False
-    try:
-        # old HEAD
-        # if expand and _state().get("visual_anchor") is None:
-        #     # Pending mode: collapse to start_range (P) first so the selection
-        #     # starts at the block cursor char, not at P+1 (the anchor side).
-        #     start = result.get("start_range")
-        #     if start is not None:
-        #         cursor.gotoRange(start, False)
-        # cursor.gotoRange(end_range, expand)
-        # if expand and _state().get("visual_anchor") is None and result.get("inclusive"):
-        if not expand:
-            return cursor.gotoRange(end_range, False)
-
-        anchor = _state().get("visual_anchor")
-        if anchor is not None:
-            # Visual mode: use _set_visual_selection so direction changes
-            # (crossing the anchor) work correctly in both directions.
-            _set_visual_selection(cursor, anchor, end_range)
-            return True
-
-        # Pending mode: collapse to start_range (P) first so the selection
-        # starts at the block cursor char, not at P+1 (the anchor side).
-        start = result.get("start_range")
-        if start is not None:
-            cursor.gotoRange(start, False)
-        cursor.gotoRange(end_range, True)
-        if result.get("inclusive"):
-            # Pending mode with an inclusive motion (e.g. e/E/ge/gE):
-            # _query_word_motion ran with expand=False so the +1 inclusive offset
-            # in _word_motion_once_forward never fired. Extend one more char to
-            # include the last character of the word.
-            cursor.goRight(1, True)
-    except Exception:
-        return False
-    return True
-
-
-def _goto_next_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
-    if not text_cursor.gotoNextParagraph(expand):
-        return False
-    if not cross_empty:
-        while _is_current_paragraph_empty(text_cursor):
-            if not text_cursor.gotoNextParagraph(expand):
-                break
-    return True
-
-
-def _goto_previous_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
-    if not text_cursor.gotoPreviousParagraph(expand):
-        return False
-    if not cross_empty:
-        while _is_current_paragraph_empty(text_cursor):
-            if not text_cursor.gotoPreviousParagraph(expand):
-                break
-    return True
 
 
 def _scan_forward_word_target(paragraph_text, offset, spec):
@@ -1222,6 +1564,40 @@ def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
     return True
 
 
+def _goto_next_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
+    if not text_cursor.gotoNextParagraph(expand):
+        return False
+    if not cross_empty:
+        while _is_current_paragraph_empty(text_cursor):
+            if not text_cursor.gotoNextParagraph(expand):
+                break
+    return True
+
+
+def _goto_previous_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
+    if not text_cursor.gotoPreviousParagraph(expand):
+        return False
+    if not cross_empty:
+        while _is_current_paragraph_empty(text_cursor):
+            if not text_cursor.gotoPreviousParagraph(expand):
+                break
+    return True
+
+
+# Offset means cursor position relative to start of paragraph.
+def _current_paragraph_text_and_offset(text_cursor):
+    text_obj = text_cursor.getText()
+    para = text_obj.createTextCursorByRange(text_cursor.getStart())
+    para.gotoStartOfParagraph(False)
+    para.gotoEndOfParagraph(True)
+    paragraph_text = para.getString()
+
+    offset_cursor = text_obj.createTextCursorByRange(text_cursor.getStart())
+    offset_cursor.gotoStartOfParagraph(True)
+    offset = len(offset_cursor.getString())
+    return paragraph_text, offset
+
+
 def _word_motion_once(text_cursor, expand: bool, spec) -> bool:
     """Execute one step for a configured word motion.
 
@@ -1284,220 +1660,53 @@ def _word_motion(spec, expand: bool, count: int, mode: str) -> bool:
         return False
 
 
-def _pos_xy(pos):
-    if pos is None:
-        return (None, None)
-    x = getattr(pos, "X", None)
-    y = getattr(pos, "Y", None)
-    if callable(x):
-        x = x()
-    if callable(y):
-        y = y()
-    return (x, y)
-
-
-def _same_pos(a, b):
-    return _pos_xy(a) == _pos_xy(b)
-
-
-def _is_current_paragraph_empty(text_cursor) -> bool:
-    if text_cursor is None:
+def _apply_motion_result(result, expand:bool) -> bool:
+    if not isinstance(result, dict) or not result.get("moved", False):
         return False
-    try:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor)
-        probe.gotoStartOfParagraph(False)
-        probe.gotoEndOfParagraph(True)
-        return len(probe.getString()) == 0
-    except Exception:
-        return False
-
-
-def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool, backward: bool = False):
-    if expand and backward:
-        edge = text_cursor.getStart()
-    elif expand:
-        edge = text_cursor.getEnd()
-    else:
-        edge = text_cursor.getStart()
-    anchor = _state().get("visual_anchor") if expand else None
-    if anchor is not None:
-        # Visual mode: use _set_visual_selection so direction changes work correctly.
-        _set_visual_selection(view_cursor, anchor, edge)
-    else:
-        view_cursor.gotoRange(edge, expand)
-
-
-def _paragraph_scan_steps(limit: int = PARAGRAPH_SCAN_LIMIT):
-    # Guard against malformed cursor loops freezing the UI.
-    return range(limit)
-
-
-def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
-    moved = False
-    for _ in _paragraph_scan_steps():
-        if not text_cursor.gotoNextParagraph(expand):
-            break
-        moved = True
-        if not _is_current_paragraph_empty(text_cursor):
-            break
-    return moved
-
-
-def _to_previous_non_empty_paragraph(text_cursor, expand: bool) -> bool:
-    moved = False
-    for _ in _paragraph_scan_steps():
-        if not text_cursor.gotoPreviousParagraph(expand):
-            break
-        moved = True
-        if not _is_current_paragraph_empty(text_cursor):
-            break
-    return moved
-
-
-def _move_to_empty_block_start(text_cursor) -> bool:
-    if not _is_current_paragraph_empty(text_cursor):
-        return False
-    text_cursor.gotoStartOfParagraph(False)
-    for _ in _paragraph_scan_steps():
-        if not text_cursor.gotoPreviousParagraph(False):
-            text_cursor.gotoStartOfParagraph(False)
-            return True
-        if not _is_current_paragraph_empty(text_cursor):
-            text_cursor.gotoNextParagraph(False)
-            text_cursor.gotoStartOfParagraph(False)
-            return True
-        text_cursor.gotoStartOfParagraph(False)
-    return False
-
-
-def _consume_empty_block_forward(text_cursor):
-    end_range = None
-    for _ in _paragraph_scan_steps():
-        text_cursor.gotoEndOfParagraph(False)
-        end_range = text_cursor.getEnd()
-        if not text_cursor.gotoNextParagraph(False):
-            text_cursor.gotoStartOfParagraph(False)
-            return end_range, False
-        if not _is_current_paragraph_empty(text_cursor):
-            text_cursor.gotoStartOfParagraph(False)
-            return end_range, True
-    return end_range, False
-
-
-def _range_after_paragraph_break(text_range):
-    try:
-        text_obj = text_range.getText()
-        probe = text_obj.createTextCursorByRange(text_range)
-        if probe.goRight(1, False):
-            return probe.getStart()
-    except Exception:
-        pass
-    return None
-
-
-def _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty) -> bool:
-    if started_empty:
-        _move_to_empty_block_start(text_cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-        return True
-    if text_cursor.isStartOfParagraph():
-        return True
-    return _paragraphs_backward(False, 1)
-
-
-def _extend_selection_after_empty_block(text_cursor, cursor):
-    if text_cursor.gotoPreviousParagraph(False):
-        text_cursor.gotoEndOfParagraph(False)
-        end_after = _range_after_paragraph_break(text_cursor.getEnd())
-        if end_after is not None:
-            cursor.gotoRange(end_after, True)
-
-
-def _extend_selection_to_paragraph_end(text_cursor, cursor):
-    text_cursor.gotoEndOfParagraph(False)
-    cursor.gotoRange(text_cursor.getEnd(), True)
-
-
-def _extend_selection_over_trailing_empty_block(text_cursor, cursor):
-    end_range, has_next = _consume_empty_block_forward(text_cursor)
-    if end_range is not None:
-        end_after = _range_after_paragraph_break(end_range) if has_next else end_range
-        cursor.gotoRange(end_after or end_range, True)
-
-
-def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
-    """Motion to for [count] paragraphs forward. Command '}'.
-
-    From a non-empty paragraph, moves to the start of the next paragraph
-    (which may itself be an empty separator line). From an empty separator
-    line, jumps past all consecutive empty lines to the first non-empty
-    paragraph start.
-    """
-    text_cursor = _get_text_cursor()
+    end_range = result.get("end_range")
     cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if cursor is None or end_range is None:
         return False
     try:
-        if expand:
-            caret = _get_visual_caret_range(text_cursor)
-            text_cursor.gotoRange(caret, False)
-        steps = max(1, int(count))
-        moved_any = False
-        for _ in range(steps):
-            if _is_current_paragraph_empty(text_cursor):
-                moved = _to_next_non_empty_paragraph(text_cursor, expand)
-            else:
-                moved = bool(text_cursor.gotoNextParagraph(expand))
-            if not moved:
-                # Last paragraph with no following empty line: move to end of it.
-                if not text_cursor.isEndOfParagraph():
-                    text_cursor.gotoEndOfParagraph(expand)
-                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-                break
-            moved_any = True
-        if moved_any:
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-        return moved_any
+        # old HEAD
+        # if expand and _state().get("visual_anchor") is None:
+        #     # Pending mode: collapse to start_range (P) first so the selection
+        #     # starts at the block cursor char, not at P+1 (the anchor side).
+        #     start = result.get("start_range")
+        #     if start is not None:
+        #         cursor.gotoRange(start, False)
+        # cursor.gotoRange(end_range, expand)
+        # if expand and _state().get("visual_anchor") is None and result.get("inclusive"):
+        if not expand:
+            return cursor.gotoRange(end_range, False)
+
+        anchor = _state().get("visual_anchor")
+        if anchor is not None:
+            # Visual mode: use _set_visual_selection so direction changes
+            # (crossing the anchor) work correctly in both directions.
+            _set_visual_selection(cursor, anchor, end_range)
+            return True
+
+        # Pending mode: collapse to start_range (P) first so the selection
+        # starts at the block cursor char, not at P+1 (the anchor side).
+        start = result.get("start_range")
+        if start is not None:
+            cursor.gotoRange(start, False)
+        cursor.gotoRange(end_range, True)
+        if result.get("inclusive"):
+            # Pending mode with an inclusive motion (e.g. e/E/ge/gE):
+            # _query_word_motion ran with expand=False so the +1 inclusive offset
+            # in _word_motion_once_forward never fired. Extend one more char to
+            # include the last character of the word.
+            cursor.goRight(1, True)
     except Exception:
         return False
+    return True
 
 
-def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
-    """Motion for [count] paragraphs backward. Command '{'.
-
-    From inside a paragraph, moves to the start of the current paragraph.
-    From the start of a non-empty paragraph, moves to the start of the
-    previous paragraph (which may be an empty separator line). From an
-    empty separator line, skips backward past all consecutive empty lines
-    to the start of the previous non-empty paragraph.
-    """
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
-        return False
-    try:
-        if expand:
-            caret = _get_visual_caret_range(text_cursor)
-            text_cursor.gotoRange(caret, False)
-        steps = max(1, int(count))
-        moved_any = False
-        for _ in range(steps):
-            if not text_cursor.isStartOfParagraph():
-                text_cursor.gotoStartOfParagraph(expand)
-                moved = True
-            elif _is_current_paragraph_empty(text_cursor):
-                moved = _to_previous_non_empty_paragraph(text_cursor, expand)
-            else:
-                moved = bool(text_cursor.gotoPreviousParagraph(expand))
-            if not moved:
-                break
-            moved_any = True
-        if moved_any:
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
-        return moved_any
-    except Exception:
-        return False
-
+# ------------------
+# Sentence motions
+# ------------------
 
 def _to_next_sentence(text_cursor, cursor, expand: bool, include_whitespace: bool = True) -> bool:
     # Implements one ")" motion with paragraph-edge handling.
@@ -1687,6 +1896,194 @@ def _sentence_text_object(expand, count, key, mode, include_whitespace:bool = Tr
     return moved
 
 
+# ------------------
+# Paragraph motions
+# ------------------
+
+def _is_current_paragraph_empty(text_cursor) -> bool:
+    if text_cursor is None:
+        return False
+    try:
+        probe = text_cursor.getText().createTextCursorByRange(text_cursor)
+        probe.gotoStartOfParagraph(False)
+        probe.gotoEndOfParagraph(True)
+        return len(probe.getString()) == 0
+    except Exception:
+        return False
+
+
+def _paragraph_scan_steps(limit: int = PARAGRAPH_SCAN_LIMIT):
+    # Guard against malformed cursor loops freezing the UI.
+    return range(limit)
+
+
+def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
+    moved = False
+    for _ in _paragraph_scan_steps():
+        if not text_cursor.gotoNextParagraph(expand):
+            break
+        moved = True
+        if not _is_current_paragraph_empty(text_cursor):
+            break
+    return moved
+
+
+def _to_previous_non_empty_paragraph(text_cursor, expand: bool) -> bool:
+    moved = False
+    for _ in _paragraph_scan_steps():
+        if not text_cursor.gotoPreviousParagraph(expand):
+            break
+        moved = True
+        if not _is_current_paragraph_empty(text_cursor):
+            break
+    return moved
+
+
+def _move_to_empty_block_start(text_cursor) -> bool:
+    if not _is_current_paragraph_empty(text_cursor):
+        return False
+    text_cursor.gotoStartOfParagraph(False)
+    for _ in _paragraph_scan_steps():
+        if not text_cursor.gotoPreviousParagraph(False):
+            text_cursor.gotoStartOfParagraph(False)
+            return True
+        if not _is_current_paragraph_empty(text_cursor):
+            text_cursor.gotoNextParagraph(False)
+            text_cursor.gotoStartOfParagraph(False)
+            return True
+        text_cursor.gotoStartOfParagraph(False)
+    return False
+
+
+def _consume_empty_block_forward(text_cursor):
+    end_range = None
+    for _ in _paragraph_scan_steps():
+        text_cursor.gotoEndOfParagraph(False)
+        end_range = text_cursor.getEnd()
+        if not text_cursor.gotoNextParagraph(False):
+            text_cursor.gotoStartOfParagraph(False)
+            return end_range, False
+        if not _is_current_paragraph_empty(text_cursor):
+            text_cursor.gotoStartOfParagraph(False)
+            return end_range, True
+    return end_range, False
+
+
+def _range_after_paragraph_break(text_range):
+    try:
+        text_obj = text_range.getText()
+        probe = text_obj.createTextCursorByRange(text_range)
+        if probe.goRight(1, False):
+            return probe.getStart()
+    except Exception:
+        pass
+    return None
+
+
+def _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty) -> bool:
+    if started_empty:
+        _move_to_empty_block_start(text_cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        return True
+    if text_cursor.isStartOfParagraph():
+        return True
+    return _paragraphs_backward(False, 1)
+
+
+def _extend_selection_after_empty_block(text_cursor, cursor):
+    if text_cursor.gotoPreviousParagraph(False):
+        text_cursor.gotoEndOfParagraph(False)
+        end_after = _range_after_paragraph_break(text_cursor.getEnd())
+        if end_after is not None:
+            cursor.gotoRange(end_after, True)
+
+
+def _extend_selection_to_paragraph_end(text_cursor, cursor):
+    text_cursor.gotoEndOfParagraph(False)
+    cursor.gotoRange(text_cursor.getEnd(), True)
+
+
+def _extend_selection_over_trailing_empty_block(text_cursor, cursor):
+    end_range, has_next = _consume_empty_block_forward(text_cursor)
+    if end_range is not None:
+        end_after = _range_after_paragraph_break(end_range) if has_next else end_range
+        cursor.gotoRange(end_after or end_range, True)
+
+
+def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
+    """Motion to for [count] paragraphs forward. Command '}'.
+
+    From a non-empty paragraph, moves to the start of the next paragraph
+    (which may itself be an empty separator line). From an empty separator
+    line, jumps past all consecutive empty lines to the first non-empty
+    paragraph start.
+    """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+    try:
+        if expand:
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if _is_current_paragraph_empty(text_cursor):
+                moved = _to_next_non_empty_paragraph(text_cursor, expand)
+            else:
+                moved = bool(text_cursor.gotoNextParagraph(expand))
+            if not moved:
+                # Last paragraph with no following empty line: move to end of it.
+                if not text_cursor.isEndOfParagraph():
+                    text_cursor.gotoEndOfParagraph(expand)
+                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                break
+            moved_any = True
+        if moved_any:
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return moved_any
+    except Exception:
+        return False
+
+
+def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
+    """Motion for [count] paragraphs backward. Command '{'.
+
+    From inside a paragraph, moves to the start of the current paragraph.
+    From the start of a non-empty paragraph, moves to the start of the
+    previous paragraph (which may be an empty separator line). From an
+    empty separator line, skips backward past all consecutive empty lines
+    to the start of the previous non-empty paragraph.
+    """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+    try:
+        if expand:
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if not text_cursor.isStartOfParagraph():
+                text_cursor.gotoStartOfParagraph(expand)
+                moved = True
+            elif _is_current_paragraph_empty(text_cursor):
+                moved = _to_previous_non_empty_paragraph(text_cursor, expand)
+            else:
+                moved = bool(text_cursor.gotoPreviousParagraph(expand))
+            if not moved:
+                break
+            moved_any = True
+        if moved_any:
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        return moved_any
+    except Exception:
+        return False
+
+
 def _paragraph_text_object(expand, count, key, mode):
     """Text objects "ip"/"ap": select a paragraph (pending/visual modes)."""
     text_cursor = _get_text_cursor()
@@ -1724,373 +2121,6 @@ def _paragraph_text_object(expand, count, key, mode):
     if _is_current_paragraph_empty(text_cursor):
         _extend_selection_over_trailing_empty_block(text_cursor, cursor)
     return True
-
-
-def _insert_commands(cmd:str, mode="normal"):
-    """For Normal mode commands 'a', 'I', 'A', 'o', 'O'."""
-    try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
-
-        if cmd == "a" or cmd == "A":
-            textCursor = _get_text_cursor()
-            if cmd == "A":
-                if mode == "visual":
-                    if cursor is not None:
-                        cursor.gotoRange(cursor.getEnd(), False)
-                _to_end_of_line(False, 1, None)
-            elif textCursor is not None and not textCursor.isEndOfParagraph():
-                 cursor.goRight(1, False)
-            return _goto_mode("insert")
-
-        elif cmd == "I":
-            if mode == "visual":
-                # Move to the line where the selection starts before going to line start
-                cursor.gotoRange(cursor.getStart(), False)
-            _to_start_of_line(False, True)
-            return _goto_mode("insert")
-
-        if cmd in ("o", "O") and mode == "visual":
-            return _go_to_other_end(mode)
-
-        if cmd == "o":
-            _to_end_of_line(False, 0, None)
-            cursor.goRight(1, False)
-        elif cmd == "O":
-            _to_start_of_line(False, False)
-        else:
-            return False
-
-        cursor.setString(chr(13))  # CR
-        if not cursor.isAtStartOfLine():
-            cursor.goLeft(1, False)
-            cursor.setString(chr(13) + chr(13))
-            cursor.goRight(1, False)
-        return _goto_mode("insert")
-
-    except Exception:
-        return False
-
-
-# Based on Commit f33d46f from fedorov-ao/vibreoffice
-def _go_to_other_end(mode: str) -> bool:
-    """Go to the other end of highlighted text. Command 'o' / 'O' in visual mode.
-
-    The current cursor position becomes the start of the highlighted text and
-    the cursor is moved to the other end of the highlighted text. The highlighted
-    area remains the same.
-    """
-    if mode != "visual":
-        return False
-    cursor = _get_cursor()
-    if cursor is None:
-        return False
-
-    s = cursor.getString()
-    if not s:
-        return False
-
-    # Probe which end the caret is on by trying to extend right.
-    # - Selection grows  → caret was at the RIGHT (end).
-    # - Selection shrinks → caret was at the LEFT (start).
-    cursor.goRight(1, True)
-    caret_was_at_end = len(cursor.getString()) > len(s)
-
-    if caret_was_at_end:
-        # Undo probe to restore original selection, then rebuild right→left.
-        cursor.goLeft(1, True)
-        cursor.collapseToEnd()
-        cursor.goLeft(len(s), True)
-        for _ in range(10):   # small bounded correction for paragraph marks
-            if cursor.getString() == s:
-                break
-            cursor.goLeft(1, True)
-        new_tc = _get_text_cursor()
-        if new_tc is not None:
-            _set_visual_anchor(new_tc.getEnd())
-    else:
-        # Collapse to start, step back 1 to include the first character
-        # then rebuild left→right.
-        cursor.collapseToStart()
-        cursor.goLeft(1, False)
-        cursor.goRight(len(s), True)
-        for _ in range(10):
-            if cursor.getString() == s:
-                break
-            cursor.goRight(1, True)
-        new_tc = _get_text_cursor()
-        if new_tc is not None:
-            _set_visual_anchor(new_tc.getStart())
-
-    return True
-
-
-def _undo_and_redo(count=1, redo=False) -> bool:
-    """Undo or redo changes. Commands 'u' and 'C-r'. """
-    doc = _current_doc()
-    if doc is None:
-        return False
-    try:
-        if redo:
-            for _ in range(count):
-                doc.getUndoManager().redo()
-        else:
-            for _ in range(count):
-                doc.getUndoManager().undo()
-        return True
-    except Exception:
-        # Non-fatal when no more undo actions exist.
-        return False
-
-
-def _scroll_window(expand:bool, count:int, forward:bool, mode:str, lines:int|None=None) -> bool:
-    """Scroll window. Commands 'C-f', 'C-b', 'C-u', 'C-d'.
-    """
-    try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
-        if lines:
-            if forward:
-                for _ in range(count):
-                    _hjkl_motion("j", lines, expand, mode)
-            else:
-                for _ in range(count):
-                    _hjkl_motion("k", lines, expand, mode)
-        else:
-            anchor = _state().get("visual_anchor") if expand else None
-            if forward:
-                for _ in range(count):
-                    cursor.screenDown()
-            else:
-                for _ in range(count):
-                    cursor.screenUp()
-            if anchor is not None:
-                _set_visual_selection(cursor, anchor, cursor.getStart())
-        return True
-    except Exception:
-        return False
-
-
-def _jump_to_page(expand: bool, target: str, count:int=1) -> bool:
-    """Motion to start or end of a page. Commands 'H' and 'L'."""
-    target = target.lower()
-    try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
-        if target == "start":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToStartOfPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToStartOfPage()
-        elif target == "end":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToEndOfPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToEndOfPage()
-        elif target == "next":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToNextPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToNextPage()
-        elif target == "previous":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToPreviousPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToPreviousPage()
-        else:
-            return False
-        return True
-    except Exception:
-        return False
-
-
-def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
-    """Delete single characters. Commands 'x','X' and 's'."""
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
-        return False
-    try:
-        if mode == "visual" and key.char == "X":
-            _delete_selected_lines(key)
-
-        if mode != "visual":
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            if key.char == "X":
-                text_cursor.collapseToStart()
-                # At start of line
-                if not text_cursor.goLeft(count, True):
-                    return False
-            # At end of line
-            elif not text_cursor.goRight(count, True):
-                return False
-
-        text_cursor.setString("")
-        if key.char == "s":
-            _insert_commands("i", mode)
-        elif mode == "visual":
-            _goto_mode("normal")
-        return True
-    except Exception:
-        return False
-
-
-def _delete_selected_lines(key:KeyEvent):
-    """Delete lines which have selection. Commands 'S', in visual mode 'X'."""
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
-        return False
-    try:
-        # X in visual mode: expand selection to cover full visual lines.
-        # gotoStartOfLine/gotoEndOfLine are view cursor methods, so use
-        # the view cursor to navigate to each end of the selection first.
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
-        sel_start = text_cursor.getStart()
-        sel_end   = text_cursor.getEnd()
-        cursor.gotoRange(sel_start, False)
-        cursor.gotoStartOfLine(False)
-        line_start = cursor.getStart()
-        cursor.gotoRange(sel_end, False)
-        cursor.gotoEndOfLine(False)
-        line_end = cursor.getStart()
-        text_cursor.gotoRange(line_start, False)
-        text_cursor.gotoRange(line_end, True)
-        text_cursor.setString("")
-
-        if key.char == "S":
-            _insert_commands("i")
-        else:
-            _goto_mode("normal")
-        return True
-    except Exception:
-        return False
-
-
-def _delete_and_replace(count:int, key:KeyEvent, mode:str) -> bool:
-    """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
-    if mode == "normal" and key.char in ("c", "d"):
-        _add_pending_key(key.char)
-        return _goto_mode("pending")
-
-    if key.char in ("C", "D"):  # To end of line commands.
-        cursor = _get_cursor()
-        text_cursor = _get_text_cursor()
-        if cursor is None or text_cursor is None:
-            return False
-        # collapse to pos 0 (char under cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-        _to_end_of_line(True, count, None)
-
-    # Linewise delete/replace 'dd', 'cc' and 'S'.
-    if (key.pending in ("c", "d") and key.char == key.pending) or key.char == "S":
-        _to_start_of_line(False, False)
-        cursor = _get_cursor()
-        cursor.goDown(count, True)
-
-    _copy_and_delete(True, True)
-
-    if key.char in ('c', 'C', 'S') or \
-        key.pending is not None and key.pending[0] in ("c", "C"):
-        _goto_mode("insert")
-    else:
-        _goto_mode("normal")
-    return True
-
-
-def _yank(count, key, mode) -> bool:
-    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y'."""
-    if key.char == "Y":
-        cursor = _get_cursor()
-        text_cursor = _get_text_cursor()
-        if cursor is None or text_cursor is None:
-            return False
-        # collapse to pos 0 (char under cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-        _to_end_of_line(True, count, None)
-        _copy_and_delete(True, False)
-        return True
-
-    if mode == "normal" and key.pending is None:
-        _set_position()
-        _add_pending_key("y")
-        _goto_mode("pending")
-        return True
-
-    # Linewise yanking 'yy'.
-    elif key.pending == "y" and key.char == "y":
-            _to_start_of_line(False, False)
-            _hjkl_motion("j", count, True, mode)
-
-    _copy_and_delete(True, False)
-
-    position = _get_position()
-    cursor = _get_cursor()
-    if (position is not None and cursor is not None) and mode != "visual":
-        # Keep yanked range visually selected briefly, then restore cursor.
-        # Use _set_mode instead of _goto_mode so the selection isn't
-        # collapsed immediately by _show_cursor("normal")().
-        def _flash_restore():
-            if key.char != "h":
-                cursor.gotoRange(position, False)
-            _show_cursor("normal")
-        threading.Timer(0.08, _flash_restore).start()
-
-    _reset_pending_keys()
-    _set_mode("normal")
-    return True
-
-
-def _replace_character(count:int, key:KeyEvent, mode) -> bool:
-    """Replace character(s) under cursor with {key_char}.
-       With {count} replace {count} characters with {count} {key_char}.
-    """
-    if key.pending is None:
-        _add_pending_key("r")
-        return True
-
-    _reset_pending_keys()
-    try:
-        cursor = _get_cursor()
-        length = len(cursor.getString())
-
-        if length > 1:
-            cursor.setString(key.char * length)
-        else:
-            cursor.setString(key.char * count)
-
-        if mode == "visual":
-            _goto_mode("normal")
-        return True
-    except Exception:
-        return False
-
-
-def _ctrl_c_command(mode:str):
-    if mode == "normal":
-        _reset_pending_keys()
-    elif mode == "visual":
-        _copy_and_delete(True, False)
-    _goto_mode("normal")
 
 
 # --------------
@@ -2164,7 +2194,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "O": lambda: _insert_commands("O", mode),
                 "p": lambda: _paste(count, True),
                 "P": lambda: _paste(count, False),
-                "r": lambda: _replace_character(count, key, mode),
+                "r": lambda: _replace_characters(count, key, mode),
                 "u": lambda: _undo_and_redo(count, False),
                 "U": lambda: _undo_and_redo(count, True),
                 "s": lambda: _delete_characters(count, key, mode),
@@ -2305,7 +2335,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.pending == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
                 return self._consume_action(
-                    lambda: _replace_character(count, key, mode)
+                    lambda: _replace_characters(count, key, mode)
                 )
             _reset_pending_keys()
             return True
@@ -2631,8 +2661,8 @@ def _is_function_key(event):
 # Infra
 # ---------------
 
-# Non-editor functionality: initialization, enabling and disabling for all
-# windows, listening events.
+# Non-editor functionality: initialization, enabling and disabling extension,
+# handling controllers, listening events.
 
 def _desktop():
     try:
