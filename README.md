@@ -35,7 +35,7 @@ This will simply build the extension file from the template files in
 
 - Multi-window support.
 - Modes: Normal (+Operator pending), Insert, Visual.
-- Custom Word, WORD, sentence and paragraph motions which match closely Vi(m)'s.
+- Vi(m) -like word, WORD, sentence and paragraph motions.
 - Most command can take number count and use it like Vi(m).
 - Passthrough of not-used shortcuts so most of LibreOffice's shortcuts are still available.
 - Statusline with mode, count, pending commands.
@@ -50,7 +50,7 @@ Currently supported commands:
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
 - Search: `/` (LibreOffice search bar)
-- Text-objects: `as`
+- Text-objects: `as`, operator pending: `ip`, `ap`
 
 - In Visual mode you can swap cursor position to other end of selection with `o`.
 

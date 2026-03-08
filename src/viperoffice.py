@@ -1374,14 +1374,15 @@ def _consume_empty_block_forward(text_cursor):
             return end_range, True
 
 
-def _extend_selection_over_empty_block_break(text_cursor, cursor) -> bool:
-    if not text_cursor.gotoPreviousParagraph(False):
-        return False
-    text_cursor.gotoEndOfParagraph(False)
-    cursor.gotoRange(text_cursor.getEnd(), True)
-    cursor.goRight(1, True)
-    text_cursor.gotoNextParagraph(False)
-    return True
+def _range_after_paragraph_break(text_range):
+    try:
+        text_obj = text_range.getText()
+        probe = text_obj.createTextCursorByRange(text_range)
+        if probe.goRight(1, False):
+            return probe.getStart()
+    except Exception:
+        pass
+    return None
 
 
 def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
@@ -1652,47 +1653,49 @@ def _paragraph_text_object(expand, count, key, mode):
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
         return False
+    if mode != "pending":
+        return False
 
-    if mode == "pending":
-        is_around = key.pending is not None and key.pending[-1] == "a"
-        started_empty = _is_current_paragraph_empty(text_cursor)
-        if started_empty:
-            _move_to_empty_block_start(text_cursor)
-            cursor.gotoRange(text_cursor.getStart(), False)
-        elif not text_cursor.isStartOfParagraph():
-            if not _paragraphs_backward(False, 1):
-                return False
-
-        moved = _paragraphs_forward(expand, count)
-        if not moved:
+    is_around = key.pending is not None and key.pending[-1] == "a"
+    started_empty = _is_current_paragraph_empty(text_cursor)
+    if started_empty:
+        _move_to_empty_block_start(text_cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+    elif not text_cursor.isStartOfParagraph():
+        if not _paragraphs_backward(False, 1):
             return False
 
-        text_cursor = _get_text_cursor()
-        if text_cursor is None:
-            return False
+    moved = _paragraphs_forward(expand, count)
+    if not moved:
+        return False
 
-        if started_empty:
-            if not _is_current_paragraph_empty(text_cursor):
-                _extend_selection_over_empty_block_break(text_cursor, cursor)
-            if not is_around:
-                return True
-            if not _is_current_paragraph_empty(text_cursor):
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+
+    if started_empty:
+        if not _is_current_paragraph_empty(text_cursor):
+            if text_cursor.gotoPreviousParagraph(False):
                 text_cursor.gotoEndOfParagraph(False)
-                cursor.gotoRange(text_cursor.getEnd(), True)
-            return True
-
+                end_after = _range_after_paragraph_break(text_cursor.getEnd())
+                if end_after is not None:
+                    cursor.gotoRange(end_after, True)
         if not is_around:
             return True
-
-        if _is_current_paragraph_empty(text_cursor):
-            end_range, has_next = _consume_empty_block_forward(text_cursor)
-            if end_range is not None:
-                cursor.gotoRange(end_range, True)
-                if has_next:
-                    cursor.goRight(1, True)
+        if not _is_current_paragraph_empty(text_cursor):
+            text_cursor.gotoEndOfParagraph(False)
+            cursor.gotoRange(text_cursor.getEnd(), True)
         return True
-    else:
-        return False
+
+    if not is_around:
+        return True
+
+    if _is_current_paragraph_empty(text_cursor):
+        end_range, has_next = _consume_empty_block_forward(text_cursor)
+        if end_range is not None:
+            end_after = _range_after_paragraph_break(end_range) if has_next else end_range
+            cursor.gotoRange(end_after or end_range, True)
+    return True
 
 
 def _insert_commands(cmd:str, mode="normal"):
@@ -1913,7 +1916,6 @@ def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
                 return False
 
         text_cursor.setString("")
-
         if key.char == "s":
             _insert_commands("i", mode)
         elif mode == "visual":
@@ -1945,7 +1947,6 @@ def _delete_selected_lines(key:KeyEvent):
         line_end = cursor.getStart()
         text_cursor.gotoRange(line_start, False)
         text_cursor.gotoRange(line_end, True)
-
         text_cursor.setString("")
 
         if key.char == "S":
