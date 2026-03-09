@@ -2161,6 +2161,7 @@ def _select_sentences_from_cursor(cursor, count) -> bool:
     _reset_count()
     return moved
 
+
 # ------------------
 # Paragraph motions
 # ------------------
@@ -2387,7 +2388,7 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
         return False
     try:
         if expand:
-            caret = _get_visual_caret_range(text_cursor) ,
+            caret = _get_visual_caret_range(text_cursor)
             text_cursor.gotoRange(caret, False)
         steps = max(1, int(count))
         moved_any = False
@@ -2440,42 +2441,62 @@ def _paragraph_text_object(expand, count, key, mode):
         return False
 
     selection_len = len(cursor.getString())
-    select_backwards = False
     cursor_length = 1
-    no_selection = True if len(cursor.getString()) <= cursor_length else False
+    has_selection = True if len(cursor.getString()) > 1 else False
 
     # Select from start of current paragraph.
-    if no_selection:
-        started_empty = _is_current_paragraph_empty(text_cursor)
-        if started_empty:
-            _move_to_empty_block_start(text_cursor)
-        else:
-            text_cursor.gotoStartOfParagraph(False)
-        _set_visual_anchor(text_cursor.getStart())
-        cursor.gotoRange(text_cursor.getStart(), False)
+    if has_selection:
+        return _select_paragraphs_from_cursor(cursor, count, is_around)
 
-    # Select from cursor point to direction of selection.
+    started_empty = _is_current_paragraph_empty(text_cursor)
+    if started_empty:
+        _move_to_empty_block_start(text_cursor)
     else:
-        anchor = _state().get("visual_anchor")
-        caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
-        if caret_before_anchor:
-            select_backwards = True
+        text_cursor.gotoStartOfParagraph(False)
+    _set_visual_anchor(text_cursor.getStart())
+    cursor.gotoRange(text_cursor.getStart(), False)
 
-        text_cursor = _get_text_cursor()
-        if text_cursor is None:
-            return False
-        caret = _get_visual_caret_range(text_cursor)
-        text_cursor.gotoRange(caret, False)
-        started_empty = _is_current_paragraph_empty(text_cursor)
-        if started_empty:
-            _move_to_empty_block_start(text_cursor)
-            cursor.gotoRange(text_cursor.getStart(), True)
+    if is_around:
+        return _select_ap_units_forward_visual(cursor, count, started_empty)
+    else:
+        moved = _paragraphs_forward(True, count)
+
+    if not moved:
+        return False
+
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+    return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
+
+
+def _select_paragraphs_from_cursor(cursor, count, is_around) -> bool:
+    """Extend an existing visual selection by ip/ap paragraph text objects.
+
+    Called when cursor already has a selection Determines direction from the
+    saved anchor vs caret position, then delegates to the appropriate
+    forward/backward helper.
+    """
+    anchor = _state().get("visual_anchor")
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+    caret = _get_visual_caret_range(text_cursor)
+    # Backward when caret is the LEFT end (i.e. anchor is right of caret).
+    select_backwards = anchor is not None and _range_starts_before(caret, anchor)
+
+    text_cursor.gotoRange(caret, False)
+    started_empty = _is_current_paragraph_empty(text_cursor)
+    if started_empty:
+        _move_to_empty_block_start(text_cursor)
+        cursor.gotoRange(text_cursor.getStart(), True)
 
     if select_backwards:
         if is_around:
             moved = _select_ap_units_backward_visual(cursor, count)
         else:
             moved = _paragraphs_backward(True, count)
+
     elif is_around:
         return _select_ap_units_forward_visual(cursor, count, started_empty)
     else:
@@ -2483,19 +2504,18 @@ def _paragraph_text_object(expand, count, key, mode):
 
     if not moved:
         return False
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
-        return False
-
     if select_backwards:
         return True
 
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
     return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
 
 
-# --------------
+# -----------------
 # Input handling
-# --------------
+# -----------------
 
 # UNO key handler
 # Return values for keyPressed/keyReleased:

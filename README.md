@@ -79,17 +79,20 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. You ca
 ## Known differences to Vi/(Neo)vim
 
 - Line based commands work on *visual lines*, not lines separated by end-of-line -characters.
-- Movement keys will wrap to the next line.
-- For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank to clipboard but just delete.
+    - Movement keys will wrap to the next line.
+    - Due to line wrapping, you may find your cursor move up/down a line for
+      commands that would otherwise leave you in the same position (such as `dd`)
+- For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank but just delete.
 - Paragraph motions `{}` stop at start of paragraphs in addition to possible
   first empty line between them.
 - `H` and `L` motions move cursor to start and end of page instead of screen.
 - `Y` does same as `y$`.
-- `C-d` and `C-u` default scrolling of 20 lines, which can be changed with extension's global variable `SCROLL`.
+- `C-d` and `C-u` default scrolling of 20 lines instead of half page since there's no reliable way to get position of half page. Number of scrolled lines can changed with extension's global variable `SCROLL`.
+- Sentence motions use LibreOffice's definition of a sentence. Selected language can have an effect for that. For example first alphabet of sentence may need to be in upper case for it to be considered as sentence.
 
 ## Known issues / missing features
 
 For implemented features:
 
-- 
 - Insert/append commands currently don't take count.
+- Commands not listed under features are not currently implemented.
