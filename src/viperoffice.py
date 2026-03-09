@@ -2120,9 +2120,17 @@ def _sentence_text_object(expand, count, key, mode):
     else:
         # Extended selection -> select from cursor point to direction of selection.
         anchor = _state().get("visual_anchor")
-        caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
-        if caret_before_anchor:
+        select_backwards = anchor is not None and _range_starts_before(cursor, anchor)
+        if select_backwards:
             moved = _sentences_backwards(expand, count)
+            # Include whitespace before the newly selected sentence start,
+            # so "as" grabs the spacing between sentences when going backward.
+            if moved:
+                new_tc = _get_text_cursor()
+                new_cursor = _get_cursor()
+                if not new_tc.isStartOfParagraph():
+                    if new_tc is not None and new_cursor is not None:
+                        _move_to_whitespace_start_after_prev_sentence(new_tc, new_cursor, expand)
         else:
             moved = _sentences_forward(expand, count)
 
@@ -2357,7 +2365,7 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
         return False
     try:
         if expand:
-            caret = _get_visual_caret_range(text_cursor)
+            caret = _get_visual_caret_range(text_cursor) ,
             text_cursor.gotoRange(caret, False)
         steps = max(1, int(count))
         moved_any = False
