@@ -331,7 +331,7 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 lines.append(f"start of paragraph: {text_cursor.isStartOfParagraph()}")
                 lines.append(f"end of paragraph: {text_cursor.isEndOfParagraph()}")
                 lines.append(f"Is current paragraph empty: {_is_current_paragraph_empty(text_cursor)}")
-                lines.append(f"start of sentence: {_is_at_sentence_start_heuristic(text_cursor)}")
+                lines.append(f"start of sentence: {_is_at_sentence_start(text_cursor)}")
                 lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(text_cursor, "after_sentence")}")
                 lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(text_cursor, "before_paragraph")}")
                 lines.append(f"start of word: {text_cursor.isStartOfWord()}")
@@ -1849,10 +1849,10 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
         return moved
 
-    print(f"_to_next_sentence: before gotoNextSentence, tc={repr(text_cursor.getString()[:30])}, expand={expand}")
+    # print(f"_to_next_sentence: before gotoNextSentence, tc={repr(text_cursor.getString()[:30])}, expand={expand}")
     text_cursor.gotoNextSentence(expand)
     _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-    print(f"_to_next_sentence: after sync, tc_str={repr(text_cursor.getString()[:30])}, same_pos={_same_pos(old_pos, cursor.getPosition())}, old_pos={_pos_xy(old_pos)}, new_pos={_pos_xy(cursor.getPosition())}")
+    # print(f"_to_next_sentence: after sync, tc_str={repr(text_cursor.getString()[:30])}, same_pos={_same_pos(old_pos, cursor.getPosition())}, old_pos={_pos_xy(old_pos)}, new_pos={_pos_xy(cursor.getPosition())}")
 
     # Some backends land on the paragraph end marker first; skip that stop.
     if text_cursor.isEndOfParagraph() and not _is_current_paragraph_empty(text_cursor):
@@ -1897,10 +1897,13 @@ def _sentences_forward(expand: bool, count: int) -> bool:
         return False
 
 
-def _is_at_sentence_start_heuristic(text_cursor) -> bool:
+def _is_at_sentence_start(text_cursor) -> bool:
     if text_cursor is None:
         return False
     try:
+        # Whitespace is never a sentence start.
+        if _is_cursor_on_whitespace(text_cursor):
+            return False
         probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
         if probe.isStartOfParagraph():
             return True
@@ -1935,7 +1938,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
         # Fall through — cursor is now at isStartOfParagraph(), handled below.
 
     # From inside a sentence, first "(" should go to current sentence start.
-    if not _is_at_sentence_start_heuristic(text_cursor):
+    if not _is_at_sentence_start(text_cursor):
         text_cursor.gotoStartOfSentence(expand)
         _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
         return True
@@ -2018,11 +2021,13 @@ def _sentence_text_object(expand, count, key, mode):
 
     if mode == "pending":
         if is_around:
-            if not _is_at_sentence_start_heuristic(text_cursor):
-                if not _sentences_backwards(False, 1):
-                    return False
             if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
                 _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
+                # _sentences_forward(False, 1)
+            elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+                _sentences_forward(False, 1)
+            elif not _is_at_sentence_start(text_cursor):
+                _sentences_backwards(False, 1)
             return _sentences_forward(expand, count)
         else:
             return False
@@ -2030,12 +2035,18 @@ def _sentence_text_object(expand, count, key, mode):
     if mode != "visual":
         return False
 
-    # Without selection, current and possible next sentences are selected.
+    # No extended selection -> select from start of current sentence.
     selection_len = len(cursor.getString())
     if selection_len <= 1:      # Cursor len at start of Visual mode is 1.
-        if not _is_at_sentence_start_heuristic(text_cursor):
+        if not _is_at_sentence_start(text_cursor):
             if not _sentences_backwards(False, 1):
                 return False
+
+        if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
+            _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
+            count += 1
+        elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+            _sentences_forward(False, 1)
         # After moving back without selection, re-anchor at sentence start
         # so _sentences_forward expands from there, not from the original
         # mid-sentence position.
@@ -2045,8 +2056,7 @@ def _sentence_text_object(expand, count, key, mode):
             moved =_sentences_forward(expand, count)
 
     else:
-        # With selection, it's direction defines which direction sentences are
-        # going to get selected from cursor point.
+        # Extended selection -> select from cursor point to direction of selection.
         anchor = _state().get("visual_anchor")
         caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
         if caret_before_anchor:
@@ -2350,7 +2360,7 @@ def _paragraph_text_object(expand, count, key, mode):
         _set_visual_anchor(text_cursor.getStart())
         cursor.gotoRange(text_cursor.getStart(), False)
 
-    # Extended selection -> select from cursor point.
+    # Extended selection -> select from cursor point to direction of selection.
     else:
         anchor = _state().get("visual_anchor")
         caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
