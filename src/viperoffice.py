@@ -1907,9 +1907,13 @@ def _is_at_sentence_start_heuristic(text_cursor) -> bool:
         ch = ""
         while True:
             if not probe.goLeft(1, True):
-                break
+                # Reached document start through whitespace only.
+                return True
             ch = probe.getString()
             probe.collapseToStart()
+            if probe.isStartOfParagraph():
+                # Walked back to paragraph start through whitespace only.
+                return True
             if ch not in (" ", "\t", "\"", "'", ")", "]"):
                 break
         return ch in (".", "!", "?")
@@ -1921,11 +1925,34 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
     # Implements one "(" motion with sentence-start/paragraph-edge handling.
     old_pos = cursor.getPosition()
 
+    # From leading whitespace of a paragraph, gotoStartOfSentence moves forward
+    # to the first sentence content rather than backward. Collapse to the real
+    # paragraph start so the isStartOfParagraph() branch below handles crossing
+    # to the previous paragraph correctly.
+    if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+        text_cursor.gotoStartOfParagraph(False)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        # Fall through — cursor is now at isStartOfParagraph(), handled below.
+
     # From inside a sentence, first "(" should go to current sentence start.
     if not _is_at_sentence_start_heuristic(text_cursor):
         text_cursor.gotoStartOfSentence(expand)
         _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
         return True
+
+    # If cursor is at the first non-whitespace character after leading paragraph
+    # whitespace, isStartOfParagraph() is False but we must treat it as paragraph
+    # start so the boundary logic below crosses to the previous paragraph.
+    if not text_cursor.isStartOfParagraph():
+        try:
+            para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+            para_probe.gotoStartOfParagraph(False)
+            para_probe.gotoRange(text_cursor.getStart(), True)
+            if all(c in (" ", "\t") for c in para_probe.getString()):
+                text_cursor.gotoStartOfParagraph(False)
+                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        except Exception:
+            pass
 
     # Paragraph-boundary behavior matching logic.
     if text_cursor.isStartOfParagraph():
