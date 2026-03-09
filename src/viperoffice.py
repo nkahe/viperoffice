@@ -333,6 +333,7 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 lines.append(f"Is current paragraph empty: {_is_current_paragraph_empty(text_cursor)}")
                 lines.append(f"start of sentence: {_is_at_sentence_start_heuristic(text_cursor)}")
                 lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(text_cursor, "after_sentence")}")
+                lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(text_cursor, "before_paragraph")}")
                 lines.append(f"start of word: {text_cursor.isStartOfWord()}")
                 lines.append(f"end of word: {text_cursor.isEndOfWord()}")
                 lines.append(f"String: {char}")
@@ -1753,9 +1754,11 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
     """Return True if cursor is on a whitespace character.
 
     condition: optional qualifier for additional check:
-        None           – any whitespace at cursor position.
-        "after_sentence" – whitespace that immediately follows a sentence end
-                           (., !, ?), ruling out mid-sentence whitespace.
+        None               – any whitespace at cursor position.
+        "after_sentence"   – whitespace that immediately follows a sentence end
+                             (., !, ?), ruling out mid-sentence whitespace.
+        "before_paragraph" – whitespace at the start of a paragraph (paragraph
+                             begins with whitespace characters).
     """
     if text_cursor is None:
         return False
@@ -1781,6 +1784,14 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
                 if ch not in (" ", "\t", "\"", "'", ")", "]"):
                     break
             return ch in (".", "!", "?")
+
+        elif condition == "before_paragraph":
+            # Check that the cursor is within leading whitespace of the paragraph.
+            para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+            para_probe.gotoStartOfParagraph(False)
+            para_probe.gotoRange(text_cursor.getStart(), True)
+            leading = para_probe.getString()
+            return len(leading) == 0 or all(c in (" ", "\t") for c in leading)
         else:
             return False
     except Exception:
@@ -1825,6 +1836,15 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
     # From an empty line, jump directly to the next non-empty paragraph.
     if _is_current_paragraph_empty(text_cursor):
         moved = _to_next_non_empty_paragraph(text_cursor, expand)
+        if moved:
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return moved
+
+    # From leading whitespace of a paragraph, gotoNextSentence would skip the
+    # first sentence entirely. Jump to the next word instead, which lands at
+    # the start of that sentence.
+    if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+        moved = text_cursor.gotoNextWord(expand)
         if moved:
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
         return moved
