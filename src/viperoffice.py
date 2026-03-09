@@ -1829,8 +1829,68 @@ def _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, expand: b
     return False
 
 
+def _to_end_of_sentence(expand: bool) -> bool:
+    """Move cursor to the end (last punctuation char) of the next sentence.
+
+    If cursor is already at a sentence end, moves to the end of the following
+    sentence. Returns True if moved.
+    """
+
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+
+    if text_cursor is None or cursor is None:
+        return False
+    try:
+        # Find sentence end by going to next sentence start, then stepping back
+        # past inter-sentence whitespace to land on the punctuation character.
+        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+
+        # If cursor is on inter-sentence whitespace, skip forward past it first
+        # so gotoNextSentence lands on the *next* sentence start, not the current one.
+        if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
+            probe.gotoNextSentence(False)
+
+        # If already at sentence end, advance past it first so we target the next one.
+        probe_ch = text_cursor.getText().createTextCursorByRange(probe.getStart())
+        if probe_ch.goRight(1, True):
+            at_end = probe_ch.getString() in (".", "!", "?")
+        else:
+            at_end = False
+        if at_end:
+            probe.goRight(1, False)
+
+        if not probe.gotoNextSentence(False):
+            return False
+
+        # Walk back past whitespace to find the sentence-ending punctuation.
+        ch = ""
+        for _ in _paragraph_scan_steps():
+            if not probe.goLeft(1, True):
+                break
+            ch = probe.getString()
+            probe.collapseToStart()
+            if ch not in (" ", "\t", "\n"):
+                break
+
+        if ch not in (".", "!", "?"):
+            return False
+
+        # Move to start of the punctuation char, then one right to include it.
+        text_cursor.gotoRange(probe.getStart(), expand)
+        text_cursor.goRight(1, True)
+        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        return True
+    except Exception:
+        return False
+
+
 def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
-    # Implements one ")" motion with paragraph-edge handling.
+    """Move cursor to the start of the next sentence, implementing one ')' motion step.
+
+    Handles edge cases: empty paragraphs (jumps to next non-empty), leading paragraph
+    whitespace, and backends that stall on paragraph-end markers.
+    """
     old_pos = cursor.getPosition()
 
     # From an empty line, jump directly to the next non-empty paragraph.
@@ -1925,7 +1985,12 @@ def _is_at_sentence_start(text_cursor) -> bool:
 
 
 def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
-    # Implements one "(" motion with sentence-start/paragraph-edge handling.
+    """Move cursor to the start of the previous sentence, implementing one '(' motion step.
+
+    Handles edge cases: leading paragraph whitespace (collapses to paragraph start to
+    trigger boundary crossing), first non-whitespace after leading whitespace (detected
+    via heuristic and collapsed to paragraph start), and mid-sentence positions.
+    """
     old_pos = cursor.getPosition()
 
     # From leading whitespace of a paragraph, gotoStartOfSentence moves forward
@@ -2023,7 +2088,7 @@ def _sentence_text_object(expand, count, key, mode):
         if is_around:
             if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
                 _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
-                # _sentences_forward(False, 1)
+                return _to_end_of_sentence(True)
             elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
                 _sentences_forward(False, 1)
             elif not _is_at_sentence_start(text_cursor):
@@ -2041,10 +2106,9 @@ def _sentence_text_object(expand, count, key, mode):
         if not _is_at_sentence_start(text_cursor):
             if not _sentences_backwards(False, 1):
                 return False
-
         if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
             _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
-            count += 1
+            _to_end_of_sentence(True)
         elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
             _sentences_forward(False, 1)
         # After moving back without selection, re-anchor at sentence start
@@ -2516,6 +2580,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "(": lambda: _sentences_backwards(expand, count),
                 "}": lambda: _paragraphs_forward(expand, count),
                 "{": lambda: _paragraphs_backward(expand, count),
+                "m": lambda: _to_end_of_sentence(expand),
             }
             if key.char == "0" and _get_raw_count() == 0:
                 motions["0"] = lambda: _to_start_of_line(expand, False)
