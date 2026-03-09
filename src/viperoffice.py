@@ -424,29 +424,31 @@ def _show_cursor(mode:str):
 # Sets mode handling cursor accordingly. In operator pending and visual modes
 #  cursor state is saved so it can be used by operator commands.
 def _goto_mode(new_mode: str) -> bool:
-    current_mode = _get_mode()
+    old_mode = _get_mode()
     if new_mode == "normal":
         _reset_pending_keys()
-        if current_mode == new_mode:
+        if old_mode in ("normal", "pending"):
             return True
-        if current_mode == "insert":
-            cursor = _get_cursor()
+
+        cursor = _get_cursor()
+        if old_mode == "insert":
             if cursor is not None and not cursor.isAtStartOfLine():
                 # Mimics Vi/Vim cursor behavior.
                 cursor.goLeft(1, False)
 
         # Make selection start where caret is in Normal mode.
-        elif current_mode == "visual":
+        elif old_mode == "visual":
             controller = _get_controller()
             text_cursor = _get_text_cursor()
-            if controller is not None and text_cursor is not None:
-                # Use the saved anchor to find the caret end before clearing it.
-                caret = _get_visual_caret_range(text_cursor)
-                _clear_visual_anchor()
-                text_cursor.gotoRange(caret, False)
-                text_cursor.goLeft(1, False)
-                controller.select(text_cursor)
-            else:
+            try:
+                if controller is not None and text_cursor is not None and cursor is not None:
+                    # Use the saved anchor to find the caret end before clearing it.
+                    caret = _get_visual_caret_range(text_cursor)
+                    text_cursor.gotoRange(caret, False)
+                    if not cursor.isAtStartOfLine():
+                        text_cursor.goLeft(1, False)
+                    controller.select(text_cursor)
+            finally:
                 _clear_visual_anchor()
 
         _show_cursor("normal")
