@@ -2084,36 +2084,32 @@ def _sentence_text_object(expand, count, key, mode):
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
-    if mode == "pending":
-        if is_around:
-            if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
-                _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
-                return _to_end_of_sentence(True)
-            elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-                _sentences_forward(False, 1)
-            elif not _is_at_sentence_start(text_cursor):
-                _sentences_backwards(False, 1)
-            return _sentences_forward(expand, count)
-        else:
-            return False
+    if not is_around:
+        return False
 
-    if mode != "visual":
+    if mode not in ("pending", "visual"):
         return False
 
     # No extended selection -> select from start of current sentence.
     selection_len = len(cursor.getString())
-    if selection_len <= 1:      # Cursor len at start of Visual mode is 1.
-        if not _is_at_sentence_start(text_cursor):
-            if not _sentences_backwards(False, 1):
-                return False
+    if mode == "pending" or selection_len <= 1:      # Cursor len at start of Visual mode is 1.
+
         if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
             _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
-            _to_end_of_sentence(True)
+            # After moving back without selection, re-anchor at sentence start
+            # so _sentences_forward expands from there, not from the original
+            # mid-sentence position.
+            new_tc = _get_text_cursor()
+            if new_tc is not None:
+                _set_visual_anchor(new_tc.getStart())
+            return _to_end_of_sentence(True)
+
         elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
             _sentences_forward(False, 1)
-        # After moving back without selection, re-anchor at sentence start
-        # so _sentences_forward expands from there, not from the original
-        # mid-sentence position.
+
+        elif not _is_at_sentence_start(text_cursor):
+            _sentences_backwards(False, 1)
+
         new_tc = _get_text_cursor()
         if new_tc is not None:
             _set_visual_anchor(new_tc.getStart())
