@@ -886,6 +886,21 @@ def _focus_findbar() -> bool:
         # dispatcher.executeDispatch(frame, ".uno:SearchDialog", "", 0, ())
         return False
 
+def _repeat_search(count, backward: bool = False) -> bool:
+    """Repeat last LibreOffice search count times. Commands 'n' and 'N'."""
+    # try:
+    dispatcher = _get_dispatcher()
+    frame = _get_frame()
+    if dispatcher is None or frame is None:
+        return False
+    # FindbarFindNext / FindbarFindPrev repeat the last findbar search.
+    cmd = "vnd.sun.star.findbar:FindPrev" if backward else "vnd.sun.star.findbar:FindNext"
+    for _ in range(max(1, count)):
+        dispatcher.executeDispatch(frame, cmd, "", 0, ())
+    return True
+    # except Exception:
+    #     return False
+
 
 # ------------------
 # Lines
@@ -2092,52 +2107,59 @@ def _sentence_text_object(expand, count, key, mode):
     if mode not in ("pending", "visual"):
         return False
 
-    # No extended selection -> select from start of current sentence.
-    selection_len = len(cursor.getString())
-    if mode == "pending" or selection_len <= 1:      # Cursor len at start of Visual mode is 1.
+    cursor_length = 1
+    has_selection = True if len(cursor.getString()) > 1 else False
 
-        if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
-            _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
-            # After moving back without selection, re-anchor at sentence start
-            # so _sentences_forward expands from there, not from the original
-            # mid-sentence position.
-            new_tc = _get_text_cursor()
-            if new_tc is not None:
-                _set_visual_anchor(new_tc.getStart())
-            return _to_end_of_sentence(True)
+    if has_selection:
+        return _select_sentences_from_cursor(cursor, count)
 
-        elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-            _sentences_forward(False, 1)
-
-        elif not _is_at_sentence_start(text_cursor):
-            _sentences_backwards(False, 1)
-
+    if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
+        _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
+        # After moving back without selection, re-anchor at sentence start
+        # so _sentences_forward expands from there, not from the original
+        # mid-sentence position.
         new_tc = _get_text_cursor()
         if new_tc is not None:
             _set_visual_anchor(new_tc.getStart())
-            moved =_sentences_forward(expand, count)
+        return _to_end_of_sentence(True)
 
-    else:
-        # Extended selection -> select from cursor point to direction of selection.
-        anchor = _state().get("visual_anchor")
-        select_backwards = anchor is not None and _range_starts_before(cursor, anchor)
-        if select_backwards:
-            moved = _sentences_backwards(expand, count)
-            # Include whitespace before the newly selected sentence start,
-            # so "as" grabs the spacing between sentences when going backward.
-            if moved:
-                new_tc = _get_text_cursor()
-                new_cursor = _get_cursor()
-                if not new_tc.isStartOfParagraph():
-                    if new_tc is not None and new_cursor is not None:
-                        _move_to_whitespace_start_after_prev_sentence(new_tc, new_cursor, expand)
-        else:
-            moved = _sentences_forward(expand, count)
+    elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+        _sentences_forward(False, 1)
+
+    elif not _is_at_sentence_start(text_cursor):
+        _sentences_backwards(False, 1)
+
+    new_tc = _get_text_cursor()
+    if new_tc is not None:
+        _set_visual_anchor(new_tc.getStart())
+        moved =_sentences_forward(expand, count)
 
     _reset_pending_keys()
     _reset_count()
     return moved
 
+
+def _select_sentences_from_cursor(cursor, count) -> bool:
+    """Select text objects from cursor to direction of selection"""
+    anchor = _state().get("visual_anchor")
+    select_backwards = anchor is not None and _range_starts_before(cursor, anchor)
+
+    if not select_backwards:
+        moved = _sentences_forward(True, count)
+
+    else:
+        moved = _sentences_backwards(True, count)
+        # Include whitespace before the newly selected sentence start,
+        # so "as" grabs the spacing between sentences when going backward.
+        new_tc = _get_text_cursor()
+        new_cursor = _get_cursor()
+        if new_tc is not None and new_cursor is not None:
+            if moved and not new_tc.isStartOfParagraph():
+                _move_to_whitespace_start_after_prev_sentence(new_tc, new_cursor, True)
+
+    _reset_pending_keys()
+    _reset_count()
+    return moved
 
 # ------------------
 # Paragraph motions
@@ -2419,9 +2441,11 @@ def _paragraph_text_object(expand, count, key, mode):
 
     selection_len = len(cursor.getString())
     select_backwards = False
+    cursor_length = 1
+    no_selection = True if len(cursor.getString()) <= cursor_length else False
 
-    # No extended selection -> select from start of current paragraph.
-    if selection_len <= 1:
+    # Select from start of current paragraph.
+    if no_selection:
         started_empty = _is_current_paragraph_empty(text_cursor)
         if started_empty:
             _move_to_empty_block_start(text_cursor)
@@ -2430,7 +2454,7 @@ def _paragraph_text_object(expand, count, key, mode):
         _set_visual_anchor(text_cursor.getStart())
         cursor.gotoRange(text_cursor.getStart(), False)
 
-    # Extended selection -> select from cursor point to direction of selection.
+    # Select from cursor point to direction of selection.
     else:
         anchor = _state().get("visual_anchor")
         caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
@@ -2551,6 +2575,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "Y": lambda: _yank(count, key, mode),
                 "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
+                "n": lambda: _repeat_search(count),
+                "N": lambda: _repeat_search(count, backward=True),
             }
         return actions
 
