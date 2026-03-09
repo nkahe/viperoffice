@@ -269,7 +269,7 @@ def _dbg(msg):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
 
 
 def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnusedFunction]
-    """Show [text] in a pop-up window for debugging."""
+    """Show [text] in a pop-up window."""
     try:
         controller = _get_controller()
         if controller is None:
@@ -291,11 +291,11 @@ def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnused
         pass
 
 
-def debug_cursor_state():  # noqa: F811  # pyright: ignore[reportUnusedFunction]
-    """Show debug info about view cursor and text cursor ranges. For development use."""
+def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
+    """Print debug info about view cursor and text cursor ranges to console. For development use."""
     cursor = _get_cursor()
     if cursor is None:
-        msg("No view cursor available.", "ViperOffice cursor debug")
+        print("ViperOffice cursor debug: No view cursor available.")
         return
     try:
         text_cursor = _get_text_cursor()
@@ -307,32 +307,46 @@ def debug_cursor_state():  # noqa: F811  # pyright: ignore[reportUnusedFunction]
             pos = cursor.getPosition()
             x = pos.X() if callable(pos.X) else pos.X
             y = pos.Y() if callable(pos.Y) else pos.Y
-            lines.append(f"ViewCursor pos: X={x}, Y={y}")
+            lines.append("-- view cursor --")
+            lines.append(f"position: X={x}, Y={y}")
         except Exception:
-            lines.append("ViewCursor pos: unavailable")
+            lines.append("Position: unavailable")
         try:
-            lines.append(f"ViewCursor collapsed: {cursor.isCollapsed()}")
-            lines.append(f"ViewCursor at start of line: {cursor.isAtStartOfLine()}")
+            lines.append(f"Collapsed: {cursor.isCollapsed()}")
+            lines.append(f"At start of line: {cursor.isAtStartOfLine()}")
         except Exception:
-            lines.append("ViewCursor range: unavailable")
+            lines.append("Range: unavailable")
 
         # Text cursor info
         if text_cursor is None:
             lines.append("TextCursor: unavailable")
         else:
             try:
-                lines.append(f"TextCursor collapsed: {text_cursor.isCollapsed()}")
-                lines.append(f"TextCursor start of paragraph: {text_cursor.isStartOfParagraph()}")
-                lines.append(f"TextCursor end of paragraph: {text_cursor.isEndOfParagraph()}")
-                lines.append(f"TextCursor start of word: {text_cursor.isStartOfWord()}")
-                lines.append(f"TextCursor end of word: {text_cursor.isEndOfWord()}")
-                lines.append(f"TextCursor string: {repr(text_cursor.getString()[:40])}")
+                char = text_cursor.getString()[:40]
+                anchor = _state().get("visual_anchor")
+                caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
+                lines.append("-- text cursor --")
+                lines.append(f"collapsed: {text_cursor.isCollapsed()}")
+                lines.append(f"caret before anchor: {caret_before_anchor}")
+                lines.append(f"start of paragraph: {text_cursor.isStartOfParagraph()}")
+                lines.append(f"end of paragraph: {text_cursor.isEndOfParagraph()}")
+                lines.append(f"Is current paragraph empty: {_is_current_paragraph_empty(text_cursor)}")
+                lines.append(f"start of sentence: {_is_at_sentence_start_heuristic(text_cursor)}")
+                lines.append(f"start of word: {text_cursor.isStartOfWord()}")
+                lines.append(f"end of word: {text_cursor.isEndOfWord()}")
+                lines.append(f"String: {char}")
+                lines.append(f"Word character class: {_word_char_class(char)}")
+                lines.append(f"Is at whitespace: {_is_cursor_on_whitespace(text_cursor)}")
+                lines.append("")
             except Exception as e:
                 lines.append(f"TextCursor info error: {e}")
 
-        msg("\n".join(lines), "ViperOffice cursor debug")
+        if pop_up:
+            msg("\n".join(lines), "ViperOffice cursor debug")
+        else:
+            print("ViperOffice cursor debug:\n" + "\n".join(lines))
     except Exception as e:
-        msg(f"Error: {e}", "ViperOffice cursor debug")
+        print(f"ViperOffice cursor debug: Error: {e}")
 
 
 # ------------------
@@ -522,6 +536,11 @@ def _range_ends_before(range_a, range_b) -> bool:
 
 
 def _try_go_left(cursor, distance: int) -> bool:
+    """Move text cursor left by distance characters with selection,
+    temporarily hiding it to avoid visual flicker.
+
+    Returns True if the cursor moved successfully.
+    """
     if cursor is None or distance <= 0:
         return False
     moved = False
@@ -545,6 +564,11 @@ def _try_go_left(cursor, distance: int) -> bool:
 
 
 def _try_go_right(cursor, distance: int) -> bool:
+    """Move text cursor right by distance characters with selection,
+    temporarily hiding it to avoid visual flicker.
+
+    Returns True if the cursor moved successfully.
+    """
     if cursor is None or distance <= 0:
         return False
     moved = False
@@ -568,7 +592,8 @@ def _try_go_right(cursor, distance: int) -> bool:
 
 
 def _ensure_visual_caret(cursor, at_end: bool) -> None:
-    """Ensure view cursor caret is on the requested selection end without changing selection."""
+    """Ensure view cursor caret is on the requested selection end without
+    changing selection."""
     if cursor is None:
         return
     try:
@@ -580,7 +605,9 @@ def _ensure_visual_caret(cursor, at_end: bool) -> None:
         pass
 
 
-def _pos_xy(pos):
+def _pos_xy(pos: object) -> tuple[Any, Any]:
+    """Extract (X, Y) coordinates from a UNO position object, handling both
+    attribute and method forms."""
     if pos is None:
         return (None, None)
     x = getattr(pos, "X", None)
@@ -2148,8 +2175,8 @@ def _paragraph_text_object(expand, count, key, mode):
     """Text objects "ip"/"ap": select paragraphs (pending/visual modes).
 
     ip: inner paragraph is either a text paragraph or a contiguous empty-line block.
-    ap: a paragraph is text plus trailing empty lines (forward) or leading empty
-    lines (backward in visual mode).
+    ap: a paragraph is text paragraph plus trailing empty lines (forward) or
+        leading empty lines (backward in visual mode).
     """
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -3092,4 +3119,5 @@ def toggle_viper_office():
         enable_viper_office()
 
 
-g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office, debug_cursor_state)
+g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office, \
+                     _debug_cursor_state)
