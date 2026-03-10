@@ -1,0 +1,13 @@
+[project]
+name = "ViperOffice"
+version = "0.1.0"
+description = "Vi mode for LibreOffice / OpenOffice"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "types-uno-script>=0.1.1",
+    "types-unopy>=2.0.0",
+]

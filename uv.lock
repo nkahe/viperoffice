@@ -1,0 +1,43 @@
+version = 1
+revision = 3
+requires-python = ">=3.14"
+
+[[package]]
+name = "python"
+version = "0.1.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "types-uno-script" },
+    { name = "types-unopy" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "types-uno-script", specifier = ">=0.1.1" },
+    { name = "types-unopy", specifier = ">=2.0.0" },
+]
+
+[[package]]
+name = "types-uno-script"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/66/39/ccbbb2bcd3dd706551f084d60d49cb751935b024c893b8085337b4a9ee2b/types-uno-script-0.1.1.tar.gz", hash = "sha256:0ec3adf5567b289b0e922a3b046593a374206f73a8ed3230a72afc7de5fdb7c2", size = 8828, upload-time = "2022-04-29T16:33:48.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/21/aca114495b60b70b0143324291f39f67b30ab3776a6fb65c79370194c7db/types_uno_script-0.1.1-py3-none-any.whl", hash = "sha256:092f710bd187825957ec67ee1bd2c8f7094b4d4a728966e70d3870239656407a", size = 9274, upload-time = "2022-04-29T16:33:46.568Z" },
+]
+
+[[package]]
+name = "types-unopy"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "types-uno-script" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/c9/35d81c34d98239178c246cc095f5d62168498be6c51f6020138aa572ea6a/types_unopy-2.0.0.tar.gz", hash = "sha256:b3bacd0cc95d63efd5c8db052d72c7edd4756acbd90761d88ea51cf171f7223d", size = 1445954, upload-time = "2024-08-31T22:24:59.642Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3d/51/0717c18e667d53cff55b30af07ccd00f4bdbce9ab278fcc57724d340f1f3/types_unopy-2.0.0-py3-none-any.whl", hash = "sha256:748673362338851088d7ab88b51132c5f42a4e56600a55c27448b44327b023bf", size = 5200911, upload-time = "2024-08-31T22:24:54.131Z" },
+]

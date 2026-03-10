@@ -1,20 +1,16 @@
 from __future__ import annotations
-from typing import Any, Final, Literal, NamedTuple, TYPE_CHECKING
+from typing import Any, Final, Literal, NamedTuple
 import builtins
 import datetime
 import threading
-import unohelper   # This project allow typings for the full LibreOffice API.
-from com.sun.star.awt import KeyModifier, XKeyHandler, Key, Rectangle
-from com.sun.star.awt import XMouseClickHandler
+import unohelper
+from com.sun.star.awt import KeyModifier, XKeyHandler, Key, Rectangle, XMouseClickHandler
 from com.sun.star.document import XEventListener
-
-if TYPE_CHECKING:
-    from com.sun.star.text import XViewCursor
+from com.sun.star.text import XViewCursor, XTextCursor
 
 # Current vi input mode. "pending" is short for Operator pending mode. Happens
 # after operator command "d", "c" or "y" and it's pending for motion.
 Mode = Literal["normal", "insert", "pending", "visual"]
-
 
 class KeyEvent(NamedTuple):
     char: str
@@ -48,12 +44,14 @@ SCROLL: Final[int] = 21
 # Guard for paragraph scans to avoid malformed cursor loops freezing the UI.
 PARAGRAPH_SCAN_LIMIT: Final[int] = 10000
 
-def _state():
+_StateDict = dict[str, Any]
+
+def _state() -> _StateDict:
     key = "_viperoffice_state"
     state = getattr(builtins, key, None)
     if state is None:
         state = {
-            # Has the extension been started. Will only be set to true.
+            # If the extension been started. Will only be set to True.
             "started": False,
             "enabled": False,
             "mode": "normal",
@@ -81,12 +79,12 @@ def _state():
     return state
 
 
-def _get_cursor():
+def _get_cursor() -> XViewCursor | None:
     return _state()["view_cursor"]
 
 
 # Text cursors are snapshots of view cursor.
-def _get_text_cursor():
+def _get_text_cursor() -> XTextCursor | None:
     cursor = _get_cursor()
     if cursor is None:
         return None
@@ -116,7 +114,7 @@ def _get_mode() -> Mode:
     return _state()["mode"]
 
 
-def _set_count(n: int):
+def _set_count(n: int) -> bool:
     try:
         value = int(n)
     except Exception:
@@ -135,7 +133,7 @@ def _reset_count():
     _update_statusline()
 
 
-def _add_to_count(n: int):
+def _add_to_count(n: int) -> bool:
     try:
         digit = int(n)
     except Exception:
@@ -161,7 +159,7 @@ def _get_raw_count() -> int:
     return _state().get("count", 0)
 
 
-def _get_pending_keys() -> None|str:
+def _get_pending_keys() -> None | str:
     return _state().get("pending_keys", None)
 
 
@@ -179,25 +177,28 @@ def _reset_pending_keys():
     _state()["pending_keys"] = None
     _update_statusline()
 
-def _reset_prefix():
+def _reset_prefix() -> bool:
     """Reset "a" or "i" text-object prefix."""
     pending_keys = _state()["pending_keys"]
     if pending_keys is None or pending_keys not in ("a", "i"):
         return False
     _state()["pending_keys"] = pending_keys[:-1]
+    return True
 
 
 def _set_position() -> bool:
     """Save current view cursor position"""
     try:
         cursor = _get_cursor()
+        if cursor is None:
+            return False
         _state()["cursor_position"] = cursor.getStart()
         return True
     except Exception:
         return False
 
 
-def _get_position():
+def _get_position() -> dict | None:
     return _state()["cursor_position"]
 
 
@@ -302,7 +303,6 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
         state = _state()
         lines = [f"Mode: {state['mode']}  pending: {state['pending_keys']}"]
 
-        # View cursor info
         try:
             pos = cursor.getPosition()
             x = pos.X() if callable(pos.X) else pos.X
@@ -382,12 +382,12 @@ def _update_statusline(controller=None):
         pass
 
 
-# Sets cursor style and save cursor position info.
 def _show_cursor(mode: Mode):
+    """Sets cursor style and saves cursor position info. """
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     controller = _get_controller()
-    if text_cursor is None or controller is None:
+    if text_cursor is None or controller is None or cursor is None:
         return False
     try:
         if mode in ("normal", "pending"):
@@ -420,9 +420,9 @@ def _show_cursor(mode: Mode):
         return False
 
 
-# Sets mode handling cursor accordingly. In operator pending and visual modes
-#  cursor state is saved so it can be used by operator commands.
 def _goto_mode(new_mode: Mode) -> bool:
+    """Change Vi input mode to [new_mode]. Resets pending keys for other than
+    Operator pending mode."""
     old_mode = _get_mode()
     if new_mode == "normal":
         _reset_pending_keys()
@@ -872,18 +872,18 @@ def _focus_findbar() -> bool:
 
 def _repeat_search(count, backward: bool = False) -> bool:
     """Repeat last LibreOffice search count times. Commands 'n' and 'N'."""
-    # try:
-    dispatcher = _get_dispatcher()
-    frame = _get_frame()
-    if dispatcher is None or frame is None:
+    try:
+        dispatcher = _get_dispatcher()
+        frame = _get_frame()
+        if dispatcher is None or frame is None:
+            return False
+        # FindbarFindNext / FindbarFindPrev repeat the last findbar search.
+        cmd = "vnd.sun.star.findbar:FindPrev" if backward else "vnd.sun.star.findbar:FindNext"
+        for _ in range(max(1, count)):
+            dispatcher.executeDispatch(frame, cmd, "", 0, ())
+        return True
+    except Exception:
         return False
-    # FindbarFindNext / FindbarFindPrev repeat the last findbar search.
-    cmd = "vnd.sun.star.findbar:FindPrev" if backward else "vnd.sun.star.findbar:FindNext"
-    for _ in range(max(1, count)):
-        dispatcher.executeDispatch(frame, cmd, "", 0, ())
-    return True
-    # except Exception:
-    #     return False
 
 
 # ------------------
@@ -1132,6 +1132,8 @@ def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
     _reset_pending_keys()
     try:
         cursor = _get_cursor()
+        if cursor is None:
+            return False
         length = len(cursor.getString())
 
         if length > 1:
@@ -1169,6 +1171,8 @@ def _delete_and_replace(count:int, key:KeyEvent, mode:Mode) -> bool:
     if (key.pending in ("c", "d") and key.char == key.pending) or key.char == "S":
         _to_start_of_line(False, False)
         cursor = _get_cursor()
+        if cursor is None:
+            return False
         cursor.goDown(count, True)
 
     _copy_and_delete(True, True)
@@ -1708,7 +1712,8 @@ def _apply_motion_result(result, expand:bool) -> bool:
         # cursor.gotoRange(end_range, expand)
         # if expand and _state().get("visual_anchor") is None and result.get("inclusive"):
         if not expand:
-            return cursor.gotoRange(end_range, False)
+            moved = cursor.gotoRange(end_range, False)
+            return True if moved else False
 
         anchor = _state().get("visual_anchor")
         if anchor is not None:
@@ -2635,8 +2640,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         down      = int(Key.DOWN)
         home      = int(Key.HOME)
         end       = int(Key.END)
-        pageup    = int(Key.PAGEUP)
-        pagedown  = int(Key.PAGEDOWN)
+        pageup    = int(Key.PAGEUP)   # type: ignore[attr-defined]
+        pagedown  = int(Key.PAGEDOWN)  # type: ignore[attr-defined]
 
         # Navigation keys are mapped to motions so they can take count, be used
         # with operators and for pageup/pagedown handle selection.
@@ -2681,6 +2686,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         count: int = _get_count()
         expand: bool = _get_mode() in ("visual", "pending")
+
+        # cmd = Cmd(
+        #     key = key.char,
+        #     pending =_get_pending_keys()
+        #
+        # )
 
         # --- Keys with non-shift/AltGr modifiers -------
 

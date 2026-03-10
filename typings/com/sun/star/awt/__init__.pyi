@@ -29,6 +29,8 @@ class Key:
     END: int
     DELETE: int
     BACKSPACE: int
+    PAGEUP: int
+    PAGEDOWN: int
 
 
 class Rectangle:

@@ -1,5 +1,6 @@
 {
   "include": ["src"],
   "stubPath": "typings",
+  "extraPaths": [".venv/lib/python3.14/site-packages"],
   "reportMissingModuleSource": "none"
 }
