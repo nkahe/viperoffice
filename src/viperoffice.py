@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Final, NamedTuple, TYPE_CHECKING
+from typing import Any, Final, Literal, NamedTuple, TYPE_CHECKING
 import builtins
 import datetime
 import threading
@@ -10,6 +10,11 @@ from com.sun.star.document import XEventListener
 
 if TYPE_CHECKING:
     from com.sun.star.text import XViewCursor
+
+# Current vi input mode. "pending" is short for Operator pending mode. Happens
+# after operator command "d", "c" or "y" and it's pending for motion.
+Mode = Literal["normal", "insert", "pending", "visual"]
+
 
 class KeyEvent(NamedTuple):
     char: str
@@ -51,10 +56,6 @@ def _state():
             # Has the extension been started. Will only be set to true.
             "started": False,
             "enabled": False,
-            # Current vi input mode. Can be currently "normal", "insert",
-            # "pending" or "visual". "pending" is short for Operator pending
-            # mode. Happens after operator command "d", "c" or "y" and it's
-            # pending for motion.
             "mode": "normal",
             # Visible cursor. Type is XViewCursor UNO object.
             "view_cursor": None,
@@ -84,6 +85,7 @@ def _get_cursor():
     return _state()["view_cursor"]
 
 
+# Text cursors are snapshots of view cursor.
 def _get_text_cursor():
     cursor = _get_cursor()
     if cursor is None:
@@ -102,17 +104,15 @@ def _clear_visual_anchor() -> None:
     _state()["visual_anchor"] = None
 
 
-def _set_mode(new_mode: str) -> bool:
-    new_mode = new_mode.lower()
-    if new_mode in ("normal", "insert", "pending", "visual"):
-        _state()["mode"] = new_mode
-        _update_statusline()
-        return True
-    else:
+def _set_mode(new_mode: Mode) -> bool:
+    if new_mode not in ("normal", "insert", "pending", "visual"):
         return False
+    _state()["mode"] = new_mode
+    _update_statusline()
+    return True
 
 
-def _get_mode() -> str:
+def _get_mode() -> Mode:
     return _state()["mode"]
 
 
@@ -383,13 +383,12 @@ def _update_statusline(controller=None):
 
 
 # Sets cursor style and save cursor position info.
-def _show_cursor(mode:str):
+def _show_cursor(mode: Mode):
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     controller = _get_controller()
     if text_cursor is None or controller is None:
         return False
-    mode = mode.lower()
     try:
         if mode in ("normal", "pending"):
             # Select 1 character right side of caret as Normal mode cursor.
@@ -423,7 +422,7 @@ def _show_cursor(mode:str):
 
 # Sets mode handling cursor accordingly. In operator pending and visual modes
 #  cursor state is saved so it can be used by operator commands.
-def _goto_mode(new_mode: str) -> bool:
+def _goto_mode(new_mode: Mode) -> bool:
     old_mode = _get_mode()
     if new_mode == "normal":
         _reset_pending_keys()
@@ -469,7 +468,7 @@ def _goto_mode(new_mode: str) -> bool:
     return True
 
 
-def _ctrl_c_command(mode:str):
+def _ctrl_c_command(mode: Mode):
     if mode == "normal":
         _reset_pending_keys()
     elif mode == "visual":
@@ -707,7 +706,7 @@ def _set_visual_selection(cursor, anchor, new_caret):
 
 
 # Based on Commit f33d46f from fedorov-ao/vibreoffice
-def _go_to_other_end(mode: str) -> bool:
+def _go_to_other_end(mode: Mode) -> bool:
     """Move cursor to the other end of highlighted text. Command 'o' / 'O' in visual mode.
 
     The current cursor position becomes the start of the highlighted text and
@@ -763,7 +762,7 @@ def _go_to_other_end(mode: str) -> bool:
 # Navigating in document
 # ----------------------
 
-def _scroll_window(expand:bool, count:int, forward:bool, mode:str, lines:int|None=None) -> bool:
+def _scroll_window(expand:bool, count:int, forward:bool, mode:Mode, lines:int|None=None) -> bool:
     """Scroll window. Commands 'C-f', 'C-b', 'C-u', 'C-d'.
     """
     try:
@@ -906,7 +905,7 @@ def _repeat_search(count, backward: bool = False) -> bool:
 # Lines
 # ------------------
 
-def _hjkl_motion(cmd:str, count:int, expand:bool, mode) -> bool:
+def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
     """Motion to left/right [count] characters for commands 'h' and 'l' and
     [count] lines up and down for commands 'j' and 'k'.
     """
@@ -1059,7 +1058,7 @@ def _delete_and_replace_lines(key:KeyEvent):
 
 # Insert, delete, replace characters
 
-def _insert_commands(cmd:str, mode="normal"):
+def _insert_commands(cmd:str, mode: Mode="normal"):
     """For Normal mode commands 'a', 'I', 'A', 'o', 'O'."""
     try:
         cursor = _get_cursor()
@@ -1106,7 +1105,7 @@ def _insert_commands(cmd:str, mode="normal"):
         return False
 
 
-def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
+def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
     """Delete single characters. Commands 'x','X' and 's'."""
     text_cursor = _get_text_cursor()
     if text_cursor is None:
@@ -1136,7 +1135,7 @@ def _delete_characters(count:int, key:KeyEvent, mode:str) -> bool:
         return False
 
 
-def _replace_characters(count:int, key:KeyEvent, mode) -> bool:
+def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
     """Replace character(s) under cursor with {key_char}.
        With count replace [count] characters with [count] {key_char}.
        Command 'r'.
@@ -1166,7 +1165,7 @@ def _replace_characters(count:int, key:KeyEvent, mode) -> bool:
 # Operators and clipboard
 # -----------------------
 
-def _delete_and_replace(count:int, key:KeyEvent, mode:str) -> bool:
+def _delete_and_replace(count:int, key:KeyEvent, mode:Mode) -> bool:
     """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
     if mode == "normal" and key.char in ("c", "d"):
         _add_pending_key(key.char)
@@ -1197,7 +1196,7 @@ def _delete_and_replace(count:int, key:KeyEvent, mode:str) -> bool:
     return True
 
 
-def _yank(count, key, mode) -> bool:
+def _yank(count, key, mode:Mode) -> bool:
     """Yanks text {motion} moves over. Commands `y`, `yy`, `Y'."""
     if key.char == "Y":
         cursor = _get_cursor()
@@ -1663,7 +1662,7 @@ def _word_motion_once(text_cursor, expand: bool, spec) -> bool:
     return False
 
 
-def _word_motion(spec, expand: bool, count: int, mode: str) -> bool:
+def _word_motion(spec, expand: bool, count: int, mode: Mode) -> bool:
     """Run a word-motion command (e.g. `w`) and optionally apply an operator.
 
     Args:
@@ -2093,22 +2092,24 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _sentence_text_object(expand, count, key, mode):
-    """Text object "as": select a sentence (pending/visual modes)."""
+def _sentence_text_object(expand:bool, count:int, key:KeyEvent, mode: Mode):
+    """Select forward "as" sentence text-objects from the start of current object.
+    """
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
-    if not is_around:
-        return False
+    # if not is_around:
+    #     return False
 
     if mode not in ("pending", "visual"):
         return False
 
     cursor_length = 1
-    has_selection = True if len(cursor.getString()) > 1 else False
+    moved = False
+    has_selection = True if len(cursor.getString()) > cursor_length else False
 
     if has_selection:
         return _select_sentences_from_cursor(cursor, count)
@@ -2140,7 +2141,7 @@ def _sentence_text_object(expand, count, key, mode):
 
 
 def _select_sentences_from_cursor(cursor, count) -> bool:
-    """Select text objects from cursor to direction of selection"""
+    """Select as sentence text-objects from cursor point to direction of selection"""
     anchor = _state().get("visual_anchor")
     select_backwards = anchor is not None and _range_starts_before(cursor, anchor)
 
@@ -2410,8 +2411,9 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _paragraph_text_object(expand, count, key, mode):
-    """Text objects "ip"/"ap": select paragraphs (pending/visual modes).
+def _paragraph_text_object(expand, count, key, mode:Mode):
+    """
+    Select "ip"/"ap" paragraph text-objects forward from the start of current object.
 
     ip: inner paragraph is either a text paragraph or a contiguous empty-line block.
     ap: a paragraph is text paragraph plus trailing empty lines (forward) or
@@ -2541,7 +2543,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return True
 
     @staticmethod
-    def _normal_ctrl_actions(expand, count, mode):
+    def _normal_ctrl_actions(expand: bool, count: int, mode: Mode):
         b_code = int(getattr(Key, "B", 512))
         c_code = int(getattr(Key, "C", 514))
         d_code = int(getattr(Key, "D", 515))
@@ -2563,7 +2565,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     @staticmethod
     def _normal_actions_keymap(key, count:int):
         """Build Normal-mode command dispatch map for actions."""
-        mode = _get_mode()
+        mode: Mode = _get_mode()
         # Available commands after "g" command.
         if "g" in (key.pending or ""):
             actions = {
@@ -2602,7 +2604,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     # These can be used independently or with operators.
     @staticmethod
-    def _motions_keymap(key, expand, count:int, mode):
+    def _motions_keymap(key, expand, count:int, mode: Mode):
         """Build motion dispatch map for actions."""
         # Available motions after "g" command.
         if "g" in (key.pending or ""):
@@ -2641,7 +2643,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
 
     @staticmethod
-    def _navigation_keys(expand, count, mode):
+    def _navigation_keys(expand, count, mode: Mode):
         backspace = int(Key.BACKSPACE)
         left      = int(Key.LEFT)
         right     = int(Key.RIGHT)
@@ -2675,7 +2677,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _get_text_cursor() is None:
             return False
 
-        mode: str = _get_mode()
+        mode: Mode = _get_mode()
         mods: int = _event_modifiers(event)
         code = _key_code(event)
         is_ctrl = _is_only_ctrl(mods)
@@ -2688,9 +2690,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
 
         key = KeyEvent(
-            char=_normalize_key_char(event),
-            code=code,
-            pending=_get_pending_keys()
+            char = _normalize_key_char(event),
+            code = code,
+            pending = _get_pending_keys()
         )
 
         count: int = _get_count()
@@ -2781,16 +2783,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
-
     @staticmethod
-    def _text_objects_keymap(expand, count:int, key, mode):
+    def _text_objects_keymap(expand, count:int, key, mode: Mode):
         text_objects = {
             "as": lambda: _sentence_text_object(expand, count, key, mode),
             "is": lambda: _sentence_text_object(expand, count, key, mode),
             "ip": lambda: _paragraph_text_object(expand, count, key, mode),
             "ap": lambda: _paragraph_text_object(expand, count, key, mode),
         }
-
         return text_objects
 
     def _match_text_objects(self, key, expand, count, mode):
@@ -2836,7 +2836,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
 # key.pending[-1] not in ("a", "i")
 
-    def _match_motions(self, key, count, mode):
+    def _match_motions(self, key, count, mode: Mode):
         expand: bool = _get_mode() in ("visual", "pending")
         motions = self._motions_keymap(key, expand, count, mode)
         motion = motions.get(key.char)
