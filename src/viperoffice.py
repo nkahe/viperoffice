@@ -829,44 +829,29 @@ def _jump_to_page(expand: bool, target: str, count:int=1) -> bool:
         cursor = _get_cursor()
         if cursor is None:
             return False
-        if target == "start":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToStartOfPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToStartOfPage()
-        elif target == "end":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToEndOfPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToEndOfPage()
-        elif target == "next":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToNextPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToNextPage()
-        elif target == "previous":
-            if expand:
-                anchor = cursor.getStart()
-                cursor.jumpToPreviousPage()
-                new_pos = cursor.getStart()
-                cursor.gotoRange(anchor, False)
-                cursor.gotoRange(new_pos, True)
-            else:
-                cursor.jumpToPreviousPage()
-        else:
+
+        if target not in ("start", "end", "next", "previous"):
             return False
+
+        anchor = cursor.getStart() if expand else None
+
+        match target:
+            case "start":
+                cursor.jumpToStartOfPage()
+            case "end":
+                cursor.jumpToEndOfPage()
+            case "next":
+                for _ in range(count):
+                    cursor.jumpToNextPage()
+            case "previous":
+                for _ in range(count):
+                    cursor.jumpToPreviousPage()
+
+        if expand and anchor:
+            new_pos = cursor.getStart()
+            cursor.gotoRange(anchor, False)
+            cursor.gotoRange(new_pos, True)
+
         return True
     except Exception:
         return False
@@ -2442,9 +2427,8 @@ def _paragraph_text_object(expand, count, key, mode:Mode):
     if mode != "visual":
         return False
 
-    selection_len = len(cursor.getString())
     cursor_length = 1
-    has_selection = True if len(cursor.getString()) > 1 else False
+    has_selection = True if len(cursor.getString()) > cursor_length else False
 
     # Select from start of current paragraph.
     if has_selection:
