@@ -75,7 +75,6 @@ def _state() -> _StateDict:
             # Anchor (fixed end) of visual mode selection. Saved when entering
             # visual mode so motions know which end is the caret.
             "visual_anchor": None,
-            "mouse_press_anchor": None
         }
         setattr(builtins, key, state)
     return state
@@ -3195,42 +3194,63 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
     Returns False to not consume the event (pass through to LibreOffice).
     """
 
-    def mouseReleased(self, event):
-        state = _state()
-        if not state["enabled"]:
-            return False
-        anchor = state.get("mouse_press_anchor")
-        cursor = _get_cursor()
-        # print(f"mouseReleased: cursor={cursor}, anchor={anchor}")
-        # if cursor is not None and anchor is not None:
-            # try:
-                # dist = _range_length_between(anchor, cursor.getStart())
-                # print(f"mouseReleased: dist={dist}")
-                # if dist == 0:
-                    # print("mouseReleased: same position (click, no drag)")
-                # else:
-                    # print("mouseReleased: different position (drag selection)")
-            # except Exception as e:
-            #     print(f"mouseReleased: comparison error {e}")
-        _reset_count()
-        _reset_pending_keys()
-        _set_mode("visual")
-        return False
-
     def mousePressed(self, event):
         state = _state()
         if not state["enabled"]:
             return False
-        # Save cursor position at press time as the future visual anchor.
+        if _get_mode() == "visual":
+            _goto_mode("normal")
+            _reset_count()
+        return False
+
+    def mouseReleased(self, event):
+        state = _state()
+        if not state["enabled"]:
+            return False
+        _reset_count()
+        _reset_pending_keys()
         cursor = _get_cursor()
-        # text_cursor.collapseToEnd()
-        # Doesn't yet work.
-        if cursor is not None:
-            try:
-                state["mouse_press_anchor"] = cursor.getStart()
-            except Exception:
-                pass
-                # _state()["mouse_press_anchor"] = None
+        if cursor is None:
+            return False
+        try:
+            sel_len = len(cursor.getString())
+        except Exception:
+            sel_len = 0
+
+        if sel_len < 2:
+            # Plain click → re-apply the 1-char normal-mode cursor at the new
+            # position. Use a short delay so LibreOffice finishes placing its
+            # own cursor before we override it (race condition otherwise).
+            if _get_mode() != "insert":
+                threading.Timer(0.05, _show_cursor, args=["normal"]).start()
+            return False
+
+        # Detect which end of the selection is the anchor (press position) by
+        # probing the view cursor's internal direction. gotoRange(end, True)
+        # moves the CARET to end. If the selection collapses to zero length,
+        # the internal anchor was also at end → backward drag (press was on
+        # right). If selection stays intact, the anchor was at start → forward.
+        sel_start = cursor.getStart()
+        sel_end = cursor.getEnd()
+        try:
+            cursor.gotoRange(sel_end, True)
+            if len(cursor.getString()) == 0:
+                # Backward drag: anchor = right (sel_end), caret = left (sel_start).
+                anchor = sel_end
+                caret = sel_start
+            else:
+                # Forward drag: anchor = left (sel_start), caret = right (sel_end).
+                anchor = sel_start
+                caret = sel_end
+        except Exception:
+            anchor = sel_start
+            caret = sel_end
+        _set_mode("visual")
+        _set_visual_anchor(anchor)
+        try:
+            _set_visual_selection(cursor, anchor, caret)
+        except Exception:
+            pass
         return False
 
     def disposing(self, event):
