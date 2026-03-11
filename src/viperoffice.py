@@ -1936,6 +1936,8 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
     if _is_current_paragraph_empty(text_cursor):
         moved = _to_next_non_empty_paragraph(text_cursor, expand)
         if moved:
+            if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+                text_cursor.gotoNextWord(expand)
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
         return moved
 
@@ -2036,13 +2038,18 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
     # to the first sentence content rather than backward. Collapse to the real
     # paragraph start so the isStartOfParagraph() branch below handles crossing
     # to the previous paragraph correctly.
+    force_paragraph_boundary = False
     if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
         text_cursor.gotoStartOfParagraph(False)
         _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        force_paragraph_boundary = True
         # Fall through — cursor is now at isStartOfParagraph(), handled below.
 
     # From inside a sentence, first "(" should go to current sentence start.
-    if not _is_at_sentence_start(text_cursor):
+    # Skip this for empty paragraphs so we can cross to previous sentence.
+    if (not force_paragraph_boundary
+            and not _is_at_sentence_start(text_cursor)
+            and not _is_current_paragraph_empty(text_cursor)):
         text_cursor.gotoStartOfSentence(expand)
         _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
         return True
@@ -2050,7 +2057,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
     # If cursor is at the first non-whitespace character after leading paragraph
     # whitespace, isStartOfParagraph() is False but we must treat it as paragraph
     # start so the boundary logic below crosses to the previous paragraph.
-    if not text_cursor.isStartOfParagraph():
+    if not force_paragraph_boundary and not text_cursor.isStartOfParagraph():
         try:
             para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
             para_probe.gotoStartOfParagraph(False)
