@@ -1,12 +1,14 @@
 from __future__ import annotations
-from typing import Any, Final, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple
 import builtins
 import datetime
 import threading
 import unohelper
 from com.sun.star.awt import KeyModifier, XKeyHandler, Key, Rectangle, XMouseClickHandler
 from com.sun.star.document import XEventListener
-from com.sun.star.text import XViewCursor, XTextCursor
+
+if TYPE_CHECKING:
+    from com.sun.star.text import XViewCursor, XTextCursor
 
 # Current vi input mode. "pending" is short for Operator pending mode. Happens
 # after operator command "d", "c" or "y" and it's pending for motion.
