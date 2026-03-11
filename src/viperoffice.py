@@ -10,8 +10,8 @@ from com.sun.star.document import XEventListener
 if TYPE_CHECKING:
     from com.sun.star.text import XViewCursor, XTextCursor
 
-# Current vi input mode. "pending" is short for Operator pending mode. Happens
-# after operator command "d", "c" or "y" and it's pending for motion.
+# Current vi input mode. "pending" is short for Operator-pending mode. Happens
+# after operator command "d", "c" or "y". ViperOffice is then waiting for motion.
 Mode = Literal["normal", "insert", "pending", "visual"]
 
 class KeyEvent(NamedTuple):
@@ -918,6 +918,16 @@ def _repeat_search(count, backward: bool = False) -> bool:
     except Exception:
         return False
 
+
+def _to_character(expand:bool, count:int, key, forward:bool, stop_before:bool) -> bool:
+    if key.char in ("f", "F", "t", "T"):
+        if key.pending is None or key.char not in key.pending:
+            _add_pending_key(key.char)
+            return True
+
+    msg(f"command: {key.pending[-1]} character to move: {key.char}")
+    _reset_pending_keys()
+    return True
 
 # ------------------
 # Lines
@@ -2648,6 +2658,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "j": lambda: _hjkl_motion("j", count, expand, mode),
                 "k": lambda: _hjkl_motion("k", count, expand, mode),
                 "l": lambda: _hjkl_motion("l", count, expand, mode),
+                "f": lambda: _to_character(expand, count, key, True, False),
+                "F": lambda: _to_character(expand, count, key, False, False),
+                "t": lambda: _to_character(expand, count, key, True, True),
+                "T": lambda: _to_character(expand, count, key, False, True),
                 "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
                 "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
@@ -2759,6 +2773,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _reset_pending_keys()
             return True
 
+        if key.pending is not None and key.pending[-1] in ("fFtT"):
+            if key.char.isprintable():
+                return self._consume_action(
+                    lambda: self._match_motions(key, count, mode)
+                )
+            _reset_pending_keys()  # Cancel for non-printable characters.
+            return True
+
         # Count parsing
         # - 1..9 always extend count
         # - 0 extends count only after count has started
@@ -2804,8 +2826,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _reset_count()
 
         if key.pending:  # Cancel rest of keys since no match.
-            _reset_pending_keys()
-            _set_mode("normal")
+            _goto_mode("normal")
             return True
 
         if is_escape:
@@ -2874,11 +2895,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _match_motions(self, key, count, mode: Mode):
         expand: bool = _get_mode() in ("visual", "pending")
         motions = self._motions_keymap(key, expand, count, mode)
-        motion = motions.get(key.char)
+
+        # For motions that take extra character, match with correct character.
+        if key.pending is not None and key.pending[-1] in ("fFtT"):
+            command = key.pending[-1]
+        else:
+            command = key.char
+
+        motion = motions.get(command)
+
         if motion is None:
             return None
 
-        # If operator is pending, add it to be done after motion.
+        # Don't yet add possible operator action.
+        if key.char in ("fFtT"):
+            return self._consume_action(motion)
+
+        # If operator is pending, add operation to be done after motion.
         if "c" in (key.pending or "") or "d" in (key.pending or ""):
             return self._consume_action(motion,
                 lambda: _delete_and_replace(count, key, _get_mode())
