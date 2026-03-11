@@ -609,6 +609,38 @@ def _ensure_visual_caret(cursor, at_end: bool) -> None:
         pass
 
 
+# UNO doesn't offer call to get caret position when there's selection. Usually
+# state.visual_anchor is set and tracked but for situations it's not available
+# this can be used.
+def _test_if_forward_selection(cursor) -> bool:
+    """Return True if caret is at right end of selection, False if at left end."""
+    if cursor is None:
+        return True
+    try:
+        original_len = len(cursor.getString())
+        moved = cursor.goRight(1, True)
+        if moved:
+            new_len = len(cursor.getString())
+            cursor.goLeft(1, True)
+            return new_len > original_len
+        return True
+    except Exception:
+        return True
+
+
+def _finalize_mouse_selection(anchor, caret) -> None:
+    """Re-apply visual selection after mouse release (post-LO cursor update)."""
+    try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return
+        _set_mode("visual")
+        _set_visual_anchor(anchor)
+        _set_visual_selection(cursor, anchor, caret)
+    except Exception:
+        pass
+
+
 def _pos_xy(pos: object) -> tuple[Any, Any]:
     """Extract (X, Y) coordinates from a UNO position object, handling both
     attribute and method forms."""
@@ -3194,6 +3226,9 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
     Returns False to not consume the event (pass through to LibreOffice).
     """
 
+    # NOTE: It isn't reliable way to get start of selection by setting it in
+    # this function. This gets called before LO has moved the cursor to position
+    # where click happened.
     def mousePressed(self, event):
         state = _state()
         if not state["enabled"]:
@@ -3225,32 +3260,20 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
                 threading.Timer(0.05, _show_cursor, args=["normal"]).start()
             return False
 
-        # Detect which end of the selection is the anchor (press position) by
-        # probing the view cursor's internal direction. gotoRange(end, True)
-        # moves the CARET to end. If the selection collapses to zero length,
-        # the internal anchor was also at end → backward drag (press was on
-        # right). If selection stays intact, the anchor was at start → forward.
+        # Detect which end is the caret by probing selection growth on +1 char.
+        #
+        # Didn't manage to get MouseDragListener to work correctly so this is used.
+        # This needs less boilerplate code so better in that regard.
         sel_start = cursor.getStart()
         sel_end = cursor.getEnd()
-        try:
-            cursor.gotoRange(sel_end, True)
-            if len(cursor.getString()) == 0:
-                # Backward drag: anchor = right (sel_end), caret = left (sel_start).
-                anchor = sel_end
-                caret = sel_start
-            else:
-                # Forward drag: anchor = left (sel_start), caret = right (sel_end).
-                anchor = sel_start
-                caret = sel_end
-        except Exception:
+        if _test_if_forward_selection(cursor):
             anchor = sel_start
             caret = sel_end
-        _set_mode("visual")
-        _set_visual_anchor(anchor)
-        try:
-            _set_visual_selection(cursor, anchor, caret)
-        except Exception:
-            pass
+        else:
+            anchor = sel_end
+            caret = sel_start
+        # Re-apply after LO finishes its own mouse-up cursor update.
+        threading.Timer(0.02, _finalize_mouse_selection, args=[anchor, caret]).start()
         return False
 
     def disposing(self, event):
