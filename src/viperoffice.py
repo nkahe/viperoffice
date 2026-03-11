@@ -66,15 +66,15 @@ def _state() -> _StateDict:
             # operator commands result to operator pending mode.
             "pending_keys": None,
             "key_handler": None,
-            # Saved snapshot of cursor position in situations when the original
-            # position need to be restored after motion.
-            "cursor_position": None,
             "view_event_listener": None,
             "global_event_broadcaster": None,
             "mouse_listener": None,
             # Anchor (fixed end) of visual mode selection. Saved when entering
             # visual mode so motions know which end is the caret.
             "visual_anchor": None,
+            # Saved snapshot of cursor position in situations when the original
+            # position need to be restored after motion.
+            "cursor_position": None,
         }
         setattr(builtins, key, state)
     return state
@@ -428,16 +428,17 @@ def _goto_mode(new_mode: Mode) -> bool:
     if new_mode == "normal":
         _reset_pending_keys()
         if old_mode in ("normal", "pending"):
-            return True
+            pass
 
-        cursor = _get_cursor()
-        if old_mode == "insert":
+        elif old_mode == "insert":
+            cursor = _get_cursor()
             if cursor is not None and not cursor.isAtStartOfLine():
                 # Mimics Vi/Vim cursor behavior.
                 cursor.goLeft(1, False)
 
         # Make selection start where caret is in Normal mode.
         elif old_mode == "visual":
+            cursor = _get_cursor()
             controller = _get_controller()
             text_cursor = _get_text_cursor()
             try:
@@ -465,6 +466,7 @@ def _goto_mode(new_mode: Mode) -> bool:
         _show_cursor("pending")
     else:
         return False
+
     _set_mode(new_mode)
     return True
 
@@ -1960,10 +1962,8 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
             _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
         return moved
 
-    # print(f"_to_next_sentence: before gotoNextSentence, tc={repr(text_cursor.getString()[:30])}, expand={expand}")
     text_cursor.gotoNextSentence(expand)
     _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
-    # print(f"_to_next_sentence: after sync, tc_str={repr(text_cursor.getString()[:30])}, same_pos={_same_pos(old_pos, cursor.getPosition())}, old_pos={_pos_xy(old_pos)}, new_pos={_pos_xy(cursor.getPosition())}")
 
     # Some backends land on the paragraph end marker first; skip that stop.
     if text_cursor.isEndOfParagraph() and not _is_current_paragraph_empty(text_cursor):
@@ -2835,7 +2835,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_del_key(event):
             return self._consume_action(lambda: _delete_characters(count, key, mode))
         if _is_insert_key(event):
-            return self._consume_action(lambda: _insert_commands("i", mode))
+            return self._consume_action(lambda: _goto_mode("insert"))
 
         return self._consume_action(None)
     # -----------------------------------------
@@ -2890,8 +2890,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return None
 
-# key.pending[-1] not in ("a", "i")
-
     def _match_motions(self, key, count, mode: Mode):
         expand: bool = _get_mode() in ("visual", "pending")
         motions = self._motions_keymap(key, expand, count, mode)
@@ -2922,6 +2920,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             )
         elif "g" in (key.pending or ""):
             return self._consume_action(motion, lambda: _reset_pending_keys())
+
         return self._consume_action(motion)
 
     def _match_commands(self, key, count):
