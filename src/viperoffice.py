@@ -19,7 +19,6 @@ class KeyEvent(NamedTuple):
     code: int
     pending: str | None
 
-
 # ------------
 # Global state
 # ------------
@@ -435,6 +434,8 @@ def _goto_mode(new_mode: Mode) -> bool:
             if cursor is not None and not cursor.isAtStartOfLine():
                 # Mimics Vi/Vim cursor behavior.
                 cursor.goLeft(1, False)
+            _show_cursor("normal")
+
 
         # Make selection start where caret is in Normal mode.
         elif old_mode == "visual":
@@ -451,8 +452,7 @@ def _goto_mode(new_mode: Mode) -> bool:
                     controller.select(text_cursor)
             finally:
                 _clear_visual_anchor()
-
-        _show_cursor("normal")
+                _show_cursor("normal")
 
     elif new_mode == "insert":
         _reset_pending_keys()
@@ -928,7 +928,6 @@ def _to_character(expand:bool, count:int, key, forward:bool, stop_before:bool) -
             return True
 
     msg(f"command: {key.pending[-1]} character to move: {key.char}")
-    _reset_pending_keys()
     return True
 
 # ------------------
@@ -1174,7 +1173,6 @@ def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
         _add_pending_key("r")
         return True
 
-    _reset_pending_keys()
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -1268,8 +1266,7 @@ def _yank(count, key, mode:Mode) -> bool:
             _show_cursor("normal")
         threading.Timer(0.08, _flash_restore).start()
 
-    _reset_pending_keys()
-    _set_mode("normal")
+    _goto_mode("normal")
     return True
 
 
@@ -2176,8 +2173,6 @@ def _sentence_text_object(expand:bool, count:int, key:KeyEvent, mode: Mode):
         _set_visual_anchor(new_tc.getStart())
         moved =_sentences_forward(expand, count)
 
-    _reset_pending_keys()
-    _reset_count()
     return moved
 
 
@@ -2199,8 +2194,6 @@ def _select_sentences_from_cursor(cursor, count) -> bool:
             if moved and not new_tc.isStartOfParagraph():
                 _move_to_whitespace_start_after_prev_sentence(new_tc, new_cursor, True)
 
-    _reset_pending_keys()
-    _reset_count()
     return moved
 
 
@@ -2754,7 +2747,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.pending == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
                 return self._consume_action(
-                    lambda: _replace_characters(count, key, mode)
+                    lambda: _replace_characters(count, key, mode),
+                    reset = True
                 )
             _reset_pending_keys()
             return True
@@ -2774,7 +2768,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_digit_char(key.char):
             if key.char != "0" or _get_raw_count() > 0:
                 _add_to_count(int(key.char))
-                return self._consume_action(None)
+                return True
+                # return self._consume_action(None)
 
         nav = self._navigation_keys(expand, count, mode).get(key.code)
         if callable(nav):
@@ -2851,6 +2846,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return None
 
     def _match_motions(self, key, count, mode: Mode):
+        """Matches suitable motions considering pending keys."""
         expand: bool = mode in ("visual", "pending")
 
         if key.pending is not None and key.pending[-1] in ("a", "i"):
@@ -2896,7 +2892,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif "g" in (key.pending or ""):
             return self._consume_action(motion, lambda: _reset_pending_keys())
 
-        return self._consume_action(motion)
+        return self._consume_action(motion, reset = True)
 
     def _match_commands(self, key, count):
         normal_actions = self._normal_actions_keymap(key, count)
@@ -2916,17 +2912,20 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
 
     # Consume {action} and after that {post_action} if set.
-    def _consume_action(self, action, post_action=None) -> bool:
+    def _consume_action(self, action, post_action=None, reset=False) -> bool:
+        """Consume {action} and after that {post_action} if set. Resets count
+           if no command is pending. Applying reset=True resets pending keys."""
         if action is not None:
             action()
             # Can't be passed as parameter since that might been updated.
             pending_keys = _get_pending_keys()
-            # msg(f"consume_active: {pending_keys=})
-            if pending_keys is None:
+            if pending_keys is None or reset:
                 _reset_count()
             if post_action is not None:
                 post_action()
                 _reset_count()
+            if reset:
+                _reset_pending_keys()
         return True
 
     @staticmethod
