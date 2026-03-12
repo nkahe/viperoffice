@@ -2133,7 +2133,8 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
 
 
 def _sentence_text_object(expand:bool, count:int, key:KeyEvent, mode: Mode):
-    """Select forward "as" sentence text-objects from the start of current object.
+    """Select "as" sentence text-objects forward from the start of current object.
+       Visual or pending mode.
     """
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -2567,20 +2568,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def __init__(self):
         pass
 
-    # Consume {action} and after that {post_action} if set.
-    def _consume_action(self, action, post_action=None) -> bool:
-        if action is not None:
-            action()
-            # Can't be passed as parameter since that might been updated.
-            pending_keys = _get_pending_keys()
-            # msg(f"consume_active: {pending_keys=})
-            if pending_keys is None:
-                _reset_count()
-            if post_action is not None:
-                post_action()
-                _reset_count()
-        return True
-
     @staticmethod
     def _normal_ctrl_actions(expand: bool, count: int, mode: Mode):
         b_code = int(getattr(Key, "B", 512))
@@ -2684,7 +2671,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return motions
 
-
     @staticmethod
     def _navigation_keys(expand, count, mode: Mode):
         backspace = int(Key.BACKSPACE)
@@ -2697,7 +2683,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         pageup    = int(Key.PAGEUP)   # type: ignore[attr-defined]
         pagedown  = int(Key.PAGEDOWN)  # type: ignore[attr-defined]
 
-        # Navigation keys are mapped to motions so they can take count, be used
+        # Navigation keys are             mapped to motions so they can take count, be used
         # with operators and for pageup/pagedown handle selection.
         return {
             backspace: "h",
@@ -2716,7 +2702,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if not state["enabled"]:
             return False
 
-        # Don't do anything if text cursor isn't working (as in annotations).
+        # Don't do anything if cursor isn't working (as in annotations).
         if _get_text_cursor() is None:
             return False
 
@@ -2796,10 +2782,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif nav is not None:
             key = KeyEvent(char=nav, code=key.code, pending=key.pending)
 
-        if mode in ("pending", "visual"):
-            matched_object = self._match_text_objects(key, expand, count, mode)
-            if matched_object is not None:
-                return matched_object
+        matched_prefix = self._match_text_object_prefix(key, mode)
+        if matched_prefix is not None:
+            return matched_prefix
 
         # Match and handle motions that support operators.
         matched_motions = self._match_motions(key, count, mode)
@@ -2842,39 +2827,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     @staticmethod
     def _text_objects_keymap(expand, count:int, key, mode: Mode):
         text_objects = {
-            "as": lambda: _sentence_text_object(expand, count, key, mode),
-            "is": lambda: _sentence_text_object(expand, count, key, mode),
-            "ip": lambda: _paragraph_text_object(expand, count, key, mode),
-            "ap": lambda: _paragraph_text_object(expand, count, key, mode),
+            "s": lambda: _sentence_text_object(expand, count, key, mode),
+            "p": lambda: _paragraph_text_object(expand, count, key, mode),
         }
         return text_objects
 
-    def _match_text_objects(self, key, expand, count, mode):
-        # Key after "a" or "i"
-        if key.pending is not None and key.pending[-1] in ("a", "i"):
-            # if key.char in ("w", "W", "s", "p"):  <- added later.
-            if key.char in ("s", "p"):
-                text_objects = self._text_objects_keymap(expand, count, key, mode)
-                # msg(f"text-object matched: {object}")
-                text_object = text_objects.get(key.pending[-1] + key.char)
-
-                if "c" in (key.pending or "") or "d" in (key.pending or ""):
-                    return self._consume_action(text_object,
-                        lambda: _delete_and_replace(count, key, _get_mode())
-                    )
-                elif "y" in (key.pending or ""):
-                    return self._consume_action(text_object,
-                        lambda: _yank(count, key, _get_mode())
-                    )
-                return self._consume_action(text_object)
-            # Not valid key, cancel
-            else:
-                if mode == "pending":
-                    _reset_count()
-                    _goto_mode("normal")
-                elif mode == "visual":
-                    _reset_pending_keys()
-            return True
+    def _match_text_object_prefix(self, key, mode):
+        if mode not in ("pending", "visual"):
+            return None
 
         if key.char in ("a", "i"):
             if key.pending is None or key.pending in ("d", "c", "y"):
@@ -2891,8 +2851,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return None
 
     def _match_motions(self, key, count, mode: Mode):
-        expand: bool = _get_mode() in ("visual", "pending")
-        motions = self._motions_keymap(key, expand, count, mode)
+        expand: bool = mode in ("visual", "pending")
+
+        if key.pending is not None and key.pending[-1] in ("a", "i"):
+            # text_objects = self._text_objects_keymap(expand, count, key, mode)
+            # msg(f"text-object matched: {object}")
+            # text_object = text_objects.get(key.char)
+            motions = self._text_objects_keymap(expand, count, key, mode)
+        else:
+            motions = self._motions_keymap(key, expand, count, mode)
 
         # For motions that take extra character, match with correct character.
         if key.pending is not None and key.pending[-1] in ("fFtT"):
@@ -2903,20 +2870,28 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         motion = motions.get(command)
 
         if motion is None:
+            # Non-valid text-object, cancel.
+            if key.pending is not None and key.pending[-1] in ("a", "i"):
+                if mode == "pending":
+                    _reset_count()
+                    _goto_mode("normal")
+                elif mode == "visual":
+                    _reset_pending_keys()
+                return True
             return None
 
-        # Don't yet add possible operator action.
+        # Don't do possible operator action until we get next character.
         if key.char in ("fFtT"):
             return self._consume_action(motion)
 
         # If operator is pending, add operation to be done after motion.
         if "c" in (key.pending or "") or "d" in (key.pending or ""):
             return self._consume_action(motion,
-                lambda: _delete_and_replace(count, key, _get_mode())
+                lambda: _delete_and_replace(count, key, mode)
             )
         elif "y" in (key.pending or ""):
             return self._consume_action(motion,
-                lambda: _yank(count, key, _get_mode())
+                lambda: _yank(count, key, mode)
             )
         elif "g" in (key.pending or ""):
             return self._consume_action(motion, lambda: _reset_pending_keys())
@@ -2938,6 +2913,21 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _set_mode("normal")
             return None
         return self._consume_action(action)
+
+
+    # Consume {action} and after that {post_action} if set.
+    def _consume_action(self, action, post_action=None) -> bool:
+        if action is not None:
+            action()
+            # Can't be passed as parameter since that might been updated.
+            pending_keys = _get_pending_keys()
+            # msg(f"consume_active: {pending_keys=})
+            if pending_keys is None:
+                _reset_count()
+            if post_action is not None:
+                post_action()
+                _reset_count()
+        return True
 
     @staticmethod
     def _g_command(key):
