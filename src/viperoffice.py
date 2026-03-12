@@ -447,7 +447,6 @@ def _goto_mode(new_mode: Mode) -> bool:
                 cursor.goLeft(1, False)
             _show_cursor("normal")
 
-
         # Make selection start where caret is in Normal mode.
         elif old_mode == "visual":
             cursor = _get_cursor()
@@ -1208,9 +1207,6 @@ def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
 
 def _delete_and_replace(count:int, key:KeyEvent, mode:Mode) -> bool:
     """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
-    if mode == "normal" and key.char in ("c", "d"):
-        _add_pending_key(key.char)
-        return _goto_mode("pending")
 
     if key.char in ("C", "D"):  # To end of line commands.
         cursor = _get_cursor()
@@ -1240,7 +1236,9 @@ def _delete_and_replace(count:int, key:KeyEvent, mode:Mode) -> bool:
 
 
 def _yank(count, key, mode:Mode) -> bool:
-    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y'."""
+    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y'.
+       Flashes yanked range.
+    """
     if key.char == "Y":
         cursor = _get_cursor()
         text_cursor = _get_text_cursor()
@@ -1250,12 +1248,6 @@ def _yank(count, key, mode:Mode) -> bool:
         cursor.gotoRange(text_cursor.getStart(), False)
         _to_end_of_line(True, count, None)
         _copy_and_delete(True, False)
-        return True
-
-    if mode == "normal" and key.pending is None:
-        _set_position()
-        _add_pending_key("y")
-        _goto_mode("pending")
         return True
 
     # Linewise yanking 'yy'.
@@ -1284,7 +1276,10 @@ def _yank(count, key, mode:Mode) -> bool:
 
 
 def _copy_and_delete(yank:bool, delete:bool) -> bool:
-    """Copy and/or delete selection to clipboard."""
+    """Copy and/or delete selection to clipboard.
+       yank  : Yank selection
+       delete: Delete selection
+    """
     try:
         if not yank and not delete:
             return False
@@ -1333,7 +1328,6 @@ def _paste(count:int, after_cursor:bool):
         for _ in range(count):
             dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
 
-        _goto_mode("normal")
     except Exception:
         return False
 
@@ -2605,9 +2599,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             }
         else:
             actions = {
-                "c": lambda: _delete_and_replace(count, key, mode),
+                "c": lambda: KeyHandler._c_d_commands(count, key, mode),
                 "C": lambda: _delete_and_replace(count, key, mode),
-                "d": lambda: _delete_and_replace(count, key, mode),
+                "d": lambda: KeyHandler._c_d_commands(count, key, mode),
                 "D": lambda: _delete_and_replace(count, key, mode),
                 "g": lambda: KeyHandler._g_command(key),
                 "i": lambda: _goto_mode("insert"),
@@ -2625,7 +2619,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "S": lambda: _delete_and_replace_lines(key),
                 "x": lambda: _delete_characters(count, key, mode),
                 "X": lambda: _delete_characters(count, key, mode),
-                "y": lambda: _yank(count, key, mode),
+                "y": lambda: KeyHandler._y_command(count, key, mode),
                 "Y": lambda: _yank(count, key, mode),
                 "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
@@ -2942,10 +2936,31 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return True
 
     @staticmethod
-    def _g_command(key):
+    def _c_d_commands(count, key, mode) -> bool:
+        if mode == "normal" and key.char in ("c", "d"):
+            _add_pending_key(key.char)
+            return _goto_mode("pending")
+        else:
+            return _delete_and_replace(count, key, mode)
+
+    @staticmethod
+    def _g_command(key) -> bool:
         if key.pending in (None, "d", "y", "c"):
             _add_pending_key("g")
             return True
+        else:
+            return False
+
+    @staticmethod
+    def _y_command(count, key, mode) -> bool:
+        if mode == "normal" and key.pending is None:
+            # Save cursor position so it can be restored after flashing
+            # yanked region.
+            _set_position()
+            _add_pending_key("y")
+            return _goto_mode("pending")
+        else:
+           return _yank(count, key, mode)
 
     def keyReleased(self, event):
         state = _state()
