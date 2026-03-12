@@ -64,6 +64,7 @@ def _state() -> _StateDict:
             # Pending commands like 'd' or 'g'. Type str | None. Note that only
             # operator commands result to operator pending mode.
             "pending_keys": None,
+            "pending_textobj": None,
             "key_handler": None,
             "view_event_listener": None,
             "global_event_broadcaster": None,
@@ -162,6 +163,16 @@ def _get_raw_count() -> int:
 def _get_pending_keys() -> None | str:
     return _state().get("pending_keys", None)
 
+
+def _add_pending_textobj(text_obj_prefix: str) -> bool:
+    if text_obj_prefix.lower() in ("a", "i"):
+        _state()["pending_textobj"] = text_obj_prefix
+        return True
+    else:
+        return False
+
+def _pending_textobj() -> str | None:
+    return _state()["pending_textobj"]
 
 def _add_pending_key(new_key:str) -> bool:
     pending_keys = _state()["pending_keys"]
@@ -1249,8 +1260,10 @@ def _yank(count, key, mode:Mode) -> bool:
 
     # Linewise yanking 'yy'.
     elif key.pending == "y" and key.char == "y":
+        cursor = _get_cursor()
+        if cursor is not None:
             _to_start_of_line(False, False)
-            _hjkl_motion("j", count, True, mode)
+            cursor.goDown(count, True)
 
     _copy_and_delete(True, False)
 
