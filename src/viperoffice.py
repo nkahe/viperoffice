@@ -115,38 +115,9 @@ def _get_mode() -> Mode:
     return _state()["mode"]
 
 
-def _set_count(n: int) -> bool:
-    try:
-        value = int(n)
-    except Exception:
-        return False
-    if value < 0:
-        value = 0
-    if value > 999:
-        value = 999
-    _state()["count"] = value
-    _update_statusline()
-    return True
-
-
 def _reset_count():
     _state()["count"] = 0
     _update_statusline()
-
-
-def _add_to_count(n: int) -> bool:
-    try:
-        digit = int(n)
-    except Exception:
-        return False
-    if digit < 0:
-        return False
-    state = _state()
-    if state["count"] <= 1000:
-        new_count = int(f"{state['count']}{digit}")
-        _update_statusline()
-        return _set_count(new_count)
-    return False
 
 
 def _get_count() -> int:
@@ -2560,8 +2531,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         }
         return actions
 
-    @staticmethod
-    def _normal_actions_keymap(key, count:int):
+    def _normal_actions_keymap(self, key, count:int):
         """Build Normal-mode command dispatch map for actions."""
         mode: Mode = _get_mode()
         # Available commands after "g" command.
@@ -2571,11 +2541,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             }
         else:
             actions = {
-                "c": lambda: KeyHandler._c_d_commands(count, key, mode),
+                "c": lambda: self._c_d_commands(count, key, mode),
                 "C": lambda: _delete_and_replace(count, key, mode),
-                "d": lambda: KeyHandler._c_d_commands(count, key, mode),
+                "d": lambda: self._c_d_commands(count, key, mode),
                 "D": lambda: _delete_and_replace(count, key, mode),
-                "g": lambda: KeyHandler._g_command(key),
+                "g": lambda: self._g_command(key),
                 "i": lambda: _goto_mode("insert"),
                 "I": lambda: _insert_commands("I", mode),
                 "a": lambda: _insert_commands("a", mode),
@@ -2584,14 +2554,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "O": lambda: _insert_commands("O", mode),
                 "p": lambda: _paste(count, True),
                 "P": lambda: _paste(count, False),
-                "r": lambda: KeyHandler._r_command(count, key, mode),
+                "r": lambda: self._r_command(count, key, mode),
                 "u": lambda: _undo_and_redo(count, False),
                 "U": lambda: _undo_and_redo(count, True),
                 "s": lambda: _delete_characters(count, key, mode),
                 "S": lambda: _delete_and_replace_lines(key),
                 "x": lambda: _delete_characters(count, key, mode),
                 "X": lambda: _delete_characters(count, key, mode),
-                "y": lambda: KeyHandler._y_command(count, key, mode),
+                "y": lambda: self._y_command(count, key, mode),
                 "Y": lambda: _yank(count, key, mode),
                 "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
@@ -2743,7 +2713,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # count has started.
         if _is_digit_char(key.char):
             if key.char != "0" or _get_raw_count() > 0:
-                _add_to_count(int(key.char))
+                self._add_to_count(int(key.char))
                 return True
 
         nav = self._navigation_keys(expand, count, mode).get(key.code)
@@ -2885,8 +2855,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return None
         return self._consume_action(action)
 
-
-    # Consume {action} and after that {post_action} if set.
     def _consume_action(self, action, post_action=None, reset=False) -> bool:
         """Consume {action} and after that {post_action} if set. Resets count
            if no command is pending. Applying reset=True resets pending keys."""
@@ -2902,7 +2870,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if reset:
                 _reset_pending_keys()
         return True
-
 
     @staticmethod
     def _add_pending_textobj(text_obj_prefix: str) -> bool:
@@ -2923,6 +2890,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _state()["pending_keys"] = new_key
         else:
             _state()["pending_keys"] = pending_keys + new_key
+        _update_statusline()
+        return True
+
+    @staticmethod
+    def _add_to_count(n: int) -> bool:
+        try:
+            digit = int(n)
+        except Exception:
+            return False
+        if digit < 0:
+            return False
+        state = _state()
+        if state["count"] > 1000:
+            return False
+
+        new_count = int(f"{state['count']}{digit}")
+        _state()["count"] = new_count
         _update_statusline()
         return True
 
