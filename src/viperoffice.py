@@ -164,26 +164,6 @@ def _get_pending_keys() -> None | str:
     return _state().get("pending_keys", None)
 
 
-def _add_pending_textobj(text_obj_prefix: str) -> bool:
-    if text_obj_prefix.lower() in ("a", "i"):
-        _state()["pending_textobj"] = text_obj_prefix
-        return True
-    else:
-        return False
-
-def _pending_textobj() -> str | None:
-    return _state()["pending_textobj"]
-
-def _add_pending_key(new_key:str) -> bool:
-    pending_keys = _state()["pending_keys"]
-    if pending_keys is None:
-        _state()["pending_keys"] = new_key
-    else:
-        _state()["pending_keys"] = pending_keys + new_key
-    _update_statusline()
-    return True
-
-
 def _reset_pending_keys():
     _state()["pending_keys"] = None
     _update_statusline()
@@ -931,11 +911,7 @@ def _repeat_search(count, backward: bool = False) -> bool:
         return False
 
 
-def _to_character(expand:bool, count:int, key, forward:bool, stop_before:bool) -> bool:
-    if key.char in ("f", "F", "t", "T"):
-        if key.pending is None or key.char not in key.pending:
-            _add_pending_key(key.char)
-            return True
+def _to_character(expand:bool, count:int, key) -> bool:
 
     msg(f"command: {key.pending[-1]} character to move: {key.char}")
     return True
@@ -1179,10 +1155,6 @@ def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
        With count replace [count] characters with [count] {key_char}.
        Command 'r'.
     """
-    if key.pending is None:
-        _add_pending_key("r")
-        return True
-
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -2612,7 +2584,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "O": lambda: _insert_commands("O", mode),
                 "p": lambda: _paste(count, True),
                 "P": lambda: _paste(count, False),
-                "r": lambda: _replace_characters(count, key, mode),
+                "r": lambda: KeyHandler._r_command(count, key, mode),
                 "u": lambda: _undo_and_redo(count, False),
                 "U": lambda: _undo_and_redo(count, True),
                 "s": lambda: _delete_characters(count, key, mode),
@@ -2629,8 +2601,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     # These can be used independently or with operators.
-    @staticmethod
-    def _motions_keymap(key, expand, count:int, mode: Mode):
+    def _motions_keymap(self, key, expand, count:int, mode: Mode):
         """Build motion dispatch map for actions."""
         # Available motions after "g" command.
         if "g" in (key.pending or ""):
@@ -2645,10 +2616,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "j": lambda: _hjkl_motion("j", count, expand, mode),
                 "k": lambda: _hjkl_motion("k", count, expand, mode),
                 "l": lambda: _hjkl_motion("l", count, expand, mode),
-                "f": lambda: _to_character(expand, count, key, True, False),
-                "F": lambda: _to_character(expand, count, key, False, False),
-                "t": lambda: _to_character(expand, count, key, True, True),
-                "T": lambda: _to_character(expand, count, key, False, True),
+                "f": lambda: self._ft_commands(expand, count, key),
+                "F": lambda: self._ft_commands(expand, count, key),
+                "t": lambda: self._ft_commands(expand, count, key),
+                "T": lambda: self._ft_commands(expand, count, key),
                 "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
                 "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
@@ -2763,20 +2734,17 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.pending is not None and key.pending[-1] in ("fFtT"):
             if key.char.isprintable():
                 return self._consume_action(
-                    lambda: self._match_motions(key, count, mode)
+                    lambda: _to_character(expand, count, key), reset = True
                 )
             _reset_pending_keys()  # Cancel for non-printable characters.
             return True
 
-        # Count parsing
-        # - 1..9 always extend count
-        # - 0 extends count only after count has started
-        # Commands that can take count should be before this.
+        # Count parsing. 1..9 always extend count. 0 extends count only after
+        # count has started.
         if _is_digit_char(key.char):
             if key.char != "0" or _get_raw_count() > 0:
                 _add_to_count(int(key.char))
                 return True
-                # return self._consume_action(None)
 
         nav = self._navigation_keys(expand, count, mode).get(key.code)
         if callable(nav):
@@ -2840,7 +2808,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if key.char in ("a", "i"):
             if key.pending is None or key.pending in ("d", "c", "y"):
-                _add_pending_key(key.char)
+                self._add_pending_key(key.char)
 
             # Not valid key, cancel
             elif mode == "pending":
@@ -2935,21 +2903,61 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _reset_pending_keys()
         return True
 
+
+    @staticmethod
+    def _add_pending_textobj(text_obj_prefix: str) -> bool:
+        if text_obj_prefix.lower() in ("a", "i"):
+            _state()["pending_textobj"] = text_obj_prefix
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def _pending_textobj() -> str | None:
+        return _state()["pending_textobj"]
+
+    @staticmethod
+    def _add_pending_key(new_key:str) -> bool:
+        pending_keys = _state()["pending_keys"]
+        if pending_keys is None:
+            _state()["pending_keys"] = new_key
+        else:
+            _state()["pending_keys"] = pending_keys + new_key
+        _update_statusline()
+        return True
+
     @staticmethod
     def _c_d_commands(count, key, mode) -> bool:
         if mode == "normal" and key.char in ("c", "d"):
-            _add_pending_key(key.char)
+            KeyHandler._add_pending_key(key.char)
             return _goto_mode("pending")
         else:
             return _delete_and_replace(count, key, mode)
 
     @staticmethod
-    def _g_command(key) -> bool:
-        if key.pending in (None, "d", "y", "c"):
-            _add_pending_key("g")
+    def _ft_commands(expand, count, key) -> bool:
+        if key.pending is None or key.char not in key.pending:
+            KeyHandler._add_pending_key(key.char)
             return True
         else:
             return False
+
+    @staticmethod
+    def _g_command(key) -> bool:
+        if key.pending in (None, "d", "y", "c"):
+            KeyHandler._add_pending_key("g")
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def _r_command(count, key, mode) -> bool:
+        if key.pending is None:
+            KeyHandler._add_pending_key("r")
+            return True
+        else:
+            return _replace_characters(count, key, mode)
+
 
     @staticmethod
     def _y_command(count, key, mode) -> bool:
@@ -2957,7 +2965,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             # Save cursor position so it can be restored after flashing
             # yanked region.
             _set_position()
-            _add_pending_key("y")
+            KeyHandler._add_pending_key("y")
             return _goto_mode("pending")
         else:
            return _yank(count, key, mode)
