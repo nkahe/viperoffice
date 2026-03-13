@@ -115,11 +115,6 @@ def _get_mode() -> Mode:
     return _state()["mode"]
 
 
-def _reset_count():
-    _state()["count"] = 0
-    _update_statusline()
-
-
 def _get_count() -> int:
     count = _state().get("count", 0)
     if count == 0:
@@ -129,23 +124,6 @@ def _get_count() -> int:
 
 def _get_raw_count() -> int:
     return _state().get("count", 0)
-
-
-def _get_pending_keys() -> None | str:
-    return _state().get("pending_keys", None)
-
-
-def _reset_pending_keys():
-    _state()["pending_keys"] = None
-    _update_statusline()
-
-def _reset_prefix() -> bool:
-    """Reset "a" or "i" text-object prefix."""
-    pending_keys = _state()["pending_keys"]
-    if pending_keys is None or pending_keys not in ("a", "i"):
-        return False
-    _state()["pending_keys"] = pending_keys[:-1]
-    return True
 
 
 def _set_position() -> bool:
@@ -319,6 +297,15 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
 
 # Functions to manipulate view and model (document).
 
+def _get_pending_keys() -> None | str:
+    return _state().get("pending_keys", None)
+
+
+def _reset_pending_keys():
+    _state()["pending_keys"] = None
+    _update_statusline()
+
+
 def _update_statusline(controller=None):
     if controller is None:
         controller = _get_controller()
@@ -430,14 +417,6 @@ def _goto_mode(new_mode: Mode) -> bool:
 
     _set_mode(new_mode)
     return True
-
-
-def _ctrl_c_command(mode: Mode):
-    if mode == "normal":
-        _reset_pending_keys()
-    elif mode == "visual":
-        _copy_and_delete(True, False)
-    _goto_mode("normal")
 
 
 # --------------------
@@ -1028,11 +1007,6 @@ def _delete_and_replace_lines(key:KeyEvent):
         text_cursor.gotoRange(line_start, False)
         text_cursor.gotoRange(line_end, True)
         text_cursor.setString("")
-
-        if key.char == "S":
-            _insert_commands("i")
-        else:
-            _goto_mode("normal")
         return True
     except Exception:
         return False
@@ -1060,17 +1034,16 @@ def _insert_commands(cmd:str, mode: Mode="normal"):
                 _to_end_of_line(False, 1, None)
             elif textCursor is not None and not textCursor.isEndOfParagraph():
                  cursor.goRight(1, False)
-            return _goto_mode("insert")
+            return True
 
         elif cmd == "I":
             if mode == "visual":
                 # Move to the line where the selection starts before going to line start
                 cursor.gotoRange(cursor.getStart(), False)
             _to_start_of_line(False, True)
-            return _goto_mode("insert")
+            return True
 
-        if cmd in ("o", "O") and mode == "visual":
-            return _go_to_other_end(mode)
+        # Commands 'o', 'O' below.
 
         if cmd == "o":
             _to_end_of_line(False, 0, None)
@@ -1078,14 +1051,14 @@ def _insert_commands(cmd:str, mode: Mode="normal"):
         elif cmd == "O":
             _to_start_of_line(False, False)
         else:
-            return False
+            return True
 
         cursor.setString(chr(13))  # CR
         if not cursor.isAtStartOfLine():
             cursor.goLeft(1, False)
             cursor.setString(chr(13) + chr(13))
             cursor.goRight(1, False)
-        return _goto_mode("insert")
+        return True
 
     except Exception:
         return False
@@ -1112,10 +1085,6 @@ def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
                 return False
 
         text_cursor.setString("")
-        if key.char == "s":
-            _insert_commands("i", mode)
-        elif mode == "visual":
-            _goto_mode("normal")
         return True
     except Exception:
         return False
@@ -1169,12 +1138,6 @@ def _delete_and_replace(count:int, key:KeyEvent, mode:Mode) -> bool:
         cursor.goDown(count, True)
 
     _copy_and_delete(True, True)
-
-    if key.char in ('c', 'C', 'S') or \
-        key.pending is not None and key.pending[0] in ("c", "C"):
-        _goto_mode("insert")
-    else:
-        _goto_mode("normal")
     return True
 
 
@@ -1241,7 +1204,7 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
         return False
 
 
-def _paste(count:int, after_cursor:bool):
+def _paste(count:int, after_cursor:bool = True):
     """Paste text from clipboard after or before cursor {count} times.
        Commands 'p' and 'P'.
     """
@@ -2502,6 +2465,11 @@ def _select_paragraphs_from_cursor(cursor, count, is_around) -> bool:
 # Input handling
 # -----------------
 
+def _reset_count():
+    _state()["count"] = 0
+    _update_statusline()
+
+
 # UNO key handler
 # Return values for keyPressed/keyReleased:
 #   True  -> event is swallowed (LibreOffice should not process it)
@@ -2511,8 +2479,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def __init__(self):
         pass
 
-    @staticmethod
-    def _normal_ctrl_actions(expand: bool, count: int, mode: Mode):
+    def _normal_ctrl_actions(self, expand: bool, count: int, mode: Mode):
         b_code = int(getattr(Key, "B", 512))
         c_code = int(getattr(Key, "C", 514))
         d_code = int(getattr(Key, "D", 515))
@@ -2523,7 +2490,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         actions = {
             b_code: lambda: _scroll_window(expand, count, False, mode, False),
-            c_code: lambda: _ctrl_c_command(mode),
+            c_code: lambda: self._ctrl_c_command(mode),
             d_code: lambda: _scroll_window(expand, count, True, mode, scroll_count),
             f_code: lambda: _scroll_window(expand, count, True, mode, False),
             r_code: lambda: _undo_and_redo(count, True),
@@ -2542,32 +2509,42 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         else:
             actions = {
                 "c": lambda: self._c_d_commands(count, key, mode),
-                "C": lambda: _delete_and_replace(count, key, mode),
                 "d": lambda: self._c_d_commands(count, key, mode),
                 "D": lambda: _delete_and_replace(count, key, mode),
                 "g": lambda: self._g_command(key),
-                "i": lambda: _goto_mode("insert"),
-                "I": lambda: _insert_commands("I", mode),
-                "a": lambda: _insert_commands("a", mode),
-                "A": lambda: _insert_commands("A", mode),
-                "o": lambda: _insert_commands("o", mode),
-                "O": lambda: _insert_commands("O", mode),
-                "p": lambda: _paste(count, True),
-                "P": lambda: _paste(count, False),
+                "n": lambda: _repeat_search(count),
+                "N": lambda: _repeat_search(count, backward=True),
+                "p": lambda: _paste(count),
+                "P": lambda: _paste(count, after_cursor=False),
                 "r": lambda: self._r_command(count, key, mode),
-                "u": lambda: _undo_and_redo(count, False),
-                "U": lambda: _undo_and_redo(count, True),
-                "s": lambda: _delete_characters(count, key, mode),
-                "S": lambda: _delete_and_replace_lines(key),
+                "u": lambda: _undo_and_redo(count, redo=False),
+                "U": lambda: _undo_and_redo(count, redo=True),
                 "x": lambda: _delete_characters(count, key, mode),
                 "X": lambda: _delete_characters(count, key, mode),
                 "y": lambda: self._y_command(count, key, mode),
                 "Y": lambda: _yank(count, key, mode),
                 "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
-                "n": lambda: _repeat_search(count),
-                "N": lambda: _repeat_search(count, backward=True),
             }
+            # If not in Visual mode, matching for Insert command is done.
+            if mode == "visual":
+                actions["o"] = lambda: _go_to_other_end(mode)
+
+        return actions
+
+    # Commands that change mode to Insert.
+    def _insert_commands_keymap(self, key, count:int, mode):
+        actions = {
+            "C": lambda: _delete_and_replace(count, key, mode),
+            "i": lambda: True,
+            "I": lambda: _insert_commands("I", mode),
+            "a": lambda: _insert_commands("a", mode),
+            "A": lambda: _insert_commands("A", mode),
+            "o": lambda: _insert_commands("o", mode),
+            "O": lambda: _insert_commands("O", mode),
+            "s": lambda: _delete_characters(count, key, mode),
+            "S": lambda: _delete_and_replace_lines(key),
+        }
         return actions
 
     # These can be used independently or with operators.
@@ -2590,14 +2567,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "F": lambda: self._ft_commands(expand, count, key),
                 "t": lambda: self._ft_commands(expand, count, key),
                 "T": lambda: self._ft_commands(expand, count, key),
-                "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
-                "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
-                "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
-                "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
                 "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
+                "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
+                "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
                 "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
-                "$": lambda: _to_end_of_line(expand, count, key),
+                "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
+                "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
                 "^": lambda: _to_start_of_line(expand, True),
+                "$": lambda: _to_end_of_line(expand, count, key),
                 "H": lambda: _jump_to_page(expand, "start"),
                 "L": lambda: _jump_to_page(expand, "end"),
                 "G": lambda: _to_line(expand, _get_raw_count(), True),
@@ -2736,6 +2713,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if matched_commands is not None:
             return matched_commands
 
+        # Match and handle commands which change to insert mode.
+        matched_commands = self._match_insert_commands(key, count, mode)
+        if matched_commands is not None:
+            return matched_commands
+
         # No suitable commands matched for "g" so cancel.
         if "g" in (key.pending or ""):
             _reset_count()
@@ -2764,8 +2746,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
-    @staticmethod
-    def _text_objects_keymap(expand, count:int, key, mode: Mode):
+
+    def _text_objects_keymap(self, expand, count:int, key, mode: Mode):
         text_objects = {
             "s": lambda: _sentence_text_object(expand, count, key, mode),
             "p": lambda: _paragraph_text_object(expand, count, key, mode),
@@ -2785,7 +2767,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _reset_count()
                 _goto_mode("normal")
             elif mode == "visual":
-                _reset_prefix()
+                self._reset_prefix()
             return True
 
         return None
@@ -2844,31 +2826,56 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         action = normal_actions.get(key.char)
         if action is None:
             return None
-        if key.pending in ("c", "d", "y"):
-            if key.char == key.pending:        # dd, yy, cc
-                return self._consume_action(action)
-            if key.char == "g":                 # dg, yg, cg
+
+        if key.pending == "c":
+            if key.char == key.pending:        # cc
+                return self._consume_action(action, lambda: _goto_mode("insert"))
+            # non-operator key while pending: cancel
+            _reset_pending_keys()
+            _set_mode("normal")
+            return None
+        elif key.pending in ("d", "y"):
+            if key.char == key.pending:        # dd, yy
+                return self._consume_action(action, lambda: _goto_mode("normal"))
+            elif key.char == "g":                 # dg, yg
                 return self._consume_action(action)
             # non-operator key while pending: cancel
             _reset_pending_keys()
             _set_mode("normal")
             return None
+
         return self._consume_action(action)
+
+    def _match_insert_commands(self, key, count, mode):
+        actions = self._insert_commands_keymap(key, count, mode)
+        action = actions.get(key.char)
+        if action is None:
+            return None
+        return self._consume_action(action, lambda: _goto_mode("insert"))
 
     def _consume_action(self, action, post_action=None, reset=False) -> bool:
         """Consume {action} and after that {post_action} if set. Resets count
            if no command is pending. Applying reset=True resets pending keys."""
-        if action is not None:
-            action()
-            # Can't be passed as parameter since that might been updated.
-            pending_keys = _get_pending_keys()
-            if pending_keys is None or reset:
-                _reset_count()
-            if post_action is not None:
-                post_action()
-                _reset_count()
-            if reset:
-                _reset_pending_keys()
+        if action is None:
+            return True
+        action()
+        # Can't be passed as parameter since that might been updated.
+        pending_keys = _get_pending_keys()
+        if pending_keys is None or reset:
+            _reset_count()
+
+        if post_action is not None:
+            post_action()
+            _reset_count()
+
+            if pending_keys is not None:
+                if pending_keys[0] == "c":
+                    _goto_mode("insert")
+                elif pending_keys[0] == "d":
+                    _goto_mode("normal")
+
+        if reset:
+            _reset_pending_keys()
         return True
 
     @staticmethod
@@ -2876,8 +2883,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if text_obj_prefix.lower() in ("a", "i"):
             _state()["pending_textobj"] = text_obj_prefix
             return True
-        else:
-            return False
+        return False
 
     @staticmethod
     def _pending_textobj() -> str | None:
@@ -2915,32 +2921,45 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if mode == "normal" and key.char in ("c", "d"):
             KeyHandler._add_pending_key(key.char)
             return _goto_mode("pending")
-        else:
-            return _delete_and_replace(count, key, mode)
+        return _delete_and_replace(count, key, mode)
+
+    @staticmethod
+    def _ctrl_c_command(mode: Mode):
+        if mode == "normal":
+            _reset_pending_keys()
+        elif mode == "visual":
+            _copy_and_delete(True, False)
+        _goto_mode("normal")
 
     @staticmethod
     def _ft_commands(expand, count, key) -> bool:
         if key.pending is None or key.char not in key.pending:
             KeyHandler._add_pending_key(key.char)
             return True
-        else:
-            return False
+        return False
 
     @staticmethod
     def _g_command(key) -> bool:
         if key.pending in (None, "d", "y", "c"):
             KeyHandler._add_pending_key("g")
             return True
-        else:
+        return False
+
+    @staticmethod
+    def _reset_prefix() -> bool:
+        """Reset "a" or "i" text-object prefix."""
+        pending_keys = _state()["pending_keys"]
+        if pending_keys is None or pending_keys not in ("a", "i"):
             return False
+        _state()["pending_keys"] = pending_keys[:-1]
+        return True
 
     @staticmethod
     def _r_command(count, key, mode) -> bool:
         if key.pending is None:
             KeyHandler._add_pending_key("r")
             return True
-        else:
-            return _replace_characters(count, key, mode)
+        return _replace_characters(count, key, mode)
 
 
     @staticmethod
@@ -2951,8 +2970,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _set_position()
             KeyHandler._add_pending_key("y")
             return _goto_mode("pending")
-        else:
-           return _yank(count, key, mode)
+        return _yank(count, key, mode)
 
     def keyReleased(self, event):
         state = _state()
