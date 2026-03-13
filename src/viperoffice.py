@@ -1085,6 +1085,7 @@ def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
                 return False
 
         text_cursor.setString("")
+        _goto_mode("normal")
         return True
     except Exception:
         return False
@@ -1234,6 +1235,7 @@ def _paste(count:int, after_cursor:bool = True):
         for _ in range(count):
             dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
 
+        _goto_mode("normal")
     except Exception:
         return False
 
@@ -2709,7 +2711,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return matched_motions
 
         # Match and handle non-motion commands.
-        matched_commands = self._match_commands(key, count)
+        matched_commands = self._match_commands(key, count, mode)
         if matched_commands is not None:
             return matched_commands
 
@@ -2816,33 +2818,34 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_action(motion,
                 lambda: _yank(count, key, mode)
             )
-        elif "g" in (key.pending or ""):
-            return self._consume_action(motion, lambda: _reset_pending_keys())
 
         return self._consume_action(motion, reset = True)
 
-    def _match_commands(self, key, count):
+    def _match_commands(self, key, count, mode):
         normal_actions = self._normal_actions_keymap(key, count)
         action = normal_actions.get(key.char)
         if action is None:
             return None
 
-        if key.pending == "c":
-            if key.char == key.pending:        # cc
-                return self._consume_action(action, lambda: _goto_mode("insert"))
-            # non-operator key while pending: cancel
-            _reset_pending_keys()
-            _set_mode("normal")
-            return None
-        elif key.pending in ("d", "y"):
-            if key.char == key.pending:        # dd, yy
+        # If operator is still pending, match same key or 'gg', otherwise cancel.
+        if key.pending in ("d", "y", "c"):
+            if key.char == key.pending:  # dd, yy
+                if key.pending == "c":
+                    return self._consume_action(action, lambda: _goto_mode("insert"))
                 return self._consume_action(action, lambda: _goto_mode("normal"))
-            elif key.char == "g":                 # dg, yg
+            elif key.char == "g":  # dgg, ygg, cgg
                 return self._consume_action(action)
             # non-operator key while pending: cancel
             _reset_pending_keys()
             _set_mode("normal")
             return None
+
+        # Switch mode after operators are done in Visual mode.
+        elif mode == "visual":
+            if key.char == "c":
+                return self._consume_action(action, lambda: _goto_mode("insert"))
+            if key.char in ("d", "y"):
+                return self._consume_action(action, lambda: _goto_mode("normal"))
 
         return self._consume_action(action)
 
