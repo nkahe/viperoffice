@@ -34,7 +34,7 @@ This will simply build the extension file from the template files in
 ## Features
 
 - Multi-window support.
-- Modes: Normal (+Operator pending), Insert, Visual.
+- Modes: Normal, Operator-pending, Insert, Visual.
 - Vi(m) -like word, WORD, sentence and paragraph motions.
 - Most command can take number count and use it like Vi(m).
 - Passthrough of not-used shortcuts so most of LibreOffice's shortcuts are still available.
@@ -42,7 +42,8 @@ This will simply build the extension file from the template files in
 
 Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`, Visual `v`.
-- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `H`, `L`, `()`, `{}`
+- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `H`, `L`, `()`, `{}`
+- To character motions: `f`, `F`, `t`, `T`
 - Number count for most commands. Example `10j`, `3gg`, `d4gE`
 - Scrolling: `C-f`, `C-b`, `C-d`, `C-u`
 - Replace: `r`

@@ -75,6 +75,9 @@ def _state() -> _StateDict:
             # Saved snapshot of cursor position in situations when the original
             # position need to be restored after motion.
             "cursor_position": None,
+            # Last f, F, t or T motion and character following it. Used for
+            # commands ; and , that repeat last of that motion type.
+            "last_ft": None
         }
         setattr(builtins, key, state)
     return state
@@ -124,6 +127,20 @@ def _get_count() -> int:
 
 def _get_raw_count() -> int:
     return _state().get("count", 0)
+
+
+def _get_last_ft() -> dict[str, str] | None:
+    return _state().get("last_ft")
+
+
+def _set_last_ft(ft_type: str, ch: str) -> None:
+    if ft_type not in ("f", "F", "t", "T"):
+        _state()["last_ft"] = None
+        return
+    if not isinstance(ch, str) or len(ch) != 1:
+        _state()["last_ft"] = None
+        return
+    _state()["last_ft"] = {"type": ft_type, "char": ch}
 
 
 def _set_position() -> bool:
@@ -862,9 +879,106 @@ def _repeat_search(count, backward: bool = False) -> bool:
 
 
 def _to_character(expand:bool, count:int, key) -> bool:
+    """Motions to move to next / previous occurances of a character.
+    Commands 'f', 'F', 't', 'T'.
+    """
+    cursor = _get_cursor()
+    doc = _current_doc()
+    if cursor is None or doc is None:
+        return False
+    try:
+        if key.pending is None or key.pending[-1] not in ("f", "F", "t", "T"):
+            return False
+        if not isinstance(key.char, str) or len(key.char) != 1:
+            return False
 
-    msg(f"command: {key.pending[-1]} character to move: {key.char}")
-    return True
+        cmd = key.pending[-1]
+        ch = key.char
+        _set_last_ft(cmd, ch)
+
+        backward = cmd in ("F", "T")
+        visual_forward_extra = expand == True and cmd in ("f", "t") and not backward
+        steps = max(1, int(count))
+        moved_any = False
+
+        search_desc = doc.createSearchDescriptor()
+        search_desc.setSearchString(ch)
+        search_desc.SearchCaseSensitive = True
+        search_desc.SearchBackwards = backward
+
+        def _range_same_start(range_a, range_b) -> bool:
+            if range_a is None or range_b is None:
+                return False
+            try:
+                text = range_a.getText()
+                return text.compareRegionStarts(range_a, range_b) == 0
+            except Exception:
+                return False
+
+        def _offset_range(text, base_range, delta: int):
+            if base_range is None:
+                return None
+            try:
+                probe = text.createTextCursorByRange(base_range)
+                if delta < 0 and not probe.goLeft(-delta, False):
+                    return None
+                if delta > 0 and not probe.goRight(delta, False):
+                    return None
+                return probe.getStart()
+            except Exception:
+                return None
+
+        for _ in range(steps):
+            text_cursor = _get_text_cursor()
+            if text_cursor is None:
+                return moved_any
+
+            text = text_cursor.getText()
+            if text is None:
+                return moved_any
+
+            if expand:
+                caret = _get_visual_caret_range(text_cursor)
+                text_cursor.gotoRange(caret, False)
+            else:
+                text_cursor.gotoRange(text_cursor.getStart(), False)
+
+            start_cursor = text.createTextCursorByRange(text_cursor.getStart())
+            if backward:
+                if not start_cursor.goLeft(1, False):
+                    break
+            else:
+                if not start_cursor.goRight(1, False):
+                    break
+
+            start_range = start_cursor.getStart()
+            found_range = doc.findNext(start_range, search_desc)
+            if found_range is None:
+                break
+
+            target_range = found_range.getStart()
+            if cmd == "t":
+                target_range = _offset_range(text, target_range, -1)
+            elif cmd == "T":
+                target_range = _offset_range(text, target_range, 1)
+            if target_range is not None and visual_forward_extra:
+                extra = _offset_range(text, target_range, 1)
+                if extra is not None:
+                    target_range = extra
+
+            if target_range is None:
+                break
+
+            if not _range_same_start(text_cursor.getStart(), target_range):
+                moved_any = True
+
+            probe = text.createTextCursorByRange(target_range)
+            _sync_view_cursor_to_text_cursor(cursor, probe, expand, backward=backward)
+
+        return moved_any
+    except Exception:
+        return False
+
 
 # ------------------
 # Lines
@@ -2681,12 +2795,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return True
 
         if key.pending is not None and key.pending[-1] in ("fFtT"):
-            if key.char.isprintable():
-                return self._consume_action(
-                    lambda: _to_character(expand, count, key), reset = True
-                )
-            _reset_pending_keys()  # Cancel for non-printable characters.
-            return True
+            if not key.char.isprintable():
+                _reset_pending_keys()
+                return True
+            # Go through this function so possible pending operators are handled.
+            return self._match_motions(key, count, mode)
 
         # Count parsing. 1..9 always extend count. 0 extends count only after
         # count has started.
@@ -2734,17 +2847,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Now suitable key matched so reset.
         _reset_count()
 
-        if key.pending:  # Cancel rest of keys since no match.
+        if key.pending or is_escape:
             _goto_mode("normal")
             return True
 
-        if is_escape:
-            return self._consume_action(lambda: _goto_mode("normal"))
         # Deliberately cancels operator pending mode.
         if _is_del_key(event):
             return self._consume_action(lambda: _delete_characters(count, key, mode))
         if _is_insert_key(event):
-            return self._consume_action(lambda: _goto_mode("insert"))
+            return _goto_mode("insert")
 
         return self._consume_action(None)
     # -----------------------------------------
@@ -2786,7 +2897,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         else:
             motions = self._motions_keymap(key, expand, count, mode)
 
-        # For motions that take extra character, match with correct character.
+        # For motions that take extra character, match with command character
+        # instead of latest.
         if key.pending is not None and key.pending[-1] in ("fFtT"):
             command = key.pending[-1]
         else:
@@ -2856,7 +2968,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return None
         return self._consume_action(action, lambda: _goto_mode("insert"))
 
-    def _consume_action(self, action, post_action=None, reset=False) -> bool:
+    def _consume_action(self, action, post_action=None, reset = False) -> bool:
         """Consume {action} and after that {post_action} if set. Resets count
            if no command is pending. Applying reset=True resets pending keys."""
         if action is None:
@@ -2874,7 +2986,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if pending_keys is not None:
                 if pending_keys[0] == "c":
                     _goto_mode("insert")
-                elif pending_keys[0] == "d":
+                elif pending_keys[0] in ("d"):
                     _goto_mode("normal")
 
         if reset:
@@ -2936,9 +3048,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     @staticmethod
     def _ft_commands(expand, count, key) -> bool:
-        if key.pending is None or key.char not in key.pending:
+        # If fFtT commands are not already pending.
+        if key.pending is None or \
+            (key.pending[-1] not in ("fFtT") and key.char in ("fFtT")):
             KeyHandler._add_pending_key(key.char)
             return True
+        else:
+            _to_character(expand, count, key)
         return False
 
     @staticmethod
