@@ -64,7 +64,6 @@ def _state() -> _StateDict:
             # Pending commands like 'd' or 'g'. Type str | None. Note that only
             # operator commands result to operator pending mode.
             "pending_keys": None,
-            "pending_textobj": None,
             "key_handler": None,
             "view_event_listener": None,
             "global_event_broadcaster": None,
@@ -329,19 +328,18 @@ def _update_statusline(controller=None):
     if controller is None:
         return
     try:
-        state = _state()
+        mode = _get_mode()
         padding = "   "
-        if state["mode"] == "pending":
-            mode_name = "o-pending"
-        else:
-            mode_name = state["mode"]
-        text = mode_name.upper()
+        mode_name = "o-pending" if mode == "pending" else mode
+        text = ""
         if _get_raw_count() != 0:
             count_text = _get_count()
             text += f"{padding}{count_text}"
+
         pendings_keys = _get_pending_keys()
-        if pendings_keys is not None:
-            text += f"{padding}{pendings_keys}"
+        if pendings_keys:
+            text += padding + pendings_keys
+        text = mode_name.upper() + text
         controller.StatusIndicator.start(text, 0)
     except Exception:
         # Non-fatal for status update.
@@ -408,8 +406,11 @@ def _goto_mode(new_mode: Mode) -> bool:
             controller = _get_controller()
             text_cursor = _get_text_cursor()
             try:
-                if controller is not None and text_cursor is not None and cursor is not None:
-                    # Use the saved anchor to find the caret end before clearing it.
+                if controller is not None and \
+                    text_cursor is not None and  \
+                    cursor is not None:
+                    # Use the saved anchor to find the caret end before
+                    # clearing it.
                     caret = _get_visual_caret_range(text_cursor)
                     text_cursor.gotoRange(caret, False)
                     if not cursor.isAtStartOfLine():
@@ -2158,6 +2159,7 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
+# TODO: inner sentence.
 def _sentence_text_object(expand:bool, count:int, key:KeyEvent, mode: Mode):
     """Select "as" sentence text-objects forward from the start of current object.
        Visual or pending mode.
@@ -2649,7 +2651,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     # Commands that change mode to Insert.
-    def _insert_commands_keymap(self, key, count:int, mode):
+    def _mode_change_commands_keymap(self, key, count:int, mode):
         actions = {
             "C": lambda: _delete_and_replace(count, key, mode),
             "i": lambda: True,
@@ -2704,6 +2706,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 motions["0"] = lambda: _to_start_of_line(expand, False)
 
         return motions
+
+    def _text_objects_keymap(self, expand, count:int, key, mode: Mode):
+        text_objects = {
+            "s": lambda: _sentence_text_object(expand, count, key, mode),
+            "p": lambda: _paragraph_text_object(expand, count, key, mode),
+        }
+        return text_objects
 
     @staticmethod
     def _navigation_keys(expand, count, mode: Mode):
@@ -2859,14 +2868,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
-
-    def _text_objects_keymap(self, expand, count:int, key, mode: Mode):
-        text_objects = {
-            "s": lambda: _sentence_text_object(expand, count, key, mode),
-            "p": lambda: _paragraph_text_object(expand, count, key, mode),
-        }
-        return text_objects
-
     def _match_text_object_prefix(self, key, mode):
         if mode not in ("pending", "visual"):
             return None
@@ -2888,11 +2889,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _match_motions(self, key, count, mode: Mode):
         """Matches suitable motions considering pending keys."""
         expand: bool = mode in ("visual", "pending")
+        has_text_obj_prefix = key.pending[-1] in ("a", "i") if key.pending else False
 
-        if key.pending is not None and key.pending[-1] in ("a", "i"):
-            # text_objects = self._text_objects_keymap(expand, count, key, mode)
-            # msg(f"text-object matched: {object}")
-            # text_object = text_objects.get(key.char)
+        if has_text_obj_prefix:
             motions = self._text_objects_keymap(expand, count, key, mode)
         else:
             motions = self._motions_keymap(key, expand, count, mode)
@@ -2908,7 +2907,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if motion is None:
             # Non-valid text-object, cancel.
-            if key.pending is not None and key.pending[-1] in ("a", "i"):
+            if has_text_obj_prefix:
                 if mode == "pending":
                     _reset_count()
                     _goto_mode("normal")
@@ -2921,15 +2920,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.char in ("fFtT"):
             return self._consume_action(motion)
 
+        actions = self._normal_actions_keymap(key, count)
         # If operator is pending, add operation to be done after motion.
         if "c" in (key.pending or "") or "d" in (key.pending or ""):
-            return self._consume_action(motion,
-                lambda: _delete_and_replace(count, key, mode)
-            )
+            return self._consume_action(motion, actions.get("d"))
         elif "y" in (key.pending or ""):
-            return self._consume_action(motion,
-                lambda: _yank(count, key, mode)
-            )
+            return self._consume_action(motion, actions.get("y"))
 
         return self._consume_action(motion, reset = True)
 
@@ -2962,7 +2958,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return self._consume_action(action)
 
     def _match_insert_commands(self, key, count, mode):
-        actions = self._insert_commands_keymap(key, count, mode)
+        actions = self._mode_change_commands_keymap(key, count, mode)
         action = actions.get(key.char)
         if action is None:
             return None
@@ -2992,17 +2988,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if reset:
             _reset_pending_keys()
         return True
-
-    @staticmethod
-    def _add_pending_textobj(text_obj_prefix: str) -> bool:
-        if text_obj_prefix.lower() in ("a", "i"):
-            _state()["pending_textobj"] = text_obj_prefix
-            return True
-        return False
-
-    @staticmethod
-    def _pending_textobj() -> str | None:
-        return _state()["pending_textobj"]
 
     @staticmethod
     def _add_pending_key(new_key:str) -> bool:
