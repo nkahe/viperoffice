@@ -1235,7 +1235,6 @@ def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
 
 def _delete_and_replace(count:int, key:KeyEvent, mode:Mode) -> bool:
     """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
-
     if key.char in ("C", "D"):  # To end of line commands.
         cursor = _get_cursor()
         text_cursor = _get_text_cursor()
@@ -2920,12 +2919,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.char in ("fFtT"):
             return self._consume_action(motion)
 
-        actions = self._normal_actions_keymap(key, count)
         # If operator is pending, add operation to be done after motion.
         if "c" in (key.pending or "") or "d" in (key.pending or ""):
-            return self._consume_action(motion, actions.get("d"))
+            return self._consume_action(motion, lambda: _delete_and_replace(count, key, mode))
+            # return self._consume_action(motion, actions.get("d"))
         elif "y" in (key.pending or ""):
-            return self._consume_action(motion, actions.get("y"))
+            return self._consume_action(motion, lambda: self._y_command(count, key, mode))
 
         return self._consume_action(motion, reset = True)
 
