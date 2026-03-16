@@ -283,18 +283,19 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
                 lines.append("-- text cursor --")
                 lines.append(f"collapsed: {text_cursor.isCollapsed()}")
-                lines.append(f"caret before anchor: {caret_before_anchor}")
                 lines.append(f"start of paragraph: {text_cursor.isStartOfParagraph()}")
                 lines.append(f"end of paragraph: {text_cursor.isEndOfParagraph()}")
-                lines.append(f"Is current paragraph empty: {_is_current_paragraph_empty(text_cursor)}")
-                lines.append(f"start of sentence: {_is_at_sentence_start(text_cursor)}")
-                lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(text_cursor, "after_sentence")}")
-                lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(text_cursor, "before_paragraph")}")
                 lines.append(f"start of word: {text_cursor.isStartOfWord()}")
                 lines.append(f"end of word: {text_cursor.isEndOfWord()}")
                 lines.append(f"String: {char}")
-                lines.append(f"Word character class: {_word_char_class(char)}")
+                lines.append("-- custom functions --")
+                lines.append(f"caret before anchor: {caret_before_anchor}")
                 lines.append(f"Is at whitespace: {_is_cursor_on_whitespace(text_cursor)}")
+                lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(text_cursor, "after_sentence")}")
+                lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(text_cursor, "before_paragraph")}")
+                lines.append(f"Is current paragraph empty: {_is_current_paragraph_empty(text_cursor)}")
+                lines.append(f"start of sentence: {_is_at_sentence_start(text_cursor)}")
+                lines.append(f"Word character class: {_word_char_class(char)}")
                 lines.append("")
             except Exception as e:
                 lines.append(f"TextCursor info error: {e}")
@@ -2628,7 +2629,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "c": lambda: self._c_d_commands(count, key, mode),
                 "d": lambda: self._c_d_commands(count, key, mode),
                 "D": lambda: _delete_and_replace(count, key, mode),
-                "g": lambda: self._g_command(key),
                 "n": lambda: _repeat_search(count),
                 "N": lambda: _repeat_search(count, backward=True),
                 "p": lambda: _paste(count),
@@ -2791,37 +2791,25 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _reset_pending_keys()
             return True
 
-        if key.pending is not None and key.pending[-1] in ("fFtT"):
-            if not key.char.isprintable():
-                _reset_pending_keys()
-                return True
-            # Go through this function so possible pending operators are handled.
-            return self._consume_action(lambda: _to_character(expand, count, key),
-                                        reset = True)
+        # Don't match navigation keys like "Home" or "PageUp" if non-operator command
+        # is pending.
+        if not (key.pending and key.pending[-1] not in "cdy"):
+            matched_nav_key = self._navigation_keys(expand, count, mode).get(key.code)
+            if callable(matched_nav_key):
+                return self._consume_action(matched_nav_key)
+            elif matched_nav_key is not None:
+                key = KeyEvent(char=matched_nav_key, code=key.code, pending=key.pending)
 
-        # Count parsing. 1..9 always extend count. 0 extends count only after
-        # count has started.
-        if _is_digit_char(key.char):
-            if key.char != "0" or _get_raw_count() > 0:
-                self._add_to_count(int(key.char))
-                return True
-
-        nav = self._navigation_keys(expand, count, mode).get(key.code)
-        if callable(nav):
-            return self._consume_action(nav)
-        elif nav is not None:
-            key = KeyEvent(char=nav, code=key.code, pending=key.pending)
-
+        # Matches prefixes like "f", "g", "i". Must be before motions.
         matched_prefix = self._match_motion_prefix(key, mode)
         if matched_prefix is not None:
             return matched_prefix
 
-        # Match and handle motions that support operators.
         matched_motion = self._match_motions(key, count, mode)
         if matched_motion is not None:
+            # TODO: check operator.
             return matched_motion
 
-        # Match and handle non-motion commands.
         matched_command = self._match_commands(key, count, mode)
         if matched_command is not None:
             return matched_command
@@ -2830,6 +2818,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         matched_command = self._match_insert_commands(key, count, mode)
         if matched_command is not None:
             return matched_command
+
+        # Count parsing. 1..9 always extend count. 0 extends count only after
+        # count has started.
+        if _is_digit_char(key.char):
+            if key.char != "0" or _get_raw_count() > 0:
+                self._add_to_count(int(key.char))
+                return True
 
         # No suitable commands matched for "g" so cancel.
         if "g" in (key.pending or ""):
@@ -2859,16 +2854,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     # -----------------------------------------
     # Match first letter for multi-part motions.
     def _match_motion_prefix(self, key, mode):
-        if key.char in ("fFtT") and \
-            (key.pending is None or key.pending[-1] not in ("fFtT")):
+
+        if key.pending and key.pending[-1] in "fFtTgai":
+            return None
+
+        if key.char in ("fFtT"):
             KeyHandler._add_pending_key(key.char)
+            return True
+
+        if key.char == "g" and key.pending in (None, "d", "y", "c"):
+            KeyHandler._add_pending_key("g")
             return True
 
         if mode not in ("pending", "visual"):
             return None
 
         if key.char in ("ai"):
-            if key.pending is None or key.pending in ("dcy"):
+            if key.pending is None or key.pending in ("cdy"):
                 return self._add_pending_key(key.char)
             else:
                 return self._cancel_two_part_motion(mode)
@@ -2884,17 +2886,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         else:
             motions = self._motions_keymap(key, expand, count, mode)
 
-        motion = motions.get(key.char)
+        if key.pending and key.pending[-1] in "fFtT":
+            motion = lambda: _to_character(expand, count, key)
+        else:
+            motion = motions.get(key.char)
 
         if motion is None:
             # Non-valid text-object, cancel.
             if has_text_obj_prefix:
-                self._cancel_two_part_motion(_get_mode())
+                return self._cancel_two_part_motion(mode)
             return None
-
-        # Don't do possible operator action until we get next character.
-        if key.char in ("fFtT"):
-            return self._consume_action(motion)
 
         # If operator is pending, add operation to be done after motion.
         if "c" in (key.pending or "") or "d" in (key.pending or ""):
@@ -2950,6 +2951,24 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if action is None:
             return None
         return self._consume_action(action, lambda: _goto_mode("insert"))
+
+
+    @staticmethod
+    def _apply_pending_operator(count, key, mode) -> bool:
+        if key.pending[0] in ("cd"):
+            _delete_and_replace(count, key, mode)
+        elif key.pending[0] == "y":
+            _yank(count, key, mode)
+        else:
+            return False
+
+        if key.pending[0] == "c":
+            _goto_mode("insert")
+        else:
+            _goto_mode("normal")
+
+        _reset_count()
+        return True
 
     def _consume_action(self, action, post_action=None, reset = False) -> bool:
         """Consume {action} and after that {post_action} if set. Resets count
@@ -3017,13 +3036,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif mode == "visual":
             _copy_and_delete(True, False)
         _goto_mode("normal")
-
-    @staticmethod
-    def _g_command(key) -> bool:
-        if key.pending in (None, "d", "y", "c"):
-            KeyHandler._add_pending_key("g")
-            return True
-        return False
 
     @staticmethod
     def _reset_prefix() -> bool:
