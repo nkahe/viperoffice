@@ -2680,10 +2680,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "j": lambda: _hjkl_motion("j", count, expand, mode),
                 "k": lambda: _hjkl_motion("k", count, expand, mode),
                 "l": lambda: _hjkl_motion("l", count, expand, mode),
-                "f": lambda: self._ft_commands(expand, count, key),
-                "F": lambda: self._ft_commands(expand, count, key),
-                "t": lambda: self._ft_commands(expand, count, key),
-                "T": lambda: self._ft_commands(expand, count, key),
                 "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
                 "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
                 "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
@@ -2769,12 +2765,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         count: int = _get_count()
         expand: bool = _get_mode() in ("visual", "pending")
 
-        # cmd = Cmd(
-        #     key = key.char,
-        #     pending =_get_pending_keys()
-        #
-        # )
-
         # --- Keys with non-shift/AltGr modifiers -------
 
         if is_ctrl:
@@ -2796,8 +2786,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.pending == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
                 return self._consume_action(
-                    lambda: _replace_characters(count, key, mode),
-                    reset = True
+                    lambda: _replace_characters(count, key, mode), reset = True
                 )
             _reset_pending_keys()
             return True
@@ -2807,7 +2796,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _reset_pending_keys()
                 return True
             # Go through this function so possible pending operators are handled.
-            return self._match_motions(key, count, mode)
+            return self._consume_action(lambda: _to_character(expand, count, key),
+                                        reset = True)
 
         # Count parsing. 1..9 always extend count. 0 extends count only after
         # count has started.
@@ -2822,24 +2812,24 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif nav is not None:
             key = KeyEvent(char=nav, code=key.code, pending=key.pending)
 
-        matched_prefix = self._match_text_object_prefix(key, mode)
+        matched_prefix = self._match_motion_prefix(key, mode)
         if matched_prefix is not None:
             return matched_prefix
 
         # Match and handle motions that support operators.
-        matched_motions = self._match_motions(key, count, mode)
-        if matched_motions is not None:
-            return matched_motions
+        matched_motion = self._match_motions(key, count, mode)
+        if matched_motion is not None:
+            return matched_motion
 
         # Match and handle non-motion commands.
-        matched_commands = self._match_commands(key, count, mode)
-        if matched_commands is not None:
-            return matched_commands
+        matched_command = self._match_commands(key, count, mode)
+        if matched_command is not None:
+            return matched_command
 
         # Match and handle commands which change to insert mode.
-        matched_commands = self._match_insert_commands(key, count, mode)
-        if matched_commands is not None:
-            return matched_commands
+        matched_command = self._match_insert_commands(key, count, mode)
+        if matched_command is not None:
+            return matched_command
 
         # No suitable commands matched for "g" so cancel.
         if "g" in (key.pending or ""):
@@ -2867,52 +2857,39 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return self._consume_action(None)
     # -----------------------------------------
-    def _match_text_object_prefix(self, key, mode):
+    # Match first letter for multi-part motions.
+    def _match_motion_prefix(self, key, mode):
+        if key.char in ("fFtT") and \
+            (key.pending is None or key.pending[-1] not in ("fFtT")):
+            KeyHandler._add_pending_key(key.char)
+            return True
+
         if mode not in ("pending", "visual"):
             return None
 
-        if key.char in ("a", "i"):
-            if key.pending is None or key.pending in ("d", "c", "y"):
-                self._add_pending_key(key.char)
-
-            # Not valid key, cancel
-            elif mode == "pending":
-                _reset_count()
-                _goto_mode("normal")
-            elif mode == "visual":
-                self._reset_prefix()
-            return True
-
+        if key.char in ("ai"):
+            if key.pending is None or key.pending in ("dcy"):
+                return self._add_pending_key(key.char)
+            else:
+                return self._cancel_two_part_motion(mode)
         return None
 
     def _match_motions(self, key, count, mode: Mode):
         """Matches suitable motions considering pending keys."""
         expand: bool = mode in ("visual", "pending")
-        has_text_obj_prefix = key.pending[-1] in ("a", "i") if key.pending else False
+        has_text_obj_prefix = key.pending[-1] in ("ai") if key.pending else False
 
         if has_text_obj_prefix:
             motions = self._text_objects_keymap(expand, count, key, mode)
         else:
             motions = self._motions_keymap(key, expand, count, mode)
 
-        # For motions that take extra character, match with command character
-        # instead of latest.
-        if key.pending is not None and key.pending[-1] in ("fFtT"):
-            command = key.pending[-1]
-        else:
-            command = key.char
-
-        motion = motions.get(command)
+        motion = motions.get(key.char)
 
         if motion is None:
             # Non-valid text-object, cancel.
             if has_text_obj_prefix:
-                if mode == "pending":
-                    _reset_count()
-                    _goto_mode("normal")
-                elif mode == "visual":
-                    _reset_pending_keys()
-                return True
+                self._cancel_two_part_motion(_get_mode())
             return None
 
         # Don't do possible operator action until we get next character.
@@ -2951,10 +2928,21 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif mode == "visual":
             if key.char == "c":
                 return self._consume_action(action, lambda: _goto_mode("insert"))
-            if key.char in ("d", "y"):
+            if key.char in ("dy"):
                 return self._consume_action(action, lambda: _goto_mode("normal"))
 
         return self._consume_action(action)
+
+    # If for example after i/a motion non-valid key is entered.
+    def _cancel_two_part_motion(self, mode):
+        if mode == "pending":
+            _reset_count()
+            _goto_mode("normal")
+        elif mode == "visual":
+            _reset_count()
+            _reset_pending_keys()
+            self._reset_prefix()
+        return True
 
     def _match_insert_commands(self, key, count, mode):
         actions = self._mode_change_commands_keymap(key, count, mode)
@@ -3017,7 +3005,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     @staticmethod
     def _c_d_commands(count, key, mode) -> bool:
-        if mode == "normal" and key.char in ("c", "d"):
+        if mode == "normal" and key.char in ("cd"):
             KeyHandler._add_pending_key(key.char)
             return _goto_mode("pending")
         return _delete_and_replace(count, key, mode)
@@ -3029,17 +3017,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif mode == "visual":
             _copy_and_delete(True, False)
         _goto_mode("normal")
-
-    @staticmethod
-    def _ft_commands(expand, count, key) -> bool:
-        # If fFtT commands are not already pending.
-        if key.pending is None or \
-            (key.pending[-1] not in ("fFtT") and key.char in ("fFtT")):
-            KeyHandler._add_pending_key(key.char)
-            return True
-        else:
-            _to_character(expand, count, key)
-        return False
 
     @staticmethod
     def _g_command(key) -> bool:
