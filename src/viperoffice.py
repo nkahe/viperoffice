@@ -880,31 +880,27 @@ def _repeat_search(count, backward: bool = False) -> bool:
         return False
 
 
-def _to_character(expand:bool, count:int, key) -> bool:
-    """Motions to move to next / previous occurances of a character.
-    Commands 'f', 'F', 't', 'T'.
+def _to_character(expand:bool, count:int, command: str, char: str) -> bool:
+    """Motions to move to [count]'th next / previous occurances of a character [char].
+       Commands 'f', 'F', 't', 'T'.
     """
     cursor = _get_cursor()
     doc = _current_doc()
     if cursor is None or doc is None:
         return False
     try:
-        if key.pending is None or key.pending[-1] not in ("f", "F", "t", "T"):
+        if command not in ("f", "F", "t", "T"):
             return False
-        if not isinstance(key.char, str) or len(key.char) != 1:
+        if not isinstance(char, str) or len(char) != 1:
             return False
 
-        cmd = key.pending[-1]
-        ch = key.char
-        _set_last_ft(cmd, ch)
-
-        backward = cmd in ("F", "T")
-        visual_forward_extra = expand == True and cmd in ("f", "t") and not backward
+        backward = command in ("F", "T")
+        visual_forward_extra = expand and command in ("f", "t") and not backward
         steps = max(1, int(count))
         moved_any = False
 
         search_desc = doc.createSearchDescriptor()
-        search_desc.setSearchString(ch)
+        search_desc.setSearchString(char)
         search_desc.SearchCaseSensitive = True
         search_desc.SearchBackwards = backward
 
@@ -950,7 +946,8 @@ def _to_character(expand:bool, count:int, key) -> bool:
                 if not start_cursor.goLeft(1, False):
                     break
             else:
-                if not start_cursor.goRight(1, False):
+                start_offset = 2 if command == "t" else 1
+                if not start_cursor.goRight(start_offset, False):
                     break
 
             start_range = start_cursor.getStart()
@@ -959,9 +956,9 @@ def _to_character(expand:bool, count:int, key) -> bool:
                 break
 
             target_range = found_range.getStart()
-            if cmd == "t":
+            if command == "t":
                 target_range = _offset_range(text, target_range, -1)
-            elif cmd == "T":
+            elif command == "T":
                 target_range = _offset_range(text, target_range, 1)
             if target_range is not None and visual_forward_extra:
                 extra = _offset_range(text, target_range, 1)
@@ -978,6 +975,52 @@ def _to_character(expand:bool, count:int, key) -> bool:
             _sync_view_cursor_to_text_cursor(cursor, probe, expand, backward=backward)
 
         return moved_any
+    except Exception:
+        return False
+
+
+def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent) -> bool:
+    """ Repeat last to-character motion (commands f, F, t, T). Commands ';' and ','.
+        key.char ';' : use same direction
+        key.char ',' : use opposite direction
+    """
+
+    try:
+        last_ft = _get_last_ft()
+
+        if not last_ft or not last_ft["type"] or not last_ft["type"]:
+            return False
+
+        ft_type = last_ft["type"]
+        ft_char = last_ft["char"]
+
+        if not isinstance(ft_type, str) or not isinstance(ft_char, str) or len(ft_char) != 1:
+            return False
+
+        if key.char == ",":
+            search_type = ft_type.swapcase()
+        elif key.char == ";":
+            search_type = ft_type
+        else:
+            return False
+
+        text_cursor = _get_text_cursor()
+        if text_cursor is None:
+            return False
+
+        match search_type:
+            case "t":
+                text_cursor.goRight(1, expand)
+            case "T", "F":
+                text_cursor.goLeft(1, expand)
+            case _:
+                pass
+
+        if len(search_type) != 1:
+            return False
+
+        return _to_character(expand, count, search_type, ft_char)
+
     except Exception:
         return False
 
@@ -2696,6 +2739,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "}": lambda: _paragraphs_forward(expand, count),
                 "{": lambda: _paragraphs_backward(expand, count),
                 "m": lambda: _to_end_of_sentence(expand),
+                ";": lambda: _repeat_last_to_character(count, expand, key),
+                ",": lambda: _repeat_last_to_character(count, expand, key),
             }
             if key.char == "0" and _get_raw_count() == 0:
                 motions["0"] = lambda: _to_start_of_line(expand, False)
@@ -2887,7 +2932,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             motions = self._motions_keymap(key, expand, count, mode)
 
         if key.pending and key.pending[-1] in "fFtT":
-            motion = lambda: _to_character(expand, count, key)
+            motion = lambda: self._ft_commands(expand, count, key)
         else:
             motion = motions.get(key.char)
 
@@ -2905,6 +2950,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return self._consume_action(motion, lambda: self._y_command(count, key, mode))
 
         return self._consume_action(motion, reset = True)
+
+    @staticmethod
+    def _ft_commands(expand, count, key) -> bool:
+        if key.pending[-1] not in ("f", "F", "t", "T"):
+            return False
+        if not isinstance(key.char, str) or len(key.char) != 1:
+            return False
+        _set_last_ft(key.pending[-1], key.char)
+        return _to_character(expand, count, key.pending[-1], key.char)
+
 
     def _match_commands(self, key, count, mode):
         normal_actions = self._normal_actions_keymap(key, count)
