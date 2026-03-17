@@ -1054,7 +1054,7 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
 
         if cmd == "k":
             if mode == "pending":
-                _to_end_of_line(False, 1)
+                _to_end_of_line(False, 1, None)
                 # At a soft-wrap point the inter-word space sits at the start of
                 # the next visual line. Step past it so the selection includes it
                 # and doesn't get left behind as a leading space after deletion.
@@ -1112,33 +1112,37 @@ def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
         return False
 
 
-def _to_end_of_line(expand:bool, count:int, key=None) -> bool:
-    """Motion to end of line and optionally [count -1 ] lines down.
+def _to_end_of_line(expand:bool, count:int, mode) -> bool:
+    """Motion to end of line and optionally [count -1] lines down.
        Command '$'. """
     cursor = _get_cursor()
     if cursor is None:
         return False
+
     try:
+        # Range of motion needs start where caret is, not after Normal/Pending mode cursor.
+        if mode == "pending":
+            cursor.collapseToStart()
+
         if count > 1:
             cursor.goDown(count - 1, expand)
         old_pos = cursor.getPosition()
+
         cursor.gotoEndOfLine(expand)
         new_pos = cursor.getPosition()
 
-        old_y = getattr(old_pos, "Y", None)
-        if callable(old_y):
-            old_y = old_y()
-        new_y = getattr(new_pos, "Y", None)
-        if callable(new_y):
-            new_y = new_y()
+        _, old_y = _pos_xy(old_pos)
+        _, new_y = _pos_xy(new_pos)
 
-        # msg("f{key.pending=}")
-
-        if key is not None and key.pending is None:
+        # if key None or key is not None and key.pending is None:
             # LibreOffice can place cursor visually at next line start; move left
             # back to previous line end unless this was an empty-line no-op.
+        cursor = _get_cursor()
+
+        if cursor is not None and mode != "pending":
             if cursor.isAtStartOfLine() and old_y != new_y:
                 cursor.goLeft(1, expand)
+
         return True
     except Exception:
         return False
@@ -2716,7 +2720,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
                 "^": lambda: _to_start_of_line(expand, True),
-                "$": lambda: _to_end_of_line(expand, count, key),
+                "$": lambda: _to_end_of_line(expand, count, mode),
                 "H": lambda: _jump_to_page(expand, "start"),
                 "L": lambda: _jump_to_page(expand, "end"),
                 "G": lambda: _to_line(expand, _get_raw_count(), True),
@@ -2832,24 +2836,24 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 key = KeyEvent(char=matched_nav_key, code=key.code, pending=key.pending)
 
         # Matches prefixes like "f", "g", "i". Must be before motions.
-        matched_prefix = self._match_motion_prefix(key, mode)
-        if matched_prefix is not None:
-            return matched_prefix
+        added_prefix = self._match_motion_prefix(key, mode)
+        if added_prefix is not None:
+            return True
 
-        matched_motion = self._match_motions(key, count, mode)
-        if matched_motion is not None:
-            if matched_motion and mode == "pending":
+        moved = self._match_motions(key, count, mode)
+        if moved is not None:
+            if moved and mode == "pending":
                 return self._apply_pending_operator(count, key, mode)
             return True
 
-        matched_command = self._match_commands(key, count)
-        if matched_command is not None:
-            return matched_command
+        run_command = self._match_commands(key, count)
+        if run_command is not None:
+            return True
 
         # Match and handle commands which change to insert mode.
-        matched_command = self._match_insert_commands(key, count, mode)
-        if matched_command is not None:
-            return matched_command
+        run_command = self._match_insert_commands(key, count, mode)
+        if run_command is not None:
+            return True
 
         # Count parsing. 1..9 always extend count. 0 extends count only after
         # count has started.
@@ -2931,7 +2935,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             motion = motions.get(key.char)
 
         if motion is None:
-            # Non-valid text-object, cancel.
             if has_text_obj_prefix:
                 self._cancel_two_part_motion(mode)
                 return False
@@ -2975,7 +2978,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         action = actions.get(key.char)
         if action is None:
             return None
-        return self._consume_action(action, lambda: _goto_mode("insert"))
+        did_action = action()
+        _reset_count()
+        _goto_mode("insert")
+        return did_action
 
     @staticmethod
     def _apply_pending_operator(count, key, mode) -> bool:
@@ -3080,7 +3086,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             KeyHandler._add_pending_key("r")
             return True
         return _replace_characters(count, key, mode)
-
 
     @staticmethod
     def _y_command(count, key, mode) -> bool:
