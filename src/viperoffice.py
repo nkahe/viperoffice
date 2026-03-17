@@ -1183,8 +1183,8 @@ def _delete_and_replace_lines(key:KeyEvent):
 
 # Insert, delete, replace characters
 
-def _insert_commands(cmd:str, mode: Mode="normal"):
-    """For Normal mode commands 'a', 'I', 'A', 'o', 'O'."""
+def _insert_text(cmd:str, mode: Mode="normal"):
+    """For Normal mode commands 'a', 'I', 'A'"""
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -1199,24 +1199,30 @@ def _insert_commands(cmd:str, mode: Mode="normal"):
                 _to_end_of_line(False, 1, None)
             elif textCursor is not None and not textCursor.isEndOfParagraph():
                  cursor.goRight(1, False)
-            return True
 
         elif cmd == "I":
             if mode == "visual":
                 # Move to the line where the selection starts before going to line start
                 cursor.gotoRange(cursor.getStart(), False)
             _to_start_of_line(False, True)
-            return True
 
-        # Commands 'o', 'O' below.
+        return True
+    except Exception:
+        return False
 
-        if cmd == "o":
-            _to_end_of_line(False, 0, None)
-            cursor.goRight(1, False)
-        elif cmd == "O":
+
+def _begin_new_paragraph(above: bool):
+    """Begin to write new paragraph above or below current line. Commands 'o', 'O'."""
+    try:
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+
+        if above:
             _to_start_of_line(False, False)
         else:
-            return True
+            _to_end_of_line(False, 0, None)
+            cursor.goRight(1, False)
 
         cursor.setString(chr(13))  # CR
         if not cursor.isAtStartOfLine():
@@ -2671,11 +2677,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         actions = {
             "C": lambda: _yank_and_delete_to_end_of_line(count, mode),
             "i": lambda: True,
-            "I": lambda: _insert_commands("I", mode),
-            "a": lambda: _insert_commands("a", mode),
-            "A": lambda: _insert_commands("A", mode),
-            "o": lambda: _insert_commands("o", mode),
-            "O": lambda: _insert_commands("O", mode),
+            "I": lambda: _insert_text("I", mode),
+            "a": lambda: _insert_text("a", mode),
+            "A": lambda: _insert_text("A", mode),
+            "o": lambda: _begin_new_paragraph(above = False),
+            "O": lambda: _begin_new_paragraph(above = True),
             "s": lambda: _delete_characters(count, key, mode),
             "S": lambda: _delete_and_replace_lines(key),
         }
