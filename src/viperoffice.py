@@ -1134,12 +1134,13 @@ def _to_end_of_line(expand:bool, count:int, mode) -> bool:
         _, old_y = _pos_xy(old_pos)
         _, new_y = _pos_xy(new_pos)
 
-        # if key None or key is not None and key.pending is None:
+        cursor = _get_cursor()
+        if cursor is None:
+            return True
+
+        if not expand:
             # LibreOffice can place cursor visually at next line start; move left
             # back to previous line end unless this was an empty-line no-op.
-        cursor = _get_cursor()
-
-        if cursor is not None and mode != "pending":
             if cursor.isAtStartOfLine() and old_y != new_y:
                 cursor.goLeft(1, expand)
 
@@ -1282,41 +1283,15 @@ def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
 # Operators and clipboard
 # -----------------------
 
-def _delete_and_replace(count:int, key:KeyEvent) -> bool:
-    """Delete text {motion} moves over. Commands: 'd', 'dd', 'D', 'c', 'C', 'S'"""
-    if key.char in ("C", "D"):  # To end of line commands.
-        cursor = _get_cursor()
-        text_cursor = _get_text_cursor()
-        if cursor is None or text_cursor is None:
-            return False
-        # collapse to pos 0 (char under cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-        _to_end_of_line(True, count, None)
-
-    _copy_and_delete(True, True)
-    return True
-
-
-def _yank(count, key, mode:Mode) -> bool:
-    """Yanks text {motion} moves over. Commands `y`, `yy`, `Y'.
+def _yank(key, mode:Mode) -> bool:
+    """Yanks text {motion} moves over. Commands `y`, `yy`.
        Flashes yanked range.
     """
-    if key.char == "Y":
-        cursor = _get_cursor()
-        text_cursor = _get_text_cursor()
-        if cursor is None or text_cursor is None:
-            return False
-        # collapse to pos 0 (char under cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-        _to_end_of_line(True, count, None)
-        _copy_and_delete(True, False)
-        return True
-
     _copy_and_delete(True, False)
-
     position = _get_position()
     cursor = _get_cursor()
-    if (position is not None and cursor is not None) and mode != "visual":
+    if (position is not None and cursor is not None) and \
+        (mode != "visual" or key.char == "Y"):
         # Keep yanked range visually selected briefly, then restore cursor.
         # Use _set_mode instead of _goto_mode so the selection isn't
         # collapsed immediately by _show_cursor("normal")().
@@ -1351,6 +1326,15 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
         return True
     except Exception:
         return False
+
+
+def _yank_and_delete_to_end_of_line(count: int, mode: Mode, delete = True) -> bool:
+    """ Delete the characters until the end of the line and
+        [count]-1 more lines. Commands 'C', 'D', 'Y'."""
+    # Makes cursor to collapse to get correct range.
+    motion_mode = "pending" if mode == "normal" else mode
+    _to_end_of_line(True, count, motion_mode)
+    return _copy_and_delete(yank = True, delete = delete)
 
 
 def _paste(count:int, after_cursor:bool = True):
@@ -2661,9 +2645,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             actions = {
                 "c": lambda: self._c_d_commands(key, mode),
                 "d": lambda: self._c_d_commands(key, mode),
-                "D": lambda: _delete_and_replace(count, key),
-                "n": lambda: _repeat_search(count),
-                "N": lambda: _repeat_search(count, backward=True),
+                "D": lambda: _yank_and_delete_to_end_of_line(count, mode),
                 "p": lambda: _paste(count),
                 "P": lambda: _paste(count, after_cursor=False),
                 "r": lambda: self._r_command(count, key, mode),
@@ -2671,10 +2653,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "U": lambda: _undo_and_redo(count, redo=True),
                 "x": lambda: _delete_characters(count, key, mode),
                 "X": lambda: _delete_characters(count, key, mode),
-                "y": lambda: self._y_command(count, key, mode),
-                "Y": lambda: _yank(count, key, mode),
+                "y": lambda: self._y_command(key, mode),
+                "Y": lambda: _yank_and_delete_to_end_of_line(count, mode, False),
                 "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
+                # "n": lambda: _repeat_search(count),
+                # "N": lambda: _repeat_search(count, backward=True),
             }
             # If not in Visual mode, matching for Insert command is done.
             if mode == "visual":
@@ -2685,7 +2669,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     # Commands that change mode to Insert.
     def _mode_change_commands_keymap(self, key, count:int, mode):
         actions = {
-            "C": lambda: _delete_and_replace(count, key),
+            "C": lambda: _yank_and_delete_to_end_of_line(count, mode),
             "i": lambda: True,
             "I": lambda: _insert_commands("I", mode),
             "a": lambda: _insert_commands("a", mode),
@@ -2846,7 +2830,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 return self._apply_pending_operator(count, key, mode)
             return True
 
-        run_command = self._match_commands(key, count)
+        run_command = self._match_commands(key, count, mode)
         if run_command is not None:
             return True
 
@@ -2955,12 +2939,17 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _set_last_ft(key.pending[-1], key.char)
         return _to_character(expand, count, key.pending[-1], key.char)
 
-    def _match_commands(self, key, count):
+    def _match_commands(self, key, count, mode):
         normal_actions = self._normal_actions_keymap(key, count)
         action = normal_actions.get(key.char)
         if action is None:
             return None
-        return self._consume_action(action)
+
+        did_action = action()
+        _reset_count()
+        if key.char not in ("cdyv"):
+            _goto_mode("normal")
+        return did_action
 
     # If for example after i/a motion non-valid key is entered.
     def _cancel_two_part_motion(self, mode):
@@ -3088,14 +3077,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return _replace_characters(count, key, mode)
 
     @staticmethod
-    def _y_command(count, key, mode) -> bool:
+    def _y_command(key, mode) -> bool:
         if mode == "normal" and key.pending is None:
             # Save cursor position so it can be restored after flashing
             # yanked region.
             _set_position()
             KeyHandler._add_pending_key("y")
             return _goto_mode("pending")
-        return _yank(count, key, mode)
+        return _yank(key, mode)
 
     def keyReleased(self, event):
         state = _state()
