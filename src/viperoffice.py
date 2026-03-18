@@ -506,7 +506,8 @@ def _try_go_right(cursor, distance: int) -> bool:
 
 def _ensure_visual_caret(cursor, at_end: bool) -> None:
     """Ensure view cursor caret is on the requested selection end without
-    changing selection."""
+    changing selection.
+    """
     if cursor is None:
         return
     try:
@@ -945,12 +946,13 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent) -> bool:
         if not isinstance(ft_type, str) or not isinstance(ft_char, str) or len(ft_char) != 1:
             return False
 
-        if key.char == ",":
-            search_type = ft_type.swapcase()
-        elif key.char == ";":
-            search_type = ft_type
-        else:
-            return False
+        match key.char:
+            case ",":
+                search_type = ft_type.swapcase()
+            case ";":
+                search_type = ft_type
+            case _:
+                return False
 
         text_cursor = _get_text_cursor()
         if text_cursor is None:
@@ -985,36 +987,41 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
     if cursor is None:
         return False
     try:
-        if cmd == "h":
-            if mode == "pending":
-                cursor.collapseToStart()
-            return bool(cursor.goLeft(count, expand))
-        if cmd == "l":
-            if mode == "pending":
-                count += 1
-            return bool(cursor.goRight(count, expand))
-        if cmd == "j":
-            if mode == "pending":
-                _to_start_of_line(False, False)
-                count += 1
-            return bool(cursor.goDown(count, expand))
+        match cmd:
+            case "h":
+                if mode == "pending":
+                    cursor.collapseToStart()
+                return bool(cursor.goLeft(count, expand))
 
-        if cmd == "k":
-            if mode == "pending":
-                _to_end_of_line(False, 1, None)
-                # At a soft-wrap point the inter-word space sits at the start of
-                # the next visual line. Step past it so the selection includes it
-                # and doesn't get left behind as a leading space after deletion.
-                tc = _get_text_cursor()
-                if tc is not None and not tc.isEndOfParagraph():
-                    cursor.goRight(1, False)
-                _to_start_of_line(True, False)
-                count += 1
-            return bool(cursor.goUp(count, expand))
+            case "l":
+                if mode == "pending":
+                    count += 1
+                return bool(cursor.goRight(count, expand))
+
+            case  "j":
+                if mode == "pending":
+                    _to_start_of_line(False, False)
+                    count += 1
+                return bool(cursor.goDown(count, expand))
+
+            case "k":
+                if mode == "pending":
+                    _to_end_of_line(False, 1, None)
+                    # At a soft-wrap point the inter-word space sits at the start of
+                    # the next visual line. Step past it so the selection includes it
+                    # and doesn't get left behind as a leading space after deletion.
+                    tc = _get_text_cursor()
+                    if tc is not None and not tc.isEndOfParagraph():
+                        cursor.goRight(1, False)
+                    _to_start_of_line(True, False)
+                    count += 1
+                return bool(cursor.goUp(count, expand))
+
+            case _:
+                return False
 
     except Exception:
         return False
-    return False
 
 
 def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
@@ -1097,7 +1104,8 @@ def _to_end_of_line(expand:bool, count:int, mode) -> bool:
 
 
 def _select_linewise() -> bool:
-    """Expand selection to cover full lines. Commands 'S' and in visual mode 'X'."""
+    """Expand selection to cover full lines. Command 'S' and in visual mode
+       commands 'C', 'D', 'X', 'Y'."""
     text_cursor = _get_text_cursor()
     if text_cursor is None:
         return False
@@ -1126,28 +1134,34 @@ def _select_linewise() -> bool:
 
 # Insert, delete, replace characters
 
-def _insert_text(cmd:str, mode: Mode="normal"):
+def _insert_text(cmd:str, mode: Mode = "normal"):
     """For Normal and Visual mode commands 'a', 'I', 'A'"""
     try:
         cursor = _get_cursor()
         if cursor is None:
             return False
 
-        if cmd == "a" or cmd == "A":
-            textCursor = _get_text_cursor()
-            if cmd == "A":
+        match cmd:
+            case "A":
                 if mode == "visual":
                     if cursor is not None:
                         cursor.gotoRange(cursor.getEnd(), False)
                 _to_end_of_line(False, 1, None)
-            elif textCursor is not None and not textCursor.isEndOfParagraph():
-                 cursor.goRight(1, False)
 
-        elif cmd == "I":
-            if mode == "visual":
-                # Move to the line where the selection starts before going to line start
-                cursor.gotoRange(cursor.getStart(), False)
-            _to_start_of_line(False, True)
+            case "a":
+                textCursor = _get_text_cursor()
+                if textCursor is not None and not textCursor.isEndOfParagraph():
+                    cursor.goRight(1, False)
+
+            case "I":
+                if mode == "visual":
+                    # Move to the line where the selection starts before going
+                    # to line start.
+                    cursor.gotoRange(cursor.getStart(), False)
+                _to_start_of_line(False, True)
+
+            case _:
+                return False
 
         return True
     except Exception:
@@ -1181,12 +1195,13 @@ def _begin_new_paragraph(above: bool):
 
 def _copy_and_delete_linewise(yank: bool, delete: bool) -> bool:
     """Copy and/or delete whole lines where selection is.
-       Command 'S' and 'C', 'D', 'X', 'Y' in Visual mode."""
+       Command 'S' and 'C', 'D', 'X', 'Y' in Visual mode.
+    """
     _select_linewise()
     return _copy_and_delete(yank, delete)
 
 
-def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
+def _delete_characters(count:int, key:KeyEvent) -> bool:
     """Delete single characters. Normal mode commands 'x','X' and 's'."""
     try:
         text_cursor = _get_text_cursor()
@@ -1208,7 +1223,7 @@ def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
         return False
 
 
-def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
+def _replace_characters(count:int, key:KeyEvent) -> bool:
     """Replace character(s) under cursor with {key_char}.
        With count replace [count] characters with [count] {key_char}.
        Command 'r'.
@@ -1285,13 +1300,12 @@ def _yank_and_delete_to_end_of_line(count: int, mode: Mode, delete = True) -> bo
     return _copy_and_delete(yank = True, delete = delete)
 
 
-def _paste(count:int, after_cursor:bool = True):
+def _paste(count:int, mode, after_cursor:bool = True):
     """Paste text from clipboard after or before cursor {count} times.
        Commands 'p' and 'P'.
     """
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
-    mode = _get_mode()
     if text_cursor is None or cursor is None:
         return False
 
@@ -1737,15 +1751,6 @@ def _apply_motion_result(result, expand:bool) -> bool:
     if cursor is None or end_range is None:
         return False
     try:
-        # old HEAD
-        # if expand and _state().get("visual_anchor") is None:
-        #     # Pending mode: collapse to start_range (P) first so the selection
-        #     # starts at the block cursor char, not at P+1 (the anchor side).
-        #     start = result.get("start_range")
-        #     if start is not None:
-        #         cursor.gotoRange(start, False)
-        # cursor.gotoRange(end_range, expand)
-        # if expand and _state().get("visual_anchor") is None and result.get("inclusive"):
         if not expand:
             moved = cursor.gotoRange(end_range, False)
             return True if moved else False
@@ -1777,7 +1782,6 @@ def _apply_motion_result(result, expand:bool) -> bool:
 # ------------------
 # Sentence motions
 # ------------------
-
 
 def _is_cursor_on_whitespace(text_cursor) -> bool:
     if text_cursor is None:
@@ -1851,6 +1855,7 @@ def _move_to_whitespace_end_before_next_sentence(text_cursor, cursor, expand: bo
         return True
     except Exception:
         return False
+
 
 def _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, expand: bool) -> bool:
     try:
@@ -2556,7 +2561,6 @@ def _reset_count():
 #   True  -> event is swallowed (LibreOffice should not process it)
 #   False -> event is passed through to LibreOffice default handling
 class KeyHandler(unohelper.Base, XKeyHandler):
-
     def __init__(self):
         pass
 
@@ -2579,8 +2583,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         }
         return actions
 
+    # Keymap for Normal mode commands and Visual mode commands which
+    # aren't included in Visual mode keymap.
     def _normal_commands_keymap(self, key, count:int, mode):
-        """Build Normal-mode command dispatch map for actions."""
         # Available commands after "g" command.
         if "g" in (key.pending or ""):
             actions = {
@@ -2598,16 +2603,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "I": lambda: _insert_text("I", mode),
                 "o": lambda: _begin_new_paragraph(above = False),
                 "O": lambda: _begin_new_paragraph(above = True),
-                "p": lambda: _paste(count),
-                "P": lambda: _paste(count, after_cursor=False),
+                "p": lambda: _paste(count, mode),
+                "P": lambda: _paste(count, mode, after_cursor=False),
                 "r": lambda: self._r_command(count, key, mode),
-                "s": lambda: _delete_characters(count, key, mode),
+                "s": lambda: _delete_characters(count, key),
                 "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
                 "u": lambda: _undo_and_redo(count, redo=False),
                 "U": lambda: _undo_and_redo(count, redo=True),
                 "v": lambda: _goto_mode("visual"),
-                "x": lambda: _delete_characters(count, key, mode),
-                "X": lambda: _delete_characters(count, key, mode),
+                "x": lambda: _delete_characters(count, key),
+                "X": lambda: _delete_characters(count, key),
                 "y": lambda: self._y_command(key, mode),
                 "Y": lambda: _yank_and_delete_to_end_of_line(count, mode, False),
                 "/": _focus_findbar,
@@ -2625,7 +2630,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "X": lambda: _copy_and_delete_linewise(yank = True, delete = True),
             "o": lambda: _go_to_other_end(mode),
             "O": lambda: _go_to_other_end(mode),
-            "v": lambda: True,
+            "v": lambda: _goto_mode("visual"),
             "c": lambda: _copy_and_delete(True, True),
             "d": lambda: _copy_and_delete(yank = True, delete = True),
             "s": lambda: _copy_and_delete(yank = False, delete = True),
@@ -2636,7 +2641,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     # These can be used independently or with operators.
     def _motions_keymap(self, key, expand, count:int, mode: Mode):
-        """Build motion dispatch map for actions."""
         # Available motions after "g" command.
         if "g" in (key.pending or ""):
             motions = {
@@ -2665,6 +2669,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "(": lambda: _sentences_backwards(expand, count),
                 "}": lambda: _paragraphs_forward(expand, count),
                 "{": lambda: _paragraphs_backward(expand, count),
+                # For testing.
                 "m": lambda: _to_end_of_sentence(expand),
                 ";": lambda: _repeat_last_to_character(count, expand, key),
                 ",": lambda: _repeat_last_to_character(count, expand, key),
@@ -2757,7 +2762,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if key.pending == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
-                _replace_characters(count, key, mode)
+                _replace_characters(count, key)
                 _reset_count()
                 _goto_mode("normal")
             _reset_pending_keys()
@@ -2819,7 +2824,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # Deliberately cancels operator pending mode.
         if _is_del_key(event):
-            return self._consume_action(lambda: _delete_characters(count, key, mode))
+            return self._consume_action(lambda: _delete_characters(count, key))
         if _is_insert_key(event):
             return _goto_mode("insert")
 
@@ -2828,7 +2833,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     # Match first letter for multi-part motions.
     def _match_motion_prefix(self, key, mode):
 
-        if key.pending and key.pending[-1] in "fFtTgai":
+        motion_prefixes = "fFtTgai"
+        if key.pending and key.pending[-1] in motion_prefixes:
             return None
 
         if key.char in ("fFtT"):
@@ -2883,7 +2889,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return moved
 
     def _ft_commands(self, expand, count, key, mode) -> bool:
-        if key.pending[-1] not in ("f", "F", "t", "T"):
+        if key.pending[-1].lower() not in ("ft"):
             return False
         if not key.char.isprintable():
             if mode == "pending":
@@ -2899,7 +2905,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return None
         did_action = action()
         _reset_count()
-        if key.char in ("cCsS"):
+        if key.char.lower() in ("cs"):
             _goto_mode("insert")
         elif key.char not in ("oOr"):
             _goto_mode("normal")
@@ -2914,11 +2920,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _reset_count()
         if key.char.lower() in ("aios"):
             _goto_mode("insert")
-        elif key.char in ("v"):
-            _goto_mode("visual")
         elif key.char in ("cdy"):
             _goto_mode("pending")
-        elif key.char not in ("r"):
+        elif key.char not in ("rv"):
             _goto_mode("normal")
         return did_action
 
@@ -3029,7 +3033,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.pending is None:
             KeyHandler._add_pending_key("r")
             return True
-        return _replace_characters(count, key, mode)
+        return _replace_characters(count, key)
 
     def _y_command(self,key, mode) -> bool:
         if mode == "normal" and key.pending is None:
