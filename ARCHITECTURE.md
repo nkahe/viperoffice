@@ -2,11 +2,13 @@
 
 ## Main extension source code
 
-Main code consist of following sections:
+Main code consist of different sections. Main class of extension is KeyHandler. Order
+is same as they are in code.
 
 ### Global state
 
-Global state of extension and all helper functions to manage it.
+Global state of extension and all helper functions to manage it. It's used mainly by
+KeyHandler. 
 
 ### Utility funtions
 
@@ -14,45 +16,53 @@ Other general helper functions.
 
 ### UI and input modes
 
-Updating statusline and cursor appearance and general Vi input mode changing which affects those.
+Update statusline and cursor appearance and general Vi input mode changing which affects those. Used mainly made by KeyHandler.
 
 ### Cursor and selection
 
 Get information or make changes to cursor which includes selection and caret position.
+Used by actions.
 
-### Navigating in document
+### Actions
 
-Jump cursor to different places in document or scroll view. Commands `gg`, `G`, `H`, `L`, `C-f`, `C-b`, `C-d`, `C-u`, `/`.
+Actions are functions which are mapped to different keys and can make changes to view
+and document. They mainly get variable state as function parameters from KeyHandler
+or other actions and return boolean about success of the action.
 
-### Lines
+#### Navigating in document
+
+Jump cursor to different places in document or scroll view. Commands `gg`, `G`, `H`, `L`, `C-f`, `C-b`, `C-d`, `C-u`, `/`, `f`, `F`, `t`, `T`, `,`, `;`.
+
+#### Lines
 
 Moving in line and line based motions. Commands `hjkl`, `$`, `0`, `^`, `S`, `X`.
 
-### Character editing
+#### Character editing
 
 Insert, delete and replace characters. Commands `i`, `I`, `a`, `A`, `o`, `O`, `x`, `X`, `s`, `r`. 
 
-### Operators and clipboard
+#### Operators and clipboard
 
-Vi operators delete, change and yank, clipboard operations, undo/redo. `d`, `dd`, `D`, `c`, `cc`, `C`, `y`, `yy`, `Y`, `p`, `P`, `u`, `C-r`.
+Vi operators delete, change and yank, clipboard operations, undo/redo. Commands `d`, `dd`, `D`, `c`, `cc`, `C`, `y`, `yy`, `Y`, `p`, `P`, `u`, `C-r`.
 
-### Word motions
+#### Word motions
 
 Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`.
 
-### Sentence motions
+#### Sentence motions
 
 Commands `()`, `is`, `as`
 
-### Paragraph motions
+#### Paragraph motions
 
 Commands `{}`, `ip`, `ap`.
 
 ### Input handling
 
-Interpreting user key input and routing to correct functions based on it and global state.
+Contains KeyHandler class which is backbone of extension. It interprets and processes user
+input, manages (global) state and calls actions based on them.
 
 ### Infra
 
-Non-editing functionality: initialization, enabling and disabling extension, listening events,
-handling controllers and attaching keyhandlers.
+Non-editing functionality: initialization, enable and disable extension, listen events,
+handle controllers and attach KeyHandler.
