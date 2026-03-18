@@ -1237,26 +1237,28 @@ def _begin_new_paragraph(above: bool):
 
 def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
     """Delete single characters. Commands 'x','X' and 's'."""
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
-        return False
     try:
-        if mode == "visual" and key.char == "X":
-            _delete_and_replace_lines(key)
-
-        if mode != "visual":
-            text_cursor.gotoRange(text_cursor.getStart(), False)
+        if mode == "visual":
             if key.char == "X":
-                text_cursor.collapseToStart()
-                # At start of line
-                if not text_cursor.goLeft(count, True):
-                    return False
-            # At end of line
-            elif not text_cursor.goRight(count, True):
-                return False
+                _delete_linewise()
+            else:
+                _copy_and_delete(False, True)
+            return True
 
+        text_cursor = _get_text_cursor()
+        if text_cursor is None:
+            return False
+        # Collapse to start of normal-mode block cursor position
+        text_cursor.gotoRange(text_cursor.getStart(), False)
+        if key.char == "X":
+            # Delete count chars to the left; bail if already at start of line
+            if not text_cursor.goLeft(count, True):
+                return False
+        else:
+            # Delete count chars from cursor position rightward
+            if not text_cursor.goRight(count, True):
+                return False
         text_cursor.setString("")
-        _goto_mode("normal")
         return True
     except Exception:
         return False
