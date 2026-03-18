@@ -1149,8 +1149,8 @@ def _to_end_of_line(expand:bool, count:int, mode) -> bool:
         return False
 
 
-def _delete_and_replace_lines(key:KeyEvent):
-    """Delete/replaces lines which have selection. Commands 'S' and in visual mode 'X'."""
+def _select_linewise() -> bool:
+    """Expand selection to cover full lines. Commands 'S' and in visual mode 'X'."""
     text_cursor = _get_text_cursor()
     if text_cursor is None:
         return False
@@ -1166,12 +1166,8 @@ def _delete_and_replace_lines(key:KeyEvent):
         cursor.gotoRange(sel_start, False)
         cursor.gotoStartOfLine(False)
         line_start = cursor.getStart()
-        cursor.gotoRange(sel_end, False)
-        cursor.gotoEndOfLine(False)
-        line_end = cursor.getStart()
-        text_cursor.gotoRange(line_start, False)
-        text_cursor.gotoRange(line_end, True)
-        text_cursor.setString("")
+        cursor.gotoRange(sel_end, True)
+        cursor.gotoEndOfLine(True)
         return True
     except Exception:
         return False
@@ -1233,6 +1229,11 @@ def _begin_new_paragraph(above: bool):
 
     except Exception:
         return False
+
+
+def _delete_linewise() -> bool:
+    _select_linewise()
+    return _copy_and_delete(False, True)
 
 
 def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
@@ -2641,9 +2642,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         }
         return actions
 
-    def _normal_actions_keymap(self, key, count:int):
+    def _normal_commands_keymap(self, key, count:int, mode):
         """Build Normal-mode command dispatch map for actions."""
-        mode: Mode = _get_mode()
         # Available commands after "g" command.
         if "g" in (key.pending or ""):
             actions = {
@@ -2685,7 +2685,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "o": lambda: _begin_new_paragraph(above = False),
             "O": lambda: _begin_new_paragraph(above = True),
             "s": lambda: _delete_characters(count, key, mode),
-            "S": lambda: _delete_and_replace_lines(key),
+            "S": lambda: _delete_linewise(),
         }
         return actions
 
@@ -2835,7 +2835,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         moved = self._match_motions(key, count, mode)
         if moved is not None:
             if moved and mode == "pending":
-                return self._apply_pending_operator(count, key, mode)
+                return self._apply_pending_operator(key, mode)
             return True
 
         run_command = self._match_commands(key, count, mode)
@@ -2948,7 +2948,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return _to_character(expand, count, key.pending[-1], key.char)
 
     def _match_commands(self, key, count, mode):
-        normal_actions = self._normal_actions_keymap(key, count)
+        normal_actions = self._normal_commands_keymap(key, count, mode)
         action = normal_actions.get(key.char)
         if action is None:
             return None
@@ -2981,7 +2981,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return did_action
 
     @staticmethod
-    def _apply_pending_operator(count, key, mode) -> bool:
+    def _apply_pending_operator(key, mode) -> bool:
         """Apply pending operator handling mode change."""
         if not key.pending:
             return False
@@ -2989,14 +2989,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.pending[0] in ("cd"):
             _copy_and_delete(True, True)
         elif key.pending[0] == "y":
-            _yank(count, key, mode)
+            _yank(key, mode)
         else:
             return False
 
-        if key.pending[0] == "c":
-            _goto_mode("insert")
-        else:
-            _goto_mode("normal")
+        new_mode = "insert" if key.pending[0] == "c" else "normal"
+        _goto_mode(new_mode)
         return True
 
     def _consume_action(self, action, post_action=None, reset = False) -> bool:
@@ -3045,10 +3043,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _update_statusline()
         return True
 
-    @staticmethod
-    def _c_d_commands(key, mode) -> bool:
+    def _c_d_commands(self, key, mode) -> bool:
         if mode == "normal" and key.char in ("cd"):
-            KeyHandler._add_pending_key(key.char)
+            self._add_pending_key(key.char)
             return _goto_mode("pending")
 
         _copy_and_delete(True, True)
