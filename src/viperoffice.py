@@ -386,59 +386,6 @@ def _show_cursor(mode: Mode):
         return False
 
 
-def _goto_mode(new_mode: Mode) -> bool:
-    """Change Vi input mode to [new_mode]. Resets pending keys for other than
-    Operator pending mode."""
-    old_mode = _get_mode()
-    if new_mode == "normal":
-        _reset_pending_keys()
-        if old_mode in ("normal", "pending"):
-            pass
-
-        elif old_mode == "insert":
-            cursor = _get_cursor()
-            if cursor is not None and not cursor.isAtStartOfLine():
-                # Mimics Vi/Vim cursor behavior.
-                cursor.goLeft(1, False)
-            _show_cursor("normal")
-
-        # Make selection start where caret is in Normal mode.
-        elif old_mode == "visual":
-            cursor = _get_cursor()
-            controller = _get_controller()
-            text_cursor = _get_text_cursor()
-            try:
-                if controller is not None and \
-                    text_cursor is not None and  \
-                    cursor is not None:
-                    # Use the saved anchor to find the caret end before
-                    # clearing it.
-                    caret = _get_visual_caret_range(text_cursor)
-                    text_cursor.gotoRange(caret, False)
-                    if not cursor.isAtStartOfLine():
-                        text_cursor.goLeft(1, False)
-                    controller.select(text_cursor)
-            finally:
-                _clear_visual_anchor()
-                _show_cursor("normal")
-
-    elif new_mode == "insert":
-        _reset_pending_keys()
-        _show_cursor("insert")
-
-    elif new_mode == "visual":
-        _reset_pending_keys()
-        _show_cursor("visual")
-
-    elif new_mode == "pending":
-        _show_cursor("pending")
-    else:
-        return False
-
-    _set_mode(new_mode)
-    return True
-
-
 # --------------------
 # Cursor and selection
 # --------------------
@@ -1180,7 +1127,7 @@ def _select_linewise() -> bool:
 # Insert, delete, replace characters
 
 def _insert_text(cmd:str, mode: Mode="normal"):
-    """For Normal mode commands 'a', 'I', 'A'"""
+    """For Normal and Visual mode commands 'a', 'I', 'A'"""
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -1208,7 +1155,8 @@ def _insert_text(cmd:str, mode: Mode="normal"):
 
 
 def _begin_new_paragraph(above: bool):
-    """Begin to write new paragraph above or below current line. Commands 'o', 'O'."""
+    """Begin to write new paragraph above or below current line.
+       Normal mode commands 'o', 'O'."""
     try:
         cursor = _get_cursor()
         if cursor is None:
@@ -1231,21 +1179,16 @@ def _begin_new_paragraph(above: bool):
         return False
 
 
-def _delete_linewise() -> bool:
+def _copy_and_delete_linewise(yank: bool, delete: bool) -> bool:
+    """Copy and/or delete whole lines where selection is.
+       Command 'S' and 'C', 'D', 'X', 'Y' in Visual mode."""
     _select_linewise()
-    return _copy_and_delete(False, True)
+    return _copy_and_delete(yank, delete)
 
 
 def _delete_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
-    """Delete single characters. Commands 'x','X' and 's'."""
+    """Delete single characters. Normal mode commands 'x','X' and 's'."""
     try:
-        if mode == "visual":
-            if key.char == "X":
-                _delete_linewise()
-            else:
-                _copy_and_delete(False, True)
-            return True
-
         text_cursor = _get_text_cursor()
         if text_cursor is None:
             return False
@@ -1281,8 +1224,6 @@ def _replace_characters(count:int, key:KeyEvent, mode:Mode) -> bool:
         else:
             cursor.setString(key.char * count)
 
-        if mode == "visual":
-            _goto_mode("normal")
         return True
     except Exception:
         return False
@@ -1309,8 +1250,6 @@ def _yank(key, mode:Mode) -> bool:
                 cursor.gotoRange(position, False)
             _show_cursor("normal")
         threading.Timer(0.08, _flash_restore).start()
-
-    _goto_mode("normal")
     return True
 
 
@@ -1339,7 +1278,7 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
 
 def _yank_and_delete_to_end_of_line(count: int, mode: Mode, delete = True) -> bool:
     """ Delete the characters until the end of the line and
-        [count]-1 more lines. Commands 'C', 'D', 'Y'."""
+        [count]-1 more lines. Normal mode commands 'C', 'D', 'Y'."""
     # Makes cursor to collapse to get correct range.
     motion_mode = "pending" if mode == "normal" else mode
     _to_end_of_line(True, count, motion_mode)
@@ -1357,7 +1296,6 @@ def _paste(count:int, after_cursor:bool = True):
         return False
 
     try:
-        # msg(f"{after_cursor=} {text_cursor.isEndOfParagraph()=}")
         if after_cursor and not text_cursor.isEndOfParagraph():
             text_cursor.goRight(1, False)
 
@@ -1376,7 +1314,6 @@ def _paste(count:int, after_cursor:bool = True):
         for _ in range(count):
             dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
 
-        _goto_mode("normal")
     except Exception:
         return False
 
@@ -2651,41 +2588,49 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             }
         else:
             actions = {
+                "a": lambda: _insert_text("a", mode),
+                "A": lambda: _insert_text("A", mode),
                 "c": lambda: self._c_d_commands(key, mode),
                 "d": lambda: self._c_d_commands(key, mode),
+                "C": lambda: _yank_and_delete_to_end_of_line(count, mode),
                 "D": lambda: _yank_and_delete_to_end_of_line(count, mode),
+                "i": lambda: True,
+                "I": lambda: _insert_text("I", mode),
+                "o": lambda: _begin_new_paragraph(above = False),
+                "O": lambda: _begin_new_paragraph(above = True),
                 "p": lambda: _paste(count),
                 "P": lambda: _paste(count, after_cursor=False),
                 "r": lambda: self._r_command(count, key, mode),
+                "s": lambda: _delete_characters(count, key, mode),
+                "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
                 "u": lambda: _undo_and_redo(count, redo=False),
                 "U": lambda: _undo_and_redo(count, redo=True),
+                "v": lambda: _goto_mode("visual"),
                 "x": lambda: _delete_characters(count, key, mode),
                 "X": lambda: _delete_characters(count, key, mode),
                 "y": lambda: self._y_command(key, mode),
                 "Y": lambda: _yank_and_delete_to_end_of_line(count, mode, False),
-                "v": lambda: _goto_mode("visual"),
                 "/": _focus_findbar,
                 # "n": lambda: _repeat_search(count),
                 # "N": lambda: _repeat_search(count, backward=True),
             }
-            # If not in Visual mode, matching for Insert command is done.
-            if mode == "visual":
-                actions["o"] = lambda: _go_to_other_end(mode)
 
         return actions
 
-    # Commands that change mode to Insert.
-    def _mode_change_commands_keymap(self, key, count:int, mode):
+    def _visual_commands_keymap(self, key, count:int, mode):
         actions = {
-            "C": lambda: _yank_and_delete_to_end_of_line(count, mode),
-            "i": lambda: True,
-            "I": lambda: _insert_text("I", mode),
-            "a": lambda: _insert_text("a", mode),
-            "A": lambda: _insert_text("A", mode),
-            "o": lambda: _begin_new_paragraph(above = False),
-            "O": lambda: _begin_new_paragraph(above = True),
-            "s": lambda: _delete_characters(count, key, mode),
-            "S": lambda: _delete_linewise(),
+            "D": lambda: _copy_and_delete_linewise(yank = True, delete = True),
+            "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
+            "Y": lambda: _copy_and_delete_linewise(yank = True, delete = False),
+            "X": lambda: _copy_and_delete_linewise(yank = True, delete = True),
+            "o": lambda: _go_to_other_end(mode),
+            "O": lambda: _go_to_other_end(mode),
+            "v": lambda: True,
+            "c": lambda: _copy_and_delete(True, True),
+            "d": lambda: _copy_and_delete(yank = True, delete = True),
+            "s": lambda: _copy_and_delete(yank = False, delete = True),
+            "x": lambda: _copy_and_delete(yank = True, delete = True),
+            "y": lambda: _yank(key, mode),
         }
         return actions
 
@@ -2812,9 +2757,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if key.pending == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
-                return self._consume_action(
-                    lambda: _replace_characters(count, key, mode), reset = True
-                )
+                _replace_characters(count, key, mode)
+                _reset_count()
+                _goto_mode("normal")
             _reset_pending_keys()
             return True
 
@@ -2838,12 +2783,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 return self._apply_pending_operator(key, mode)
             return True
 
-        run_command = self._match_commands(key, count, mode)
-        if run_command is not None:
-            return True
+        if mode == "visual":
+            run_command = self._match_visual_commands(key, count, mode)
+            if run_command is not None:
+                return True
 
-        # Match and handle commands which change to insert mode.
-        run_command = self._match_insert_commands(key, count, mode)
+        run_command = self._match_normal_commands(key, count, mode)
         if run_command is not None:
             return True
 
@@ -2947,15 +2892,33 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _set_last_ft(key.pending[-1], key.char)
         return _to_character(expand, count, key.pending[-1], key.char)
 
-    def _match_commands(self, key, count, mode):
+    def _match_visual_commands(self, key, count, mode):
+        visual_actions = self._visual_commands_keymap(key, count, mode)
+        action = visual_actions.get(key.char)
+        if action is None:
+            return None
+        did_action = action()
+        _reset_count()
+        if key.char in ("cCsS"):
+            _goto_mode("insert")
+        elif key.char not in ("oOr"):
+            _goto_mode("normal")
+        return did_action
+
+    def _match_normal_commands(self, key, count, mode):
         normal_actions = self._normal_commands_keymap(key, count, mode)
         action = normal_actions.get(key.char)
         if action is None:
             return None
-
         did_action = action()
         _reset_count()
-        if key.char not in ("cdyv"):
+        if key.char.lower() in ("aios"):
+            _goto_mode("insert")
+        elif key.char in ("v"):
+            _goto_mode("visual")
+        elif key.char in ("cdy"):
+            _goto_mode("pending")
+        elif key.char not in ("r"):
             _goto_mode("normal")
         return did_action
 
@@ -2969,16 +2932,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif mode == "pending":
             _goto_mode("normal")
         return True
-
-    def _match_insert_commands(self, key, count, mode):
-        actions = self._mode_change_commands_keymap(key, count, mode)
-        action = actions.get(key.char)
-        if action is None:
-            return None
-        did_action = action()
-        _reset_count()
-        _goto_mode("insert")
-        return did_action
 
     @staticmethod
     def _apply_pending_operator(key, mode) -> bool:
@@ -3046,11 +2999,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _c_d_commands(self, key, mode) -> bool:
         if mode == "normal" and key.char in ("cd"):
             self._add_pending_key(key.char)
-            return _goto_mode("pending")
-
-        _copy_and_delete(True, True)
-        new_mode = "insert" if key.char == "c" else "normal"
-        return _goto_mode(new_mode)
+            return True
+        return _copy_and_delete(True, True)
 
     @staticmethod
     def _ctrl_c_command(mode: Mode):
@@ -3081,14 +3031,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return True
         return _replace_characters(count, key, mode)
 
-    @staticmethod
-    def _y_command(key, mode) -> bool:
+    def _y_command(self,key, mode) -> bool:
         if mode == "normal" and key.pending is None:
             # Save cursor position so it can be restored after flashing
             # yanked region.
             _set_position()
-            KeyHandler._add_pending_key("y")
-            return _goto_mode("pending")
+            self._add_pending_key("y")
+            return True
         return _yank(key, mode)
 
     def keyReleased(self, event):
@@ -3102,6 +3051,59 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def disposing(self, event):
         return None
+
+
+def _goto_mode(new_mode: Mode) -> bool:
+    """Change Vi input mode to [new_mode]. Resets pending keys for other than
+    Operator pending mode."""
+    old_mode = _get_mode()
+    if new_mode == "normal":
+        _reset_pending_keys()
+        if old_mode in ("normal", "pending"):
+            pass
+
+        elif old_mode == "insert":
+            cursor = _get_cursor()
+            if cursor is not None and not cursor.isAtStartOfLine():
+                # Mimics Vi/Vim cursor behavior.
+                cursor.goLeft(1, False)
+            _show_cursor("normal")
+
+        # Make selection start where caret is in Normal mode.
+        elif old_mode == "visual":
+            cursor = _get_cursor()
+            controller = _get_controller()
+            text_cursor = _get_text_cursor()
+            try:
+                if controller is not None and \
+                    text_cursor is not None and  \
+                    cursor is not None:
+                    # Use the saved anchor to find the caret end before
+                    # clearing it.
+                    caret = _get_visual_caret_range(text_cursor)
+                    text_cursor.gotoRange(caret, False)
+                    if not cursor.isAtStartOfLine():
+                        text_cursor.goLeft(1, False)
+                    controller.select(text_cursor)
+            finally:
+                _clear_visual_anchor()
+                _show_cursor("normal")
+
+    elif new_mode == "insert":
+        _reset_pending_keys()
+        _show_cursor("insert")
+
+    elif new_mode == "visual":
+        _reset_pending_keys()
+        _show_cursor("visual")
+
+    elif new_mode == "pending":
+        _show_cursor("pending")
+    else:
+        return False
+
+    _set_mode(new_mode)
+    return True
 
 
 # Normalize UNO key event payload into a single-character command key when possible.
