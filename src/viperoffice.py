@@ -933,7 +933,6 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent) -> bool:
         key.char ';' : use same direction
         key.char ',' : use opposite direction
     """
-
     try:
         last_ft = _get_last_ft()
 
@@ -943,7 +942,9 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent) -> bool:
         ft_type = last_ft["type"]
         ft_char = last_ft["char"]
 
-        if not isinstance(ft_type, str) or not isinstance(ft_char, str) or len(ft_char) != 1:
+        if not isinstance(ft_type, str) or \
+            not isinstance(ft_char, str) or \
+            len(ft_char) != 1:
             return False
 
         match key.char:
@@ -1701,7 +1702,7 @@ def _word_motion_once(text_cursor, expand: bool, spec) -> bool:
 
 
 def _word_motion(spec, expand: bool, count: int, mode: Mode) -> bool:
-    """Run a word-motion command (e.g. `w`) and optionally apply an operator.
+    """Run a word-motion command (e.g. 'w') and optionally apply an operator.
 
     Args:
         spec: Word motion specification (direction/target/big_word/etc.).
@@ -2128,7 +2129,7 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
 
 
 # TODO: inner sentence.
-def _sentence_text_object(expand:bool, count:int, key:KeyEvent, mode: Mode):
+def _select_sentence_text_objects(count:int, key:KeyEvent):
     """Select "as" sentence text-objects forward from the start of current object.
        Visual or pending mode.
     """
@@ -2138,18 +2139,10 @@ def _sentence_text_object(expand:bool, count:int, key:KeyEvent, mode: Mode):
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
-    # if not is_around:
-    #     return False
-
-    if mode not in ("pending", "visual"):
+    if not is_around:
         return False
 
-    cursor_length = 1
     moved = False
-    has_selection = True if len(cursor.getString()) > cursor_length else False
-
-    if has_selection:
-        return _select_sentences_from_cursor(cursor, count)
 
     if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
         _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
@@ -2170,13 +2163,16 @@ def _sentence_text_object(expand:bool, count:int, key:KeyEvent, mode: Mode):
     new_tc = _get_text_cursor()
     if new_tc is not None:
         _set_visual_anchor(new_tc.getStart())
-        moved =_sentences_forward(expand, count)
+        moved =_sentences_forward(True, count)
 
     return moved
 
 
-def _select_sentences_from_cursor(cursor, count) -> bool:
+def _select_sentences_from_cursor(count: int, key: KeyEvent) -> bool:
     """Select as sentence text-objects from cursor point to direction of selection"""
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
     anchor = _state().get("visual_anchor")
     select_backwards = anchor is not None and _range_starts_before(cursor, anchor)
 
@@ -2444,7 +2440,7 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _paragraph_text_object(expand, count, key, mode:Mode):
+def _select_paragraph_text_objects(count: int, key: KeyEvent):
     """
     Select "ip"/"ap" paragraph text-objects forward from the start of current object.
 
@@ -2458,43 +2454,11 @@ def _paragraph_text_object(expand, count, key, mode:Mode):
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
-    if mode == "pending":
-        started_empty = _is_current_paragraph_empty(text_cursor)
-        if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
-            return False
-
-        moved = _paragraphs_forward(expand, count)
-        if not moved:
-            return False
-
-        text_cursor = _get_text_cursor()
-        if text_cursor is None:
-            return False
-        return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
-
-    if mode != "visual":
+    started_empty = _is_current_paragraph_empty(text_cursor)
+    if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
         return False
 
-    cursor_length = 1
-    has_selection = True if len(cursor.getString()) > cursor_length else False
-
-    # Select from start of current paragraph.
-    if has_selection:
-        return _select_paragraphs_from_cursor(cursor, count, is_around)
-
-    started_empty = _is_current_paragraph_empty(text_cursor)
-    if started_empty:
-        _move_to_empty_block_start(text_cursor)
-    else:
-        text_cursor.gotoStartOfParagraph(False)
-    _set_visual_anchor(text_cursor.getStart())
-    cursor.gotoRange(text_cursor.getStart(), False)
-
-    if is_around:
-        return _select_ap_units_forward_visual(cursor, count, started_empty)
-    else:
-        moved = _paragraphs_forward(True, count)
-
+    moved = _paragraphs_forward(True, count)
     if not moved:
         return False
 
@@ -2504,18 +2468,22 @@ def _paragraph_text_object(expand, count, key, mode:Mode):
     return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
 
 
-def _select_paragraphs_from_cursor(cursor, count, is_around) -> bool:
+def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
     """Extend an existing visual selection by ip/ap paragraph text objects.
 
     Called when cursor already has a selection Determines direction from the
     saved anchor vs caret position, then delegates to the appropriate
     forward/backward helper.
     """
-    anchor = _state().get("visual_anchor")
+
     text_cursor = _get_text_cursor()
-    if text_cursor is None:
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
         return False
+    is_around = key.pending is not None and key.pending[-1] == "a"
+    anchor = _state().get("visual_anchor")
     caret = _get_visual_caret_range(text_cursor)
+
     # Backward when caret is the LEFT end (i.e. anchor is right of caret).
     select_backwards = anchor is not None and _range_starts_before(caret, anchor)
 
@@ -2679,10 +2647,17 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return motions
 
-    def _text_objects_keymap(self, expand, count:int, key, mode: Mode):
+    def _normal_text_objects(self, count:int, key):
         text_objects = {
-            "s": lambda: _sentence_text_object(expand, count, key, mode),
-            "p": lambda: _paragraph_text_object(expand, count, key, mode),
+            "s": lambda: _select_sentence_text_objects(count, key),
+            "p": lambda: _select_paragraph_text_objects(count, key),
+        }
+        return text_objects
+
+    def _visual_text_objects(self, count:int, key):
+        text_objects = {
+            "s": lambda: _select_sentences_from_cursor(count, key),
+            "p": lambda: _select_paragraphs_from_cursor(count, key),
         }
         return text_objects
 
@@ -2861,7 +2836,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         has_text_obj_prefix = key.pending[-1] in ("ai") if key.pending else False
 
         if has_text_obj_prefix:
-            motions = self._text_objects_keymap(expand, count, key, mode)
+            if mode == "visual":
+                motions = self._visual_text_objects(count, key)
+            else:
+                motions = self._normal_text_objects(count, mode)
         else:
             motions = self._motions_keymap(key, expand, count, mode)
 
