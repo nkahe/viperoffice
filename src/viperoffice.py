@@ -1780,6 +1780,109 @@ def _apply_motion_result(result, expand:bool) -> bool:
     return True
 
 
+def _word_unit_bounds(paragraph_text: str, offset: int) -> tuple[int, int]:
+    length = len(paragraph_text)
+    if length == 0:
+        return 0, 0
+    i = min(max(0, offset), length - 1)
+    classify = _word_char_class
+    cls = classify(paragraph_text[i], big_word=False)
+    start = i
+    end = i
+    for _ in range(length):
+        if start <= 0:
+            break
+        if classify(paragraph_text[start - 1], big_word=False) != cls:
+            break
+        start -= 1
+    for _ in range(length):
+        if end + 1 >= length:
+            break
+        if classify(paragraph_text[end + 1], big_word=False) != cls:
+            break
+        end += 1
+    return start, end + 1
+
+
+def _range_at_paragraph_offset(paragraph_cursor, offset: int):
+    try:
+        probe = paragraph_cursor.getText().createTextCursorByRange(paragraph_cursor.getStart())
+        probe.gotoStartOfParagraph(False)
+        if offset > 0:
+            probe.goRight(offset, False)
+        return probe.getStart()
+    except Exception:
+        return None
+
+
+def _select_word_text_objects(count: int, key: KeyEvent) -> bool:
+    """Select [count] words 'iw' in Operator-pending mode. Space between words
+       is considered as a word.
+    """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+    if key.pending is None or key.pending[-1] != "i":
+        return False
+
+    steps = max(1, int(count))
+
+    try:
+        text_obj = text_cursor.getText()
+        paragraph_cursor = text_obj.createTextCursorByRange(text_cursor.getStart())
+        paragraph_text, offset = _current_paragraph_text_and_offset(paragraph_cursor)
+
+        if len(paragraph_text) == 0:
+            start_range = _range_at_paragraph_offset(paragraph_cursor, 0)
+            if start_range is None:
+                return False
+            end_range = start_range
+            current_text = paragraph_text
+            current_end_excl = 0
+        else:
+            start_idx, end_excl = _word_unit_bounds(paragraph_text, offset)
+            start_range = _range_at_paragraph_offset(paragraph_cursor, start_idx)
+            if start_range is None:
+                return False
+            end_range = _range_at_paragraph_offset(paragraph_cursor, end_excl)
+            if end_range is None:
+                return False
+            current_text = paragraph_text
+            current_end_excl = end_excl
+
+        remaining = steps - 1
+
+        for _ in _paragraph_scan_steps():
+            if remaining <= 0:
+                break
+            if current_end_excl >= len(current_text):
+                if not paragraph_cursor.gotoNextParagraph(False):
+                    break
+                paragraph_cursor.gotoStartOfParagraph(False)
+                end_range = paragraph_cursor.getStart()
+                current_text, _ = _current_paragraph_text_and_offset(paragraph_cursor)
+                current_end_excl = 0
+                remaining -= 1
+                continue
+
+            next_start, next_end_excl = _word_unit_bounds(current_text, current_end_excl)
+            end_range = _range_at_paragraph_offset(paragraph_cursor, next_end_excl)
+            if end_range is None:
+                break
+            current_end_excl = next_end_excl
+            remaining -= 1
+
+        cursor.gotoRange(start_range, False)
+        cursor.gotoRange(end_range, True)
+        return True
+    except Exception:
+        return False
+
+
+def _select_word_words_from_cursor(expand, count, key, mode:Mode):
+    pass
+
 # ------------------
 # Sentence motions
 # ------------------
@@ -2590,7 +2693,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return actions
 
-    def _visual_commands_keymap(self, key, count:int, mode):
+    def _visual_commands_keymap(self, key, mode):
         actions = {
             "D": lambda: _copy_and_delete_linewise(yank = True, delete = True),
             "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
@@ -2651,6 +2754,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         text_objects = {
             "s": lambda: _select_sentence_text_objects(count, key),
             "p": lambda: _select_paragraph_text_objects(count, key),
+            "w": lambda: _select_word_text_objects(count, key),
         }
         return text_objects
 
@@ -2839,7 +2943,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if mode == "visual":
                 motions = self._visual_text_objects(count, key)
             else:
-                motions = self._normal_text_objects(count, mode)
+                motions = self._normal_text_objects(count, key)
         else:
             motions = self._motions_keymap(key, expand, count, mode)
 
@@ -2877,7 +2981,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return _to_character(expand, count, key.pending[-1], key.char)
 
     def _match_visual_commands(self, key, count, mode):
-        visual_actions = self._visual_commands_keymap(key, count, mode)
+        visual_actions = self._visual_commands_keymap(key, mode)
         action = visual_actions.get(key.char)
         if action is None:
             return None
