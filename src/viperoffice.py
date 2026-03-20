@@ -3063,6 +3063,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             elif matched_nav_key is not None:
                 key = KeyEvent(char=matched_nav_key, code=key.code, pending=key.pending)
 
+        # Count parsing. 1..9 always extend count. 0 extends count only after
+        # count has started.
+        if _is_digit_char(key.char):
+            if key.char != "0" or _get_raw_count() > 0:
+                self._add_to_count(int(key.char))
+                return True
+
         # Matches prefixes like "f", "g", "i". Must be before motions.
         added_prefix = self._match_motion_prefix(key, mode)
         if added_prefix is not None:
@@ -3082,13 +3089,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         run_command = self._match_normal_commands(key, count, mode)
         if run_command is not None:
             return True
-
-        # Count parsing. 1..9 always extend count. 0 extends count only after
-        # count has started.
-        if _is_digit_char(key.char):
-            if key.char != "0" or _get_raw_count() > 0:
-                self._add_to_count(int(key.char))
-                return True
 
         # No suitable commands matched for "g" so cancel.
         if "g" in (key.pending or ""):
@@ -3206,12 +3206,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if action is None:
             return None
         did_action = action()
-        _reset_count()
         if key.char.lower() in ("aios"):
+            _reset_count()
             _goto_mode("insert")
         elif key.char in ("cdy"):
             _goto_mode("pending")
         elif key.char not in ("rv"):
+            _reset_count()
             _goto_mode("normal")
         return did_action
 
