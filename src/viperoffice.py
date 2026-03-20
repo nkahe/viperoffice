@@ -1804,6 +1804,32 @@ def _word_unit_bounds(paragraph_text: str, offset: int) -> tuple[int, int]:
     return start, end + 1
 
 
+def _word_unit_bounds_backward(paragraph_text: str, offset: int) -> tuple[int, int] | None:
+    length = len(paragraph_text)
+    if length == 0:
+        return 0, 0
+    if offset <= 0:
+        return None
+    i = min(offset - 1, length - 1)
+    classify = _word_char_class
+    cls = classify(paragraph_text[i], big_word=False)
+    start = i
+    end = i
+    for _ in range(length):
+        if start <= 0:
+            break
+        if classify(paragraph_text[start - 1], big_word=False) != cls:
+            break
+        start -= 1
+    for _ in range(length):
+        if end + 1 >= length:
+            break
+        if classify(paragraph_text[end + 1], big_word=False) != cls:
+            break
+        end += 1
+    return start, end + 1
+
+
 def _range_at_paragraph_offset(paragraph_cursor, offset: int):
     try:
         probe = paragraph_cursor.getText().createTextCursorByRange(paragraph_cursor.getStart())
@@ -1815,73 +1841,253 @@ def _range_at_paragraph_offset(paragraph_cursor, offset: int):
         return None
 
 
+def _goto_next_paragraph_start(paragraph_cursor):
+    if not paragraph_cursor.gotoNextParagraph(False):
+        return None
+    paragraph_cursor.gotoStartOfParagraph(False)
+    return _current_paragraph_text_and_offset(paragraph_cursor)
+
+
+def _goto_previous_paragraph_start(paragraph_cursor):
+    if not paragraph_cursor.gotoPreviousParagraph(False):
+        return None
+    paragraph_cursor.gotoStartOfParagraph(False)
+    return _current_paragraph_text_and_offset(paragraph_cursor)
+
+
+def _advance_word_units_forward(paragraph_cursor, paragraph_text: str, offset: int, steps: int):
+    if steps <= 0:
+        return None
+
+    if len(paragraph_text) == 0:
+        new_caret = _range_at_paragraph_offset(paragraph_cursor, 0)
+        current_text = paragraph_text
+        current_end_excl = 0
+    else:
+        _, end_excl = _word_unit_bounds(paragraph_text, offset)
+        new_caret = _range_at_paragraph_offset(paragraph_cursor, end_excl)
+        current_text = paragraph_text
+        current_end_excl = end_excl
+
+    if new_caret is None:
+        return None
+
+    remaining = steps - 1
+    for _ in _paragraph_scan_steps():
+        if remaining <= 0:
+            break
+        if current_end_excl >= len(current_text):
+            moved = _goto_next_paragraph_start(paragraph_cursor)
+            if moved is None:
+                break
+            current_text, _ = moved
+            current_end_excl = 0
+            new_caret = paragraph_cursor.getStart()
+            remaining -= 1
+            continue
+
+        _, next_end_excl = _word_unit_bounds(current_text, current_end_excl)
+        new_caret = _range_at_paragraph_offset(paragraph_cursor, next_end_excl)
+        if new_caret is None:
+            break
+        current_end_excl = next_end_excl
+        remaining -= 1
+    return new_caret
+
+
+def _advance_word_units_backward(paragraph_cursor, paragraph_text: str, offset: int, steps: int):
+    if steps <= 0:
+        return None
+
+    current_text = paragraph_text
+    current_offset = offset
+    new_caret = None
+
+    def _consume_backward_unit(text: str, off: int):
+        if len(text) == 0:
+            caret = _range_at_paragraph_offset(paragraph_cursor, 0)
+            return text, 0, caret
+
+        bounds = _word_unit_bounds_backward(text, off)
+        if bounds is None:
+            moved = _goto_previous_paragraph_start(paragraph_cursor)
+            if moved is None:
+                return None
+            text, _ = moved
+            if len(text) == 0:
+                caret = _range_at_paragraph_offset(paragraph_cursor, 0)
+                return text, 0, caret
+            bounds = _word_unit_bounds_backward(text, len(text))
+            if bounds is None:
+                caret = paragraph_cursor.getStart()
+                return text, 0, caret
+        start_idx, _ = bounds
+        caret = _range_at_paragraph_offset(paragraph_cursor, start_idx)
+        return text, start_idx, caret
+
+    for _ in range(steps):
+        result = _consume_backward_unit(current_text, current_offset)
+        if result is None:
+            break
+        current_text, current_offset, new_caret = result
+        if new_caret is None:
+            break
+
+    return new_caret
+
+
+def _word_text_object_forward_ranges(text_cursor, steps: int, base_range=None, use_left_char: bool = False):
+    try:
+        text_obj = text_cursor.getText()
+        start_range = base_range or text_cursor.getStart()
+        start_cursor = text_obj.createTextCursorByRange(start_range)
+        moved_left = False
+        if use_left_char:
+            moved_left = start_cursor.goLeft(1, False)
+        paragraph_text, offset = _current_paragraph_text_and_offset(start_cursor)
+        try:
+            ch = paragraph_text[offset:offset + 1] if 0 <= offset < len(paragraph_text) else ""
+            with open("/tmp/viperffice-debug.log", "a", encoding="utf-8") as f:
+                f.write(
+                    "iw debug: offset="
+                    f"{offset} ch={repr(ch)} "
+                    f"moved_left={moved_left} "
+                    f"para_len={len(paragraph_text)} "
+                    f"snippet={repr(paragraph_text[:40])}\n"
+                )
+        except Exception:
+            pass
+
+        if len(paragraph_text) == 0:
+            start_range = _range_at_paragraph_offset(start_cursor, 0)
+        else:
+            start_idx, _ = _word_unit_bounds(paragraph_text, offset)
+            start_range = _range_at_paragraph_offset(start_cursor, start_idx)
+        if start_range is None:
+            return None, None
+
+        end_cursor = text_obj.createTextCursorByRange(base_range or text_cursor.getStart())
+        end_text, end_offset = _current_paragraph_text_and_offset(end_cursor)
+        end_range = _advance_word_units_forward(end_cursor, end_text, end_offset, steps)
+        if end_range is None:
+            return None, None
+
+        return start_range, end_range
+    except Exception:
+        return None, None
+
+
 def _select_word_text_objects(count: int, key: KeyEvent) -> bool:
-    """Select [count] words 'iw' in Operator-pending mode. Space between words
-       is considered as a word.
+    """Select [count] words 'iw' in Operator-pending mode. Starts from start
+       of current word. Space between words is considered as a word.
     """
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
         return False
-    if key.pending is None or key.pending[-1] != "i":
-        return False
 
     steps = max(1, int(count))
 
+    start_range, end_range = _word_text_object_forward_ranges(text_cursor, steps)
+    if start_range is None or end_range is None:
+        return False
+    cursor.gotoRange(start_range, False)
+    cursor.gotoRange(end_range, True)
+    return True
+
+
+def _select_current_word_object(text_cursor, cursor):
+    try:
+        text_cursor.collapseToStart()
+        if _is_cursor_on_whitespace(text_cursor):
+            probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+            for _ in _paragraph_scan_steps():
+                if probe.isStartOfParagraph():
+                    break
+                if not probe.goLeft(1, True):
+                    break
+                ch = probe.getString()
+                probe.collapseToStart()
+                if ch not in (" ", "\t", "\n"):
+                    break
+                if text_cursor.isStartOfParagraph():
+                    break
+                text_cursor.goLeft(1, False)
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, False)
+        elif not text_cursor.isStartOfWord():
+            _word_motion_once_backward(text_cursor, False, _WORD_MOTION_B)
+            _sync_view_cursor_to_text_cursor(cursor, text_cursor, False)
+    except Exception:
+        return
+
+
+def _expand_with_word_text_objects(count, key):
+    """Expand selection with word text-objects 'iw' in Visual mode to direction
+       of selection.
+    """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    if text_cursor is None or cursor is None:
+        return False
+
+    # Start from start of current word if haven't expanded selection.
+    if len(cursor.getString()) <= 1:
+        _select_current_word_object(text_cursor, cursor)
+        start_range, end_range = _word_text_object_forward_ranges(
+            text_cursor,
+            max(1, int(count)),
+            base_range=cursor.getStart(),
+            use_left_char=False,
+        )
+        if start_range is None or end_range is None:
+            return False
+        _set_visual_anchor(start_range)
+        _set_visual_selection(cursor, start_range, end_range)
+        return True
+
+    anchor = _state().get("visual_anchor")
+    if anchor is None:
+        is_forward = _test_if_forward_selection(cursor)
+        anchor = cursor.getStart() if is_forward else cursor.getEnd()
+        _set_visual_anchor(anchor)
+        caret = cursor.getEnd() if is_forward else cursor.getStart()
+        select_backwards = not is_forward
+    else:
+        caret = _get_visual_caret_range(text_cursor)
+        select_backwards = _range_starts_before(caret, anchor)
+
+    if caret is None or anchor is None:
+        return False
+
     try:
         text_obj = text_cursor.getText()
-        paragraph_cursor = text_obj.createTextCursorByRange(text_cursor.getStart())
+        paragraph_cursor = text_obj.createTextCursorByRange(caret)
         paragraph_text, offset = _current_paragraph_text_and_offset(paragraph_cursor)
 
-        if len(paragraph_text) == 0:
-            start_range = _range_at_paragraph_offset(paragraph_cursor, 0)
-            if start_range is None:
-                return False
-            end_range = start_range
-            current_text = paragraph_text
-            current_end_excl = 0
+        steps = max(1, int(count))
+        if select_backwards:
+            new_caret = _advance_word_units_backward(
+                paragraph_cursor,
+                paragraph_text,
+                offset,
+                steps,
+            )
         else:
-            start_idx, end_excl = _word_unit_bounds(paragraph_text, offset)
-            start_range = _range_at_paragraph_offset(paragraph_cursor, start_idx)
-            if start_range is None:
-                return False
-            end_range = _range_at_paragraph_offset(paragraph_cursor, end_excl)
-            if end_range is None:
-                return False
-            current_text = paragraph_text
-            current_end_excl = end_excl
+            new_caret = _advance_word_units_forward(
+                paragraph_cursor,
+                paragraph_text,
+                offset,
+                steps,
+            )
 
-        remaining = steps - 1
+        if new_caret is None:
+            return False
 
-        for _ in _paragraph_scan_steps():
-            if remaining <= 0:
-                break
-            if current_end_excl >= len(current_text):
-                if not paragraph_cursor.gotoNextParagraph(False):
-                    break
-                paragraph_cursor.gotoStartOfParagraph(False)
-                end_range = paragraph_cursor.getStart()
-                current_text, _ = _current_paragraph_text_and_offset(paragraph_cursor)
-                current_end_excl = 0
-                remaining -= 1
-                continue
-
-            next_start, next_end_excl = _word_unit_bounds(current_text, current_end_excl)
-            end_range = _range_at_paragraph_offset(paragraph_cursor, next_end_excl)
-            if end_range is None:
-                break
-            current_end_excl = next_end_excl
-            remaining -= 1
-
-        cursor.gotoRange(start_range, False)
-        cursor.gotoRange(end_range, True)
+        _set_visual_selection(cursor, anchor, new_caret)
         return True
     except Exception:
         return False
 
-
-def _select_word_words_from_cursor(expand, count, key, mode:Mode):
-    pass
 
 # ------------------
 # Sentence motions
@@ -2762,6 +2968,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         text_objects = {
             "s": lambda: _select_sentences_from_cursor(count, key),
             "p": lambda: _select_paragraphs_from_cursor(count, key),
+            "w": lambda: _expand_with_word_text_objects(count, key),
         }
         return text_objects
 
