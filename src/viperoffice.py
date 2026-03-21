@@ -2784,7 +2784,6 @@ def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
     saved anchor vs caret position, then delegates to the appropriate
     forward/backward helper.
     """
-
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
     if text_cursor is None or cursor is None:
@@ -2807,7 +2806,6 @@ def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
             moved = _select_ap_units_backward_visual(cursor, count)
         else:
             moved = _paragraphs_backward(True, count)
-
     elif is_around:
         return _select_ap_units_forward_visual(cursor, count, started_empty)
     else:
@@ -2828,9 +2826,10 @@ def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
 # Input handling
 # -----------------
 
-def _reset_count():
+def _reset_count() -> bool:
     _state()["count"] = 0
     _update_statusline()
+    return True
 
 
 # UNO key handler
@@ -2972,31 +2971,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         }
         return text_objects
 
-    @staticmethod
-    def _navigation_keys(expand, count, mode: Mode):
-        backspace = int(Key.BACKSPACE)
-        left      = int(Key.LEFT)
-        right     = int(Key.RIGHT)
-        up        = int(Key.UP)
-        down      = int(Key.DOWN)
-        home      = int(Key.HOME)
-        end       = int(Key.END)
-        pageup    = int(Key.PAGEUP)   # type: ignore[attr-defined]
-        pagedown  = int(Key.PAGEDOWN)  # type: ignore[attr-defined]
-
-        # Navigation keys are             mapped to motions so they can take count, be used
-        # with operators and for pageup/pagedown handle selection.
-        return {
-            backspace: "h",
-            left:      "h",
-            right:     "l",
-            up:        "k",
-            down:      "j",
-            home:      "0",
-            end:       "$",
-            pageup:    lambda: _scroll_window(expand, count, False, mode, False),
-            pagedown:  lambda: _scroll_window(expand, count, True, mode, False),
-        }
     # ------------------------------------------
     def keyPressed(self, event):
         state = _state()
@@ -3016,7 +2990,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Insert mode matching. Do as little as possible.
         if mode == "insert":
             if is_escape or (is_ctrl and code == 514):  # C-c
-                return self._consume_action(lambda: _goto_mode("normal"))
+                self._ctrl_c_command(mode)
             return False
 
         key = KeyEvent(
@@ -3031,12 +3005,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # --- Keys with non-shift/AltGr modifiers -------
 
         if is_ctrl:
-            actions = self._normal_ctrl_actions(expand, count, mode)
-            action = actions.get(key.code)
-            if action is not None:
-                return self._consume_action(action)
-            else:
-                return False
+            run_command = self._match_ctrl_commands(key, expand, count, mode)
+            if run_command is not None:
+                return True
 
         # Pass other non-shift modified shortcuts through, except characters
         # made with AltGr.
@@ -3057,11 +3028,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Don't match navigation keys like "Home" or "PageUp" if non-operator command
         # is pending.
         if not (key.pending and mode != "pending"):
-            matched_nav_key = self._navigation_keys(expand, count, mode).get(key.code)
-            if callable(matched_nav_key):
-                return self._consume_action(matched_nav_key)
-            elif matched_nav_key is not None:
-                key = KeyEvent(char=matched_nav_key, code=key.code, pending=key.pending)
+            matched_action = self._navigation_keys(expand, count, mode).get(key.code)
+            if callable(matched_action):
+                matched_action()
+                return _reset_count()
+            elif matched_action is not None:
+                key = KeyEvent(char=matched_action, code=key.code, pending=key.pending)
 
         # Count parsing. 1..9 always extend count. 0 extends count only after
         # count has started.
@@ -3101,20 +3073,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if _is_function_key(event):
             return False
 
-        # Now suitable key matched so reset.
+        # No suitable key matched so reset.
         _reset_count()
 
         if key.pending or is_escape:
             _goto_mode("normal")
             return True
 
-        # Deliberately cancels operator pending mode.
+        # Deliberately let possible Operator-pending mode get canceled before
+        # match Del key so it can be used for that.
         if _is_del_key(event):
-            return self._consume_action(lambda: _delete_characters(count, key))
-        if _is_insert_key(event):
-            return _goto_mode("insert")
+            self._del_key(count, key, mode)
+            return True
 
-        return self._consume_action(None)
+        if _is_insert_key(event):
+            _goto_mode("insert")
+
+        return True
     # -----------------------------------------
     # Match first letter for multi-part motions.
     def _match_motion_prefix(self, key, mode):
@@ -3200,6 +3175,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _goto_mode("normal")
         return did_action
 
+    def _match_ctrl_commands(self, key, expand, count, mode):
+        actions = self._normal_ctrl_actions(expand, count, mode)
+        action = actions.get(key.code)
+        if action is None:
+            return None
+        did_action = action()
+        _reset_count()
+        return did_action
+
     def _match_normal_commands(self, key, count, mode):
         normal_actions = self._normal_commands_keymap(key, count, mode)
         action = normal_actions.get(key.char)
@@ -3215,6 +3199,32 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _reset_count()
             _goto_mode("normal")
         return did_action
+
+    @staticmethod
+    def _navigation_keys(expand, count, mode: Mode):
+        backspace = int(Key.BACKSPACE)
+        left      = int(Key.LEFT)
+        right     = int(Key.RIGHT)
+        up        = int(Key.UP)
+        down      = int(Key.DOWN)
+        home      = int(Key.HOME)
+        end       = int(Key.END)
+        pageup    = int(Key.PAGEUP)   # type: ignore[attr-defined]
+        pagedown  = int(Key.PAGEDOWN)  # type: ignore[attr-defined]
+
+        # Navigation keys are mapped to motions so they can take count, be used
+        # with operators and for pageup/pagedown handle selection.
+        return {
+            backspace: "h",
+            left:      "h",
+            right:     "l",
+            up:        "k",
+            down:      "j",
+            home:      "0",
+            end:       "$",
+            pageup:    lambda: _scroll_window(expand, count, False, mode, False),
+            pagedown:  lambda: _scroll_window(expand, count, True, mode, False),
+        }
 
     # If for example after i/a motion non-valid key is entered.
     def _cancel_two_part_motion(self, mode):
@@ -3242,25 +3252,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         new_mode = "insert" if key.pending[0] == "c" else "normal"
         _goto_mode(new_mode)
-        return True
-
-    def _consume_action(self, action, post_action=None, reset = False) -> bool:
-        """Consume {action} and after that {post_action} if set. Resets count
-           if no command is pending. Applying reset=True resets pending keys."""
-        if action is None:
-            return True
-        action()
-        # Can't be passed as parameter since that might been updated.
-        pending_keys = _get_pending_keys()
-        if pending_keys is None or reset:
-            _reset_count()
-
-        if post_action is not None:
-            post_action()
-            _reset_count()
-
-        if reset:
-            _reset_pending_keys()
         return True
 
     @staticmethod
@@ -3303,6 +3294,16 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         elif mode == "visual":
             _copy_and_delete(True, False)
         _goto_mode("normal")
+        return True
+
+    @staticmethod
+    def _del_key(count, key, mode) -> bool:
+        if mode == "visual":
+            _copy_and_delete(yank = True, delete = True)
+        else:
+            _delete_characters(count, key)
+        _goto_mode("normal")
+        return True
 
     @staticmethod
     def _reset_prefix() -> bool:
