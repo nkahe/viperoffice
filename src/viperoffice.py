@@ -3845,11 +3845,14 @@ class ViewEventListener(unohelper.Base, XEventListener):
             if controller is not None:
                 _state()["view_cursor"] = controller.getViewCursor()
             _reset_count()
-            _update_statusline(controller)
-            if state["mode"] == "normal":
-                _show_normal_cursor_for_controller(controller)
-            else:
+            if state["mode"] == "insert":
+                _reset_pending_keys()
+                _update_statusline(controller)
                 _show_insert_cursor_for_controller(controller)
+            else:
+                _goto_mode("normal")
+                _update_statusline(controller)
+                _show_normal_cursor_for_controller(controller)
         elif event_name == "OnViewCreated":
             _attach_controller(controller)
 
