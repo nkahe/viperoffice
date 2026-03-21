@@ -418,6 +418,7 @@ def _show_cursor(mode: Mode):
             return False
 
         controller.select(text_cursor)
+        print("end")
     except Exception:
         return False
 
@@ -3076,7 +3077,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Insert mode matching. Do as little as possible.
         if mode == "insert":
             if is_escape or (is_ctrl and code == 514):  # C-c
-                self._ctrl_c_command(mode)
+                return self._ctrl_c_command(mode)
             return False
 
         key = KeyEvent(
@@ -3349,7 +3350,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return True
         return _copy_and_delete(True, True)
 
-    def _ctrl_c_command(self, mode: Mode):
+    def _ctrl_c_command(self, mode: Mode) -> bool:
         if mode == "normal":
             self.reset_pending_keys()
         elif mode == "visual":
