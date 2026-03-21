@@ -59,9 +59,6 @@ def _state() -> _StateDict:
             "mode": "normal",
             # Visible cursor. Type is XViewCursor UNO object.
             "view_cursor": None,
-            # Pending commands like 'd' or 'g'. Type str | None. Note that only
-            # operator commands result to operator pending mode.
-            "pending_keys": None,
             "key_handler": None,
             "view_event_listener": None,
             "global_event_broadcaster": None,
@@ -302,12 +299,25 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
 # Functions to manipulate view and model (document).
 
 def _get_pending_keys() -> None | str:
-    return _state().get("pending_keys", None)
+    handler = _state().get("key_handler")
+    try:
+        if handler is None:
+            return None
+        pending_keys = handler.pending_keys
+        return pending_keys
+    except Exception:
+        return None
 
 
 def _reset_pending_keys():
-    _state()["pending_keys"] = None
+    handler = _state().get("key_handler")
+    try:
+        if handler is not None and hasattr(handler, "reset_pending_keys"):
+            return bool(handler.reset_pending_keys())
+    except Exception:
+        pass
     _update_statusline()
+    return True
 
 
 def _get_count() -> int:
@@ -2858,7 +2868,8 @@ def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
 #   False -> event is passed through to LibreOffice default handling
 class KeyHandler(unohelper.Base, XKeyHandler):
     def __init__(self):
-        self._count = 0
+        self._count: int = 0
+        self._pending_keys: str | None = None
 
     # An optional number that may precede the command to multiply or
     # iterate the command.
@@ -2866,6 +2877,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def count(self) -> int:
         count = self._count
         return 1 if count == 0 else count
+
+    # Pending commands like 'd' or 'g'. Type str | None. Note that only
+    # operator commands result to operator pending mode.
+    @property
+    def pending_keys(self) -> str | None:
+        return self._pending_keys
 
     def get_raw_count(self) -> int:
         return self._count
@@ -2889,6 +2906,20 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         self._count = new_count
         _update_statusline()
         return True
+
+    def _add_pending_key(self, new_key: str) -> bool:
+        pending_keys = self._pending_keys
+        if pending_keys is None:
+            self._pending_keys = new_key
+        else:
+            self._pending_keys = pending_keys + new_key
+        _update_statusline()
+        return True
+
+    def reset_pending_keys(self):
+        self._pending_keys = None
+        _update_statusline()
+        return
 
     def _normal_ctrl_actions(self, expand: bool, mode: Mode):
         count = self.count
@@ -3051,7 +3082,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         key = KeyEvent(
             char = _normalize_key_char(event),
             code = code,
-            pending = _get_pending_keys()
+            pending = self.pending_keys
         )
 
         count: int = self.count
@@ -3077,7 +3108,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 _replace_characters(count, key)
                 self._reset_count()
                 _goto_mode("normal")
-            _reset_pending_keys()
+            self.reset_pending_keys()
             return True
 
         # Don't match navigation keys like "Home" or "PageUp" if non-operator command
@@ -3154,11 +3185,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return None
 
         if key.char in ("fFtT"):
-            KeyHandler._add_pending_key(key.char)
+            self._add_pending_key(key.char)
             return True
 
         if key.char == "g" and key.pending in (None, "d", "y", "c"):
-            KeyHandler._add_pending_key("g")
+            self._add_pending_key("g")
             return True
 
         if mode not in ("pending", "visual"):
@@ -3190,7 +3221,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if key.pending[-1] in "fFtT":
                 motion = partial(self._ft_commands, expand, key, mode)
             # For dd, cc, yy, S do motion lines down from current line.
-            elif key.pending[0] == key.char or key.char == "S":
+            elif mode == "pending" and key.pending[0] == key.char or \
+                key.char == "S":
                 motion = partial(_hjkl_motion, "j", count -1, True, mode)
             else:
                 motion = motions.get(key.char)
@@ -3289,7 +3321,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
            keys and count but don't change mode."""
         if mode == "visual":
             self._reset_count()
-            _reset_pending_keys()
+            self.reset_pending_keys()
         elif mode == "pending":
             _goto_mode("normal")
         return True
@@ -3311,26 +3343,15 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _goto_mode(new_mode)
         return True
 
-    @staticmethod
-    def _add_pending_key(new_key:str) -> bool:
-        pending_keys = _state()["pending_keys"]
-        if pending_keys is None:
-            _state()["pending_keys"] = new_key
-        else:
-            _state()["pending_keys"] = pending_keys + new_key
-        _update_statusline()
-        return True
-
     def _c_d_commands(self, key, mode) -> bool:
         if mode == "normal" and key.char in ("cd"):
             self._add_pending_key(key.char)
             return True
         return _copy_and_delete(True, True)
 
-    @staticmethod
-    def _ctrl_c_command(mode: Mode):
+    def _ctrl_c_command(self, mode: Mode):
         if mode == "normal":
-            _reset_pending_keys()
+            self.reset_pending_keys()
         elif mode == "visual":
             _copy_and_delete(True, False)
         _goto_mode("normal")
@@ -3346,28 +3367,26 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _goto_mode("normal")
         return True
 
-    @staticmethod
-    def _reset_prefix() -> bool:
+    def _reset_prefix(self) -> bool:
         """Remove last pending command if it's a command prefix:
            g, a/i, or f/F/t/T."""
-        pending_keys = _get_pending_keys()
+        pending_keys = self._pending_keys
         if not pending_keys or pending_keys[-1] not in "aigfFtT":
             return False
         remaining_keys = pending_keys[:-1]
         if remaining_keys:
-            _state()["pending_keys"] = remaining_keys
+            self._pending_keys = remaining_keys
         else:
-            _reset_pending_keys()
+            self.reset_pending_keys()
         return True
 
-    @staticmethod
-    def _r_command(count, key) -> bool:
+    def _r_command(self, count, key) -> bool:
         if key.pending is None:
-            KeyHandler._add_pending_key("r")
+            self._add_pending_key("r")
             return True
         return _replace_characters(count, key)
 
-    def _y_command(self,key, mode) -> bool:
+    def _y_command(self, key, mode) -> bool:
         if mode == "normal" and key.pending is None:
             # Save cursor position so it can be restored after flashing
             # yanked region.
