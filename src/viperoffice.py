@@ -1820,65 +1820,63 @@ def _apply_motion_result(result, expand:bool) -> bool:
     return True
 
 
-def _word_unit_bounds(paragraph_text: str, offset: int) -> tuple[int, int]:
-    """Return the (start, end) indices of the word-like unit containing offset.
+def _word_unit_bounds_core(paragraph_text: str, offset: int, backward: bool = False) -> tuple[int, int] | None:
+    """Core logic for finding inner word unit in paragraph_text.
 
-    Start is inclusive and end is exclusive. Uses _word_char_class to classify
-    characters (big_word=False). Returns (0, 0) for empty paragraph_text.
+    If backward is False, returns the (start, end) indices (start inclusive,
+    end exclusive) of the unit containing `offset`.
+    If backward is True, returns the (start, end) indices of the unit
+    immediately preceding `offset`, or None when offset <= 0.
+    For empty paragraph_text, (0, 0) is returned.
     """
     length = len(paragraph_text)
     if length == 0:
         return 0, 0
-    i = min(max(0, offset), length - 1)
+
     classify = _word_char_class
+    if backward:
+        if offset <= 0:
+            return None
+        i = min(offset - 1, length - 1)
+    else:
+        i = min(max(0, offset), length - 1)
+
     cls = classify(paragraph_text[i], big_word=False)
     start = i
     end = i
+
     for _ in range(length):
         if start <= 0:
             break
         if classify(paragraph_text[start - 1], big_word=False) != cls:
             break
         start -= 1
+
     for _ in range(length):
         if end + 1 >= length:
             break
         if classify(paragraph_text[end + 1], big_word=False) != cls:
             break
         end += 1
+
     return start, end + 1
+
+
+def _word_unit_bounds(paragraph_text: str, offset: int) -> tuple[int, int]:
+    """Return the (start, end) indices of the word-like unit containing offset.
+
+    Preserves the original behaviour and signature.
+    """
+    res = _word_unit_bounds_core(paragraph_text, offset, backward=False)
+    # Core never returns None for backward=False, but keep a fallback just in case
+    return res if res is not None else (0, 0)
 
 
 def _word_unit_bounds_backward(paragraph_text: str, offset: int) -> tuple[int, int] | None:
     """Return the (start, end) indices of the word-like unit immediately
-    preceding offset (searching backward).
-
-    If offset is 0 or the paragraph is empty, returns None or (0, 0) as
-    appropriate. The returned end index is exclusive.
+    preceding offset (searching backward). May return None when offset <= 0.
     """
-    length = len(paragraph_text)
-    if length == 0:
-        return 0, 0
-    if offset <= 0:
-        return None
-    i = min(offset - 1, length - 1)
-    classify = _word_char_class
-    cls = classify(paragraph_text[i], big_word=False)
-    start = i
-    end = i
-    for _ in range(length):
-        if start <= 0:
-            break
-        if classify(paragraph_text[start - 1], big_word=False) != cls:
-            break
-        start -= 1
-    for _ in range(length):
-        if end + 1 >= length:
-            break
-        if classify(paragraph_text[end + 1], big_word=False) != cls:
-            break
-        end += 1
-    return start, end + 1
+    return _word_unit_bounds_core(paragraph_text, offset, backward=True)
 
 
 def _range_at_paragraph_offset(paragraph_cursor, offset: int):
