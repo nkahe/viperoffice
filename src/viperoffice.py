@@ -771,9 +771,9 @@ def _scroll_window(expand:bool, count:int, forward:bool, mode:Mode, lines:int|No
         return False
 
 
-def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
-    """Go to line [count] motion. Commands 'G' and 'gg'.
-    Args:
+def _to_line(expand: bool, raw_count: int, default_end: bool, mode) -> bool:
+    """Go to line [count] motion. Commands 'G' and 'gg'. Linewise in
+       Operation-pending mode. Args:
 
     expand: bool       Expand selection
     raw_count: int     Move to line [count].
@@ -797,6 +797,9 @@ def _to_line(expand:bool, raw_count:int, default_end:bool) -> bool:
 
         if raw_count > 1:
             cursor.goDown(raw_count - 1, expand)  # [count]G/gg
+
+        if mode == "pending":
+            _select_linewise()
         return True
     except Exception:
         return False
@@ -3005,7 +3008,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # Available motions after "g" command.
         if "g" in (key.pending or ""):
             motions = {
-                "g": lambda: _to_line(expand, self.get_raw_count(), False),
+                "g": lambda: _to_line(expand, self.get_raw_count(), False, mode),
                 "e": lambda: _word_motion(_WORD_MOTION_GE, expand, count, mode),
                 "E": lambda: _word_motion(_WORD_MOTION_G_BIG_E, expand, count, mode)
             }
@@ -3025,7 +3028,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "$": lambda: _to_end_of_line(expand, count, mode),
                 "H": lambda: _jump_to_page(expand, "start"),
                 "L": lambda: _jump_to_page(expand, "end"),
-                "G": lambda: _to_line(expand, self.get_raw_count(), True),
+                "G": lambda: _to_line(expand, self.get_raw_count(), True, mode),
                 ")": lambda: _sentences_forward(expand, count),
                 "(": lambda: _sentences_backwards(expand, count),
                 "}": lambda: _paragraphs_forward(expand, count),
