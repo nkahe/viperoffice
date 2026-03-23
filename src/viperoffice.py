@@ -1040,7 +1040,7 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
 
             case  "j":
                 if mode == "pending":
-                    _to_start_of_line(False, False)
+                    cursor.gotoStartOfLine(False)
                     count += 1
                 return bool(cursor.goDown(count, expand))
 
@@ -1053,7 +1053,7 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
                     tc = _get_text_cursor()
                     if tc is not None and not tc.isEndOfParagraph():
                         cursor.goRight(1, False)
-                    _to_start_of_line(True, False)
+                    cursor.gotoStartOfLine(True)
                     count += 1
                 return bool(cursor.goUp(count, expand))
 
@@ -1064,16 +1064,22 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
         return False
 
 
-def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
-    """Motion to start of line. Commands '0' and '^'."""
+def _to_start_of_line(expand: bool, mode = "normal") -> bool:
+    """Motion to start of line. Command '0'"""
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    if mode == "pending":
+        cursor.collapseToStart()
+    return cursor.gotoStartOfLine(expand)
 
+
+def _to_first_non_blank(expand) -> bool:
+    """Motion to first non-blank character in line. Command '^'."""
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
-        if not first_non_blank:
-            return bool(cursor.gotoStartOfLine(expand))
-
         # This variable represents the original line the cursor was on before
         # any of the following changes.
         old_line = cursor.getPosition().Y
@@ -1101,6 +1107,7 @@ def _to_start_of_line(expand:bool, first_non_blank:bool) -> bool:
         # Move the cursor to the first non space/tab character.
         if i > 0:
             cursor.goRight(i, expand)
+
         return True
     except Exception:
         return False
@@ -1198,7 +1205,7 @@ def _insert_text(cmd:str, mode: Mode = "normal"):
                     # Move to the line where the selection starts before going
                     # to line start.
                     cursor.gotoRange(cursor.getStart(), False)
-                _to_start_of_line(False, True)
+                _to_first_non_blank(False)
 
             case _:
                 return False
@@ -1217,7 +1224,7 @@ def _begin_new_paragraph(above: bool):
             return False
 
         if above:
-            _to_start_of_line(False, False)
+            cursor.gotoStartOfLine(False)
         else:
             _to_end_of_line(False, 0, None)
             cursor.goRight(1, False)
@@ -3040,7 +3047,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
                 "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
-                "^": lambda: _to_start_of_line(expand, True),
+                "^": lambda: _to_first_non_blank(expand),
                 "$": lambda: _to_end_of_line(expand, count, mode),
                 "H": lambda: _jump_to_page(expand, "start"),
                 "L": lambda: _jump_to_page(expand, "end"),
@@ -3056,7 +3063,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 ",": lambda: _repeat_last_to_character(count, expand, key),
             }
             if key.char == "0" and self.get_raw_count() == 0:
-                motions["0"] = lambda: _to_start_of_line(expand, False)
+                motions["0"] = lambda: _to_start_of_line(expand, mode)
 
         return motions
 
