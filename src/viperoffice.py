@@ -3156,8 +3156,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         moved = self._match_motions(key, mode)
         if moved is not None:
-            if moved and mode == "pending":
-                return self._apply_pending_operator(key, mode)
+            if mode == "pending":
+                if moved:
+                    return self._apply_pending_operator(key, mode)
+                else:
+                    _reset_count()
+                    _goto_mode("normal")
             return True
 
         if mode == "visual":
