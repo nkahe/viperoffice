@@ -1090,7 +1090,7 @@ def _to_start_of_line(expand: bool, mode = "normal") -> bool:
     return cursor.gotoStartOfLine(expand)
 
 
-def _to_first_non_blank(expand) -> bool:
+def _to_first_non_blank(expand, count = 0) -> bool:
     """Motion to first non-blank character in line. Command '^'."""
     cursor = _get_cursor()
     if cursor is None:
@@ -3006,7 +3006,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             c_code: lambda: self._ctrl_c_command(mode),
             d_code: lambda: _scroll_window(expand, count, True, mode, scroll_count),
             f_code: lambda: _scroll_window(expand, count, True, mode, False),
-            r_code: lambda: _undo_and_redo(count, True),
+            r_code: lambda: _redo(count),
             u_code: lambda: _scroll_window(expand, count, False, mode, scroll_count),
         }
         return actions
@@ -3367,6 +3367,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _navigation_keys(self, expand, mode: Mode):
         count = self.count
         backspace = int(Key.BACKSPACE)
+        enter     = int(Key.RETURN)
         left      = int(Key.LEFT)
         right     = int(Key.RIGHT)
         up        = int(Key.UP)
@@ -3380,6 +3381,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # with operators and for pageup/pagedown handle selection.
         return {
             backspace: "h",
+            enter:     lambda: _to_first_non_blank(expand, count),
             left:      "h",
             right:     "l",
             up:        "k",

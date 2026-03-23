@@ -56,7 +56,8 @@ Currently supported commands:
 - In Visual mode: swap cursor position to other end of selection: `o`.
 
 Aliases:
-- `Ins` = i, `BS` = h, `C-c` copy in Visual mode, navigation keys are mapped to equivalent motions.
+- `Ins` = i, `BS` = h, `C-c` copy in Visual mode, `<CR>` downwards to first non-black character.
+- Navigation keys are mapped to equivalent motions.
 
 Mouse:
 - Mouse selection in Normal mode switch to Visual mode.
