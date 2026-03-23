@@ -751,10 +751,10 @@ def _scroll_window(expand:bool, count:int, forward:bool, mode:Mode, lines:int|No
         if lines:
             if forward:
                 for _ in range(count):
-                    _hjkl_motion("j", lines, expand, mode)
+                    _line_down(lines, expand, mode)
             else:
                 for _ in range(count):
-                    _hjkl_motion("k", lines, expand, mode)
+                    _line_up(lines, expand, mode)
         else:
             anchor = _state().get("visual_anchor") if expand else None
             if forward:
@@ -1038,28 +1038,44 @@ def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
                     count += 1
                 return bool(cursor.goRight(count, expand))
 
-            case  "j":
-                if mode == "pending":
-                    cursor.gotoStartOfLine(False)
-                    count += 1
-                return bool(cursor.goDown(count, expand))
-
-            case "k":
-                if mode == "pending":
-                    _to_end_of_line(False, 1, None)
-                    # At a soft-wrap point the inter-word space sits at the start of
-                    # the next visual line. Step past it so the selection includes it
-                    # and doesn't get left behind as a leading space after deletion.
-                    tc = _get_text_cursor()
-                    if tc is not None and not tc.isEndOfParagraph():
-                        cursor.goRight(1, False)
-                    cursor.gotoStartOfLine(True)
-                    count += 1
-                return bool(cursor.goUp(count, expand))
-
             case _:
                 return False
 
+    except Exception:
+        return False
+
+
+def _line_up(count:int, expand:bool, mode: Mode) -> bool:
+    """Motion for [count] lines up. Command 'k'. """
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    try:
+        if mode == "pending":
+            _to_end_of_line(False, 1, None)
+            # At a soft-wrap point the inter-word space sits at the start of
+            # the next visual line. Step past it so the selection includes it
+            # and doesn't get left behind as a leading space after deletion.
+            tc = _get_text_cursor()
+            if tc is not None and not tc.isEndOfParagraph():
+                cursor.goRight(1, False)
+                cursor.gotoStartOfLine(True)
+                count += 1
+        return bool(cursor.goUp(count, expand))
+    except Exception:
+        return False
+
+
+def _line_down(count:int, expand:bool, mode: Mode) -> bool:
+    """Motion for [count] lines down. Command 'j'. """
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    try:
+        if mode == "pending":
+            cursor.gotoStartOfLine(False)
+            count += 1
+        return bool(cursor.goDown(count, expand))
     except Exception:
         return False
 
@@ -1080,6 +1096,9 @@ def _to_first_non_blank(expand) -> bool:
     if cursor is None:
         return False
     try:
+        if count:
+            cursor.goDown(count, expand)
+
         # This variable represents the original line the cursor was on before
         # any of the following changes.
         old_line = cursor.getPosition().Y
@@ -1167,7 +1186,6 @@ def _select_linewise() -> bool:
         sel_end   = text_cursor.getEnd()
         cursor.gotoRange(sel_start, False)
         cursor.gotoStartOfLine(False)
-        line_start = cursor.getStart()
         cursor.gotoRange(sel_end, True)
         cursor.gotoEndOfLine(True)
         return True
@@ -1387,18 +1405,28 @@ def _paste(count:int, mode, after_cursor:bool = True):
         return False
 
 
-def _undo_and_redo(count=1, redo=False) -> bool:
-    """Undo or redo changes. Commands 'u' and 'C-r'."""
+def _undo(count=1) -> bool:
+    """Undo changes. Command 'u'."""
     doc = _current_doc()
     if doc is None:
         return False
     try:
-        if redo:
-            for _ in range(count):
-                doc.getUndoManager().redo()
-        else:
-            for _ in range(count):
-                doc.getUndoManager().undo()
+        for _ in range(count):
+            doc.getUndoManager().undo()
+        return True
+    except Exception:
+        # Non-fatal when no more undo actions exist.
+        return False
+
+
+def _redo(count=1) -> bool:
+    """Redo changes. Command 'C-r'."""
+    doc = _current_doc()
+    if doc is None:
+        return False
+    try:
+        for _ in range(count):
+            doc.getUndoManager().redo()
         return True
     except Exception:
         # Non-fatal when no more undo actions exist.
@@ -3009,8 +3037,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "r": lambda: self._r_command(count, key),
                 "s": lambda: _delete_characters(count, key),
                 "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
-                "u": lambda: _undo_and_redo(count, redo=False),
-                "U": lambda: _undo_and_redo(count, redo=True),
+                "u": lambda: _undo(count),
+                "U": lambda: _redo(count),
                 "v": lambda: _goto_mode("visual"),
                 "x": lambda: _delete_characters(count, key),
                 "X": lambda: _delete_characters(count, key),
@@ -3053,8 +3081,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         else:
             motions = {
                 "h": lambda: _hjkl_motion("h", count, expand, mode),
-                "j": lambda: _hjkl_motion("j", count, expand, mode),
-                "k": lambda: _hjkl_motion("k", count, expand, mode),
+                "j": lambda: _line_down(count, expand, mode),
+                "k": lambda: _line_up(count, expand, mode),
                 "l": lambda: _hjkl_motion("l", count, expand, mode),
                 "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
                 "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
@@ -3270,7 +3298,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             # For dd, cc, yy, S do motion lines down from current line.
             elif mode == "pending" and key.pending[0] == key.char or \
                 key.char == "S":
-                motion = partial(_hjkl_motion, "j", count -1, True, mode)
+                motion = partial(_line_down, count -1, True, mode)
             else:
                 motion = motions.get(key.char)
         else:
