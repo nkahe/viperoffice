@@ -1090,14 +1090,19 @@ def _to_start_of_line(expand: bool, mode = "normal") -> bool:
     return cursor.gotoStartOfLine(expand)
 
 
-def _to_first_non_blank(expand, count = 0) -> bool:
-    """Motion to first non-blank character in line. Command '^'."""
+def _to_first_non_blank(expand, count = 0, up: bool = False) -> bool:
+    """Motion to first non-blank character in current line, [count] lines down
+       or up if 'up' is True. Commands '^', '-', '+', <CR>.
+    """
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
         if count:
-            cursor.goDown(count, expand)
+            if up:
+                cursor.goUp(count, expand)
+            else:
+                cursor.goDown(count, expand)
 
         # This variable represents the original line the cursor was on before
         # any of the following changes.
@@ -3104,6 +3109,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 # "m": lambda: _to_end_of_sentence(expand),
                 ";": lambda: _repeat_last_to_character(count, expand, key),
                 ",": lambda: _repeat_last_to_character(count, expand, key),
+                "+": lambda: _to_first_non_blank(expand, count, False),
+                "-": lambda: _to_first_non_blank(expand, count, True),
+                "_": lambda: _to_first_non_blank(expand, count - 1, False),
             }
             if key.char == "0" and self.get_raw_count() == 0:
                 motions["0"] = lambda: _to_start_of_line(expand, mode)

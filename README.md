@@ -42,7 +42,7 @@ This will simply build the extension file from the template files in
 
 Currently supported commands:
 - Insert: `i`, `I`, `a`, `A`, `o`, `O`, Visual `v`.
-- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `H`, `L`, `()`, `{}`
+- Motions: `hjkl`, `$`, `0`, `^`, `gg`, `G`, `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`, `H`, `L`, `()`, `{}`, `<CR>`, `+`, `-`, `_`
 - To character motions: `f`, `F`, `t`, `T`, `;`, `,`
 - Number count for most commands. Example `10j`, `3gg`, `d4gE`
 - Scrolling: `C-f`, `C-b`, `C-d`, `C-u`
@@ -56,7 +56,7 @@ Currently supported commands:
 - In Visual mode: swap cursor position to other end of selection: `o`.
 
 Aliases:
-- `Ins` = i, `BS` = h, `C-c` copy in Visual mode, `<CR>` downwards to first non-black character.
+- `Ins` = i, `BS` = h, `C-c` copy in Visual mode
 - Navigation keys are mapped to equivalent motions.
 
 Mouse:
