@@ -1181,38 +1181,46 @@ def _select_linewise() -> bool:
 
 # Insert, delete, replace characters
 
-def _insert_text(cmd:str, mode: Mode = "normal"):
-    """For Normal and Visual mode commands 'a', 'I', 'A'"""
+def _append_text():
+    """Command 'a'."""
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    textCursor = _get_text_cursor()
+    try:
+        if textCursor is not None and not textCursor.isEndOfParagraph():
+            cursor.goRight(1, False)
+    except Exception:
+        pass
+
+
+def _append_text_to_end_of_line(mode: Mode = "normal"):
+    """Command 'A'."""
     try:
         cursor = _get_cursor()
         if cursor is None:
             return False
-
-        match cmd:
-            case "A":
-                if mode == "visual":
-                    if cursor is not None:
-                        cursor.gotoRange(cursor.getEnd(), False)
-                _to_end_of_line(False, 1, None)
-
-            case "a":
-                textCursor = _get_text_cursor()
-                if textCursor is not None and not textCursor.isEndOfParagraph():
-                    cursor.goRight(1, False)
-
-            case "I":
-                if mode == "visual":
-                    # Move to the line where the selection starts before going
-                    # to line start.
-                    cursor.gotoRange(cursor.getStart(), False)
-                _to_first_non_blank(False)
-
-            case _:
-                return False
-
-        return True
+        if mode == "visual":
+            if cursor is not None:
+                cursor.gotoRange(cursor.getEnd(), False)
+        _to_end_of_line(False, 1, None)
+        return
     except Exception:
+        pass
+
+
+def _insert_before_first_non_blank(mode):
+    """Command 'I'."""
+    cursor = _get_cursor()
+    if cursor is None:
         return False
+    try:
+        if mode == "visual":
+            # Move to the line where the selection starts before going to line start.
+            cursor.gotoRange(cursor.getStart(), False)
+        return _to_first_non_blank(False)
+    except Exception:
+        pass
 
 
 def _begin_new_paragraph(above: bool):
@@ -1461,6 +1469,13 @@ _WORD_MOTION_BIG_W = {
     "target": START,
     "big_word": True,
     "cross_empty": True,
+    "inclusive": False,
+}
+_WORD_OBJECT_BACK = {
+    "direction": BACKWARD,
+    "target": END,
+    "big_word": False,
+    "cross_empty": False,
     "inclusive": False,
 }
 
@@ -2979,14 +2994,14 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             }
         else:
             actions = {
-                "a": lambda: _insert_text("a", mode),
-                "A": lambda: _insert_text("A", mode),
+                "a": _append_text,
+                "A": lambda: _append_text_to_end_of_line(mode),
                 "c": lambda: self._c_d_commands(key, mode),
                 "d": lambda: self._c_d_commands(key, mode),
                 "C": lambda: _yank_and_delete_to_end_of_line(count, mode),
                 "D": lambda: _yank_and_delete_to_end_of_line(count, mode),
                 "i": lambda: True,
-                "I": lambda: _insert_text("I", mode),
+                "I": lambda: _insert_before_first_non_blank(mode),
                 "o": lambda: _begin_new_paragraph(above = False),
                 "O": lambda: _begin_new_paragraph(above = True),
                 "p": lambda: _paste(count, mode),
