@@ -21,20 +21,18 @@ ViperOffice (like Vi/Vim) operates in different modes. The current mode is shown
 Motion commands can follow an operator to make the operator act on the text moved over (the text between the cursor before and after the motion). Operators are commonly used to delete or change text. The main operators:
 
 - `c` — change
-- `d` — delete
-- `y` — yank into register (does not change the text)
+- `d` — delete and yank (copy) to clipboard
+- `y` — yank into clipboard (does not change the text)
 
 ### Left-right motions
 
 These commands move the cursor horizontally in the current line. Most are exclusive motions (they do not include the target character) except where noted.
 
-- `h`, `<Left>`, `CTRL-H`, `<BS>`
+- `h`, `<Left>`, `<BS>`
   - Move [count] characters left. Exclusive motion.
-  - Tip: to map `<BS>` literally, use `:map CTRL-V<BS> X` (press `CTRL-V` then `<BS>`).
 
-- `l`, `<Right>`, `<Space>`
+- `l`, `<Right>`
   - Move [count] characters right. Exclusive motion.
-  - See the `whichwrap` option to adjust end-of-line behavior.
 
 - `0` or `<Home>`
   - Move to the first character of the line. Exclusive motion.
@@ -46,7 +44,6 @@ These commands move the cursor horizontally in the current line. Most are exclus
 - `$`, `<End>`
   - Move to the end of the line (inclusive). With a count N also go `N-1` lines down if possible.
   - In Visual mode `$` places the cursor just after the last character.
-  - With `virtualedit` enabled, `$` may move the cursor back from past EOL to the last character.
 
 - `f{char}`
   - Move to the [count]th occurrence of `{char}` to the right; cursor lands on `{char}` (inclusive).
@@ -67,20 +64,15 @@ These commands move the cursor horizontally in the current line. Most are exclus
 
 ### Up-down motions
 
-- `k`, `<Up>` — move up [count] logical lines.
-- `j`, `<Down>` — move down [count] logical lines.
-
-- `gk`, `g<Up>` — move [count] display lines upward (exclusive). Differs from `k` when lines wrap and with operators because it's not linewise.
-- `gj`, `g<Down>` — move [count] display lines downward (exclusive). Differs from `j` when lines wrap and with operators because it's not linewise.
-
-- `<CR>`
-  - Move [count] lines downward, to the first non-blank character (linewise).
-
-- `G`
-  - Go to line [count], default last line, to the first non-blank character (linewise).
-
-- `gg`
-  - Go to line [count], default first line, to the first non-blank character (linewise).
+- `k`, `<Up>`  — move [count] display lines upward (exclusive).
+- `j`, `<Down>` — move [count] display lines downward (exclusive).
+- `<CR>` - Move [count] lines downward, to the first non-blank character (linewise).
+- `G` - Go to line [count], default last line, to the first non-blank character (linewise).
+- `gg` - Go to line [count], default first line, to the first non-blank character (linewise).
+- `H` - Go to start of page.
+- `L` - Go to end of page.
+- `CTRL-U` - Move cursor 20 lines up [count] times.
+- `CTRL-D` - Move cursor 20 lines down [count] times.
 
 ### Word motions
 
@@ -108,10 +100,88 @@ Text-object commands work in Visual mode or after an operator. Commands starting
 
 - `aw` — "a word": select [count] words (leading/trailing whitespace included but not counted). In Visual linewise mode `aw` becomes charwise.
 - `iw` — "inner word": select [count] words (whitespace between words is counted). In Visual linewise mode `iw` becomes charwise.
-
 - `as` — "a sentence": select [count] sentences. In Visual mode it's charwise.
-
 - `ap` — "a paragraph": select [count] paragraphs. A blank line (only whitespace) is a paragraph boundary. In Visual mode it's linewise.
 - `ip` — "inner paragraph": select [count] paragraphs. A blank line is a paragraph boundary. In Visual mode it's linewise.
 
 (When using these commands, combine them with operators, e.g. `daw` to delete a word including surrounding whitespace.)
+
+
+## Scroll
+
+`CTRL-B` or `PageUp` - Scroll window [count] pages Backwards (upwards) in the document.
+`CTRL-F` or `PageDown` - Scroll window [count] pages Forwards (downwards) in the document.
+
+
+## Insert mode
+
+<Esc> or CTRL-[ - End insert mode, go back to Normal mode.
+CTRL-C - Quit insert mode, go back to Normal mode.
+
+## Change
+
+"x]x	or Del		Delete [count] characters under and after the cursor
+			(not linewise).
+The <Del> key does not take a [count].  Instead, it
+			deletes the last character of the count.
+
+X			Delete [count] characters before the cursor.
+
+d{motion}		Delete text that {motion} moves to clipboard.
+dd			Delete [count] lines into clipboard linewise.
+D			Delete the characters under the cursor until the end
+			of the line and [count]-1 more lines to clipboard. synonym for "d$".
+			(not linewise)
+{Visual}x or Del - Delete the highlighted text 
+{Visual}d - Delete highligted text to clipboard.
+{Visual}X - Delete the highlighted lines. 
+{Visual}D		Delete the highlighted lines to clipboard
+
+## Delete and insert
+
+`c{motion}` — Delete the text that `{motion}` moves into `clipboard.i`, then start Insert mode.
+
+`cc` — Delete [count] lines into `clipboard.i` and start Insert mode.
+
+C			Delete from the cursor position to the end of the
+ the line and [count]-1 more lines into `clipboard.i`, then start Insert mode.
+		start insert.  Synonym for c$ (not linewise).
+
+`s` — Delete [count] characters into `clipboard.i` and start Insert mode (substitute).
+		insert (s stands for Substitute).  Synonym for "cl" (not linewise).
+
+`S` — Delete [count] lines into `clipboard.i` and start Insert mode. (Synonym for `cc`, linewise).
+Synonym for "cc" linewise.
+
+{Visual}["clipboard.i"]c
+{Visual}["clipboard.i"]s — Delete the highlighted text into `clipboard.i` and start Insert mode.
+			start insert (for {Visual} see Visual-mode).
+
+{Visual}r{char}		Replace all selected characters by {char}.
+
+{Visual}["clipboard.i"]C — Delete the highlighted lines into `clipboard.i` and start Insert mode.
+			start insert. 
+
+{Visual}["clipboard.i"]S — Delete the highlighted lines into `clipboard.i` and start Insert mode.
+			start insert.
+
+
+## Simple changes
+
+r{char}			Replace the character under the cursor with {char}.
+			If {char} is a <CR> or <NL>, a line break replaces the
+			character. 
+
+## Copying and moving text
+
+`y{motion}` — Yank `{motion}` text into `clipboard.i` (does not change the text).
+
+`yy` — Yank [count] lines into `clipboard.i` (linewise).
+
+`Y` — Yank [count] lines into `clipboard.i` (synonym for `yy`, linewise).
+
+		Mapped to "y$" by default. default-mappings
+
+`p` — Put the text from `clipboard.i` after the cursor [count] times.
+
+`P` — Put the text from `clipboard.i` before the cursor [count] times.
