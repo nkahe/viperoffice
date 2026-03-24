@@ -2122,7 +2122,7 @@ def _to_start_of_word_object(text_cursor, cursor):
         text_cursor.collapseToStart()
         move_1_right = False
         # if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-        if _is_cursor_on_whitespace(text_cursor):
+        if _is_cursor_at_whitespace(text_cursor):
             # move_1_right = True
             text_cursor = _select_whitespace(text_cursor)
             # Move the view cursor to the start of the visual line and sync
@@ -2193,18 +2193,6 @@ def _expand_with_word_text_objects(count, key, mode) -> bool:
 # ------------------
 # Sentence motions
 # ------------------
-
-def _is_cursor_on_whitespace(text_cursor) -> bool:
-    if text_cursor is None:
-        return False
-    try:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-        if not probe.goRight(1, True):
-            return False
-        return probe.getString() in (" ", "\t", "\n")
-    except Exception:
-        return False
-
 
 def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
     """Return True if cursor is on a whitespace character.
@@ -2419,7 +2407,7 @@ def _is_at_sentence_start(text_cursor) -> bool:
         return False
     try:
         # Whitespace is never a sentence start.
-        if _is_cursor_on_whitespace(text_cursor):
+        if _is_cursor_at_whitespace(text_cursor):
             return False
         probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
         if probe.isStartOfParagraph():
