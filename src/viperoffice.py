@@ -742,7 +742,7 @@ def _go_to_other_end(mode: Mode) -> bool:
 # ----------------------
 
 def _scroll_window(expand:bool, count:int, forward:bool, mode:Mode, lines:int|None=None) -> bool:
-    """Scroll window. Commands 'C-f', 'C-b', 'C-u', 'C-d'.
+    """Scroll window. Commands 'C-f' or <PageDown>, 'C-b' or <PageUp>, 'C-u', 'C-d'.
     """
     try:
         cursor = _get_cursor()
@@ -751,10 +751,10 @@ def _scroll_window(expand:bool, count:int, forward:bool, mode:Mode, lines:int|No
         if lines:
             if forward:
                 for _ in range(count):
-                    _line_down(lines, expand, mode)
+                    _lines_down(lines, expand, mode)
             else:
                 for _ in range(count):
-                    _line_up(lines, expand, mode)
+                    _lines_up(lines, expand, mode)
         else:
             anchor = _state().get("visual_anchor") if expand else None
             if forward:
@@ -1019,34 +1019,35 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent) -> bool:
 # Lines
 # ------------------
 
-def _hjkl_motion(cmd:str, count:int, expand:bool, mode: Mode) -> bool:
-    """Motion to left/right [count] characters for commands 'h' and 'l' and
-    [count] lines up and down for commands 'j' and 'k'.
-    """
+
+def _characters_left(count, expand, mode) -> bool:
+    """Motion for [count] characters left. Command 'h', <Left> or <BS>."""
     cursor = _get_cursor()
     if cursor is None:
         return False
     try:
-        match cmd:
-            case "h":
-                if mode == "pending":
-                    cursor.collapseToStart()
-                return bool(cursor.goLeft(count, expand))
-
-            case "l":
-                if mode == "pending":
-                    count += 1
-                return bool(cursor.goRight(count, expand))
-
-            case _:
-                return False
-
+        if mode == "pending":
+            cursor.collapseToStart()
+        return bool(cursor.goLeft(count, expand))
     except Exception:
         return False
 
 
-def _line_up(count:int, expand:bool, mode: Mode) -> bool:
-    """Motion for [count] lines up. Command 'k'. """
+def _characters_right(count, expand, mode) -> bool:
+    """Motion for [count] characters right. Command 'l' or <Right>. """
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    try:
+        if mode == "pending":
+            cursor.collapseToStart()
+        return bool(cursor.goRight(count, expand))
+    except Exception:
+        return False
+
+
+def _lines_up(count:int, expand:bool, mode: Mode) -> bool:
+    """Motion for [count] lines up. Command 'k' or <Up>. """
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -1066,8 +1067,8 @@ def _line_up(count:int, expand:bool, mode: Mode) -> bool:
         return False
 
 
-def _line_down(count:int, expand:bool, mode: Mode) -> bool:
-    """Motion for [count] lines down. Command 'j'. """
+def _lines_down(count:int, expand:bool, mode: Mode) -> bool:
+    """Motion for [count] lines down. Command 'j' or <Down>. """
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -1081,7 +1082,7 @@ def _line_down(count:int, expand:bool, mode: Mode) -> bool:
 
 
 def _to_start_of_line(expand: bool, mode = "normal") -> bool:
-    """Motion to start of line. Command '0'"""
+    """Motion to start of line. Command '0' or <Home>"""
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -1138,8 +1139,9 @@ def _to_first_non_blank(expand, count = 0, up: bool = False) -> bool:
 
 
 def _to_end_of_line(expand:bool, count:int, mode) -> bool:
-    """Motion to end of line and optionally [count -1] lines down.
-       Command '$'. """
+    """Motion to end of line and optionally [count] -1 lines down.
+    Command '$' or <End>.
+    """
     cursor = _get_cursor()
     if cursor is None:
         return False
@@ -1371,7 +1373,7 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
 
 def _yank_and_delete_to_end_of_line(count: int, mode: Mode, delete = True) -> bool:
     """ Delete the characters until the end of the line and
-        [count]-1 more lines. Normal mode commands 'C', 'D', 'Y'."""
+        [count] - 1 more lines. Normal mode commands 'C', 'D', 'Y'."""
     # Makes cursor to collapse to get correct range.
     motion_mode = "pending" if mode == "normal" else mode
     _to_end_of_line(True, count, motion_mode)
@@ -1379,7 +1381,7 @@ def _yank_and_delete_to_end_of_line(count: int, mode: Mode, delete = True) -> bo
 
 
 def _paste(count:int, mode, after_cursor:bool = True):
-    """Paste text from clipboard after or before cursor {count} times.
+    """Paste text from clipboard after or before cursor [count] times.
        Commands 'p' and 'P'.
     """
     text_cursor = _get_text_cursor()
@@ -1425,7 +1427,7 @@ def _undo(count=1) -> bool:
 
 
 def _redo(count=1) -> bool:
-    """Redo changes. Command 'C-r'."""
+    """Redo changes. Command 'C-r' or 'U'."""
     doc = _current_doc()
     if doc is None:
         return False
@@ -1919,7 +1921,6 @@ def _word_unit_bounds_core(paragraph_text: str, offset: int, backward: bool = Fa
 
 def _word_unit_bounds(paragraph_text: str, offset: int) -> tuple[int, int]:
     """Return the (start, end) indices of the word-like unit containing offset.
-
     Preserves the original behaviour and signature.
     """
     res = _word_unit_bounds_core(paragraph_text, offset, backward=False)
@@ -1975,7 +1976,7 @@ def _advance_word_units_forward(paragraph_cursor, paragraph_text: str, offset: i
         if remaining <= 0:
             break
         if current_end_excl >= len(current_text):
-            moved = _goto_next_paragraph_start(paragraph_cursor)
+            moved = _goto_paragraph_start(paragraph_cursor, True)
             if moved is None:
                 break
             current_text, _ = moved
@@ -2008,7 +2009,7 @@ def _advance_word_units_backward(paragraph_cursor, paragraph_text: str, offset: 
 
         bounds = _word_unit_bounds_backward(text, off)
         if bounds is None:
-            moved = _goto_previous_paragraph_start(paragraph_cursor)
+            moved = _goto_paragraph_start(paragraph_cursor, False)
             if moved is None:
                 return None
             text, _ = moved
@@ -3085,10 +3086,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             }
         else:
             motions = {
-                "h": lambda: _hjkl_motion("h", count, expand, mode),
-                "j": lambda: _line_down(count, expand, mode),
-                "k": lambda: _line_up(count, expand, mode),
-                "l": lambda: _hjkl_motion("l", count, expand, mode),
+                "h": lambda: _characters_left(count, expand, mode),
+                "j": lambda: _lines_down(count, expand, mode),
+                "k": lambda: _lines_up(count, expand, mode),
+                "l": lambda: _characters_right(count, expand, mode),
                 "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
                 "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
                 "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
@@ -3306,7 +3307,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             # For dd, cc, yy, S do motion lines down from current line.
             elif mode == "pending" and key.pending[0] == key.char or \
                 key.char == "S":
-                motion = partial(_line_down, count -1, True, mode)
+                motion = partial(_lines_down, count -1, True, mode)
             else:
                 motion = motions.get(key.char)
         else:
