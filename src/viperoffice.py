@@ -3708,21 +3708,81 @@ def _is_function_key(event):
 # Non-editor functionality: initialization, enabling and disabling extension,
 # handling controllers, listening events.
 
-def _desktop():
-    try:
-        return XSCRIPTCONTEXT.getDesktop()
-    except Exception:
-        return None
+
+def enable_viper_office():
+    """Enable ViperOffice"""
+    state = _state()
+    if not state["started"]:
+        _initialize()
+    state["enabled"] = True
+    _activate_for_current_view()
+    controller = _get_controller()
+    if controller is not None:
+        state["view_cursor"] = controller.getViewCursor()
+    _set_mode("normal")
+    _show_cursor("normal")
 
 
-# If component is oducment not for example Calc sheet.
-def _is_text_document(doc):
-    if doc is None:
-        return False
+def disable_viper_office():
+    """Disable ViperOffice"""
+    state = _state()
+    state["enabled"] = False
+    _restore_status_all_views()
+    _restore_lo_default_cursor_all_views()
+
+
+def toggle_viper_office():
+    """Toggle enabling of ViperOffice"""
+    state = _state()
+    if state["enabled"] is True:
+        disable_viper_office()
+    else:
+        enable_viper_office()
+
+
+def _initialize():
+    state = _state()
+    state["started"] = True
+    # Detach any previously registered handler before creating a new one.
+    _detach_key_handler_from_all_views()
+    state["key_handler"] = KeyHandler()
+    _attach_key_handler_to_all_views()
+    _start_view_event_listener()
+    enable_viper_office()
+
+
+def _activate_for_current_view():
+    state = _state()
+    controller = _get_controller()
+    if controller is None:
+        return
+    _state()["view_cursor"] = controller.getViewCursor()
+    _update_statusline(controller)
+    if state["mode"] == "normal":
+        _show_normal_cursor_for_controller(controller)
+    else:
+        _show_insert_cursor_for_controller(controller)
+
+
+def _restore_status_all_views():
+    for controller in _iter_text_document_controllers():
+        _restore_status_for_controller(controller)
+
+
+def _restore_lo_default_cursor_all_views():
+    for controller in _iter_text_document_controllers():
+        _show_insert_cursor_for_controller(controller)
+
+
+def _restore_status_for_controller(controller):
+    if controller is None:
+        return
     try:
-        return bool(doc.supportsService("com.sun.star.text.TextDocument"))
+        layout = controller.getFrame().LayoutManager
+        layout.destroyElement("private:resource/statusbar/statusbar")
+        layout.createElement("private:resource/statusbar/statusbar")
     except Exception:
-        return False
+        pass
 
 
 def _iter_text_document_controllers():
@@ -3753,17 +3813,21 @@ def _iter_text_document_controllers():
         return
 
 
-def _global_event_broadcaster():
-    state = _state()
-    if state["global_event_broadcaster"] is not None:
-        return state["global_event_broadcaster"]
+def _desktop():
     try:
-        ctx = XSCRIPTCONTEXT.getComponentContext()
-        broadcaster = ctx.getByName("/singletons/com.sun.star.frame.theGlobalEventBroadcaster")
-        state["global_event_broadcaster"] = broadcaster
-        return broadcaster
+        return XSCRIPTCONTEXT.getDesktop()
     except Exception:
         return None
+
+
+# If component is oducment not for example Calc sheet.
+def _is_text_document(doc):
+    if doc is None:
+        return False
+    try:
+        return bool(doc.supportsService("com.sun.star.text.TextDocument"))
+    except Exception:
+        return False
 
 
 def _detach_key_handler_from_all_views():
@@ -3819,31 +3883,43 @@ def _attach_controller(controller):
             pass
 
 
-def _show_normal_cursor_for_controller(controller):
-    if controller is None:
+def _start_view_event_listener():
+    _stop_view_event_listener()
+    state = _state()
+    broadcaster = _global_event_broadcaster()
+    if broadcaster is None:
         return
+    listener = ViewEventListener()
     try:
-        cursor = controller.getViewCursor()
-        textCursor = cursor.getText().createTextCursorByRange(cursor)
-        textCursor.gotoRange(textCursor.getStart(), False)
-        moved = textCursor.goRight(1, False)
-        if moved:
-            textCursor.goLeft(1, True)
-        controller.select(textCursor)
+        broadcaster.addEventListener(listener)
+        state["view_event_listener"] = listener
     except Exception:
-        pass
+        state["view_event_listener"] = None
 
 
-def _show_insert_cursor_for_controller(controller):
-    if controller is None:
-        return
+def _stop_view_event_listener():
+    state = _state()
+    broadcaster = _global_event_broadcaster()
+    listener = state.get("view_event_listener")
+    if broadcaster is not None and listener is not None:
+        try:
+            broadcaster.removeEventListener(listener)
+        except Exception:
+            pass
+    state["view_event_listener"] = None
+
+
+def _global_event_broadcaster():
+    state = _state()
+    if state["global_event_broadcaster"] is not None:
+        return state["global_event_broadcaster"]
     try:
-        cursor = controller.getViewCursor()
-        textCursor = cursor.getText().createTextCursorByRange(cursor)
-        textCursor.gotoRange(textCursor.getStart(), False)
-        controller.select(textCursor)
+        ctx = XSCRIPTCONTEXT.getComponentContext()
+        broadcaster = ctx.getByName("/singletons/com.sun.star.frame.theGlobalEventBroadcaster")
+        state["global_event_broadcaster"] = broadcaster
+        return broadcaster
     except Exception:
-        pass
+        return None
 
 
 class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
@@ -3968,106 +4044,31 @@ class ViewEventListener(unohelper.Base, XEventListener):
         return None
 
 
-def _start_view_event_listener():
-    _stop_view_event_listener()
-    state = _state()
-    broadcaster = _global_event_broadcaster()
-    if broadcaster is None:
-        return
-    listener = ViewEventListener()
-    try:
-        broadcaster.addEventListener(listener)
-        state["view_event_listener"] = listener
-    except Exception:
-        state["view_event_listener"] = None
-
-
-def _stop_view_event_listener():
-    state = _state()
-    broadcaster = _global_event_broadcaster()
-    listener = state.get("view_event_listener")
-    if broadcaster is not None and listener is not None:
-        try:
-            broadcaster.removeEventListener(listener)
-        except Exception:
-            pass
-    state["view_event_listener"] = None
-
-
-def _activate_for_current_view():
-    state = _state()
-    controller = _get_controller()
-    if controller is None:
-        return
-    _state()["view_cursor"] = controller.getViewCursor()
-    _update_statusline(controller)
-    if state["mode"] == "normal":
-        _show_normal_cursor_for_controller(controller)
-    else:
-        _show_insert_cursor_for_controller(controller)
-
-
-def _restore_status_for_controller(controller):
+def _show_normal_cursor_for_controller(controller):
     if controller is None:
         return
     try:
-        layout = controller.getFrame().LayoutManager
-        layout.destroyElement("private:resource/statusbar/statusbar")
-        layout.createElement("private:resource/statusbar/statusbar")
+        cursor = controller.getViewCursor()
+        textCursor = cursor.getText().createTextCursorByRange(cursor)
+        textCursor.gotoRange(textCursor.getStart(), False)
+        moved = textCursor.goRight(1, False)
+        if moved:
+            textCursor.goLeft(1, True)
+        controller.select(textCursor)
     except Exception:
         pass
 
 
-def _restore_status_all_views():
-    for controller in _iter_text_document_controllers():
-        _restore_status_for_controller(controller)
-
-
-def _restore_default_cursor_all_views():
-    for controller in _iter_text_document_controllers():
-        _show_insert_cursor_for_controller(controller)
-
-
-def _initialize():
-    state = _state()
-    state["started"] = True
-    # Detach any previously registered handler before creating a new one.
-    _detach_key_handler_from_all_views()
-    state["key_handler"] = KeyHandler()
-    _attach_key_handler_to_all_views()
-    _start_view_event_listener()
-    enable_viper_office()
-
-
-def enable_viper_office():
-    """Enable ViperOffice"""
-    state = _state()
-    if not state["started"]:
-        _initialize()
-    state["enabled"] = True
-    _activate_for_current_view()
-    controller = _get_controller()
-    if controller is not None:
-        state["view_cursor"] = controller.getViewCursor()
-    _set_mode("normal")
-    _show_cursor("normal")
-
-
-def disable_viper_office():
-    """Disable ViperOffice"""
-    state = _state()
-    state["enabled"] = False
-    _restore_status_all_views()
-    _restore_default_cursor_all_views()
-
-
-def toggle_viper_office():
-    """Toggle enabling of ViperOffice"""
-    state = _state()
-    if state["enabled"] is True:
-        disable_viper_office()
-    else:
-        enable_viper_office()
+def _show_insert_cursor_for_controller(controller):
+    if controller is None:
+        return
+    try:
+        cursor = controller.getViewCursor()
+        textCursor = cursor.getText().createTextCursorByRange(cursor)
+        textCursor.gotoRange(textCursor.getStart(), False)
+        controller.select(textCursor)
+    except Exception:
+        pass
 
 
 g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office, \
