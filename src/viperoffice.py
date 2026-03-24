@@ -62,7 +62,9 @@ def _state() -> _StateDict:
             "key_handler": None,
             "view_event_listener": None,
             "global_event_broadcaster": None,
+            # One mouse listener shared across controllers.
             "mouse_listener": None,
+            "mouse_listener_controllers": set(),
             # Anchor (fixed end) of visual mode selection. Saved when entering
             # visual mode so motions know which end is the caret.
             "visual_anchor": None,
@@ -558,7 +560,7 @@ def _ensure_visual_caret(cursor, at_end: bool) -> None:
 # UNO doesn't offer call to get caret position when there's selection. Usually
 # state.visual_anchor is set and tracked but for situations it's not available
 # this can be used.
-def _test_if_forward_selection(cursor) -> bool:
+def _is_forward_selection(cursor) -> bool:
     """Return True if caret is at right end of selection, False if at left end."""
     if cursor is None:
         return True
@@ -572,19 +574,6 @@ def _test_if_forward_selection(cursor) -> bool:
         return True
     except Exception:
         return True
-
-
-def _finalize_mouse_selection(anchor, caret) -> None:
-    """Re-apply visual selection after mouse release (post-LO cursor update)."""
-    try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return
-        _set_mode("visual")
-        _set_visual_anchor(anchor)
-        _set_visual_selection(cursor, anchor, caret)
-    except Exception:
-        pass
 
 
 def _pos_xy(pos: object) -> tuple[Any, Any]:
@@ -2165,7 +2154,7 @@ def _expand_with_word_text_objects(count, key, mode) -> bool:
 
     anchor = _state().get("visual_anchor")
     if anchor is None:
-        is_forward = _test_if_forward_selection(cursor)
+        is_forward = _is_forward_selection(cursor)
         anchor = cursor.getStart() if is_forward else cursor.getEnd()
         _set_visual_anchor(anchor)
         caret = cursor.getEnd() if is_forward else cursor.getStart()
@@ -3792,12 +3781,13 @@ def _detach_controller(controller):
         except Exception:
             break
     listener = state.get("mouse_listener")
-    if listener is not None:
+    controllers = state.get("mouse_listener_controllers")
+    if listener is not None and controllers and id(controller) in controllers:
         try:
             controller.removeMouseClickHandler(listener)
         except Exception:
             pass
-        state["mouse_listener"] = None
+        controllers.discard(id(controller))
 
 
 def _attach_key_handler_to_all_views():
@@ -3816,11 +3806,15 @@ def _attach_controller(controller):
         controller.addKeyHandler(state["key_handler"])
     except Exception:
         pass
-    if state.get("mouse_listener") is None:
+    listener = state.get("mouse_listener")
+    if listener is None:
         listener = MouseSelectionListener()
+        state["mouse_listener"] = listener
+    controllers = state.setdefault("mouse_listener_controllers", set())
+    if id(controller) not in controllers:
         try:
             controller.addMouseClickHandler(listener)
-            state["mouse_listener"] = listener
+            controllers.add(id(controller))
         except Exception:
             pass
 
@@ -3878,6 +3872,12 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
             return False
         _reset_count()
         _reset_pending_keys()
+        controller = _get_controller()
+        if controller is not None:
+            try:
+                state["view_cursor"] = controller.getViewCursor()
+            except Exception:
+                pass
         cursor = _get_cursor()
         if cursor is None:
             return False
@@ -3887,28 +3887,45 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
             sel_len = 0
 
         if sel_len < 2:
-            # Plain click → re-apply the 1-char normal-mode cursor at the new
-            # position. Use a short delay so LibreOffice finishes placing its
+            # No extended selection -> apply Normal mode cursor.
+            #
+            # Use a short delay so LibreOffice finishes placing its
             # own cursor before we override it (race condition otherwise).
             if _get_mode() != "insert":
                 threading.Timer(0.05, _show_cursor, args=["normal"]).start()
             return False
 
-        # Detect which end is the caret by probing selection growth on +1 char.
-        #
-        # Didn't manage to get MouseDragListener to work correctly so this is used.
-        # This needs less boilerplate code so better in that regard.
+        self._apply_visual_mode_when_mouse_selection(cursor)
+        return False
+
+    # Didn't manage to get MouseDragListener to work correctly so this is used.
+    # This needs less boilerplate code so better in that regard.
+    def _apply_visual_mode_when_mouse_selection(self, cursor):
+        """Applies Visual mode when text is selected with mouse in any window."""
+        if cursor is None:
+            return
         sel_start = cursor.getStart()
         sel_end = cursor.getEnd()
-        if _test_if_forward_selection(cursor):
+        if _is_forward_selection(cursor):
             anchor = sel_start
             caret = sel_end
         else:
             anchor = sel_end
             caret = sel_start
-        # Re-apply after LO finishes its own mouse-up cursor update.
-        threading.Timer(0.02, _finalize_mouse_selection, args=[anchor, caret]).start()
-        return False
+        # Apply after LO finishes its own mouse-up cursor update.
+        threading.Timer(0.02, self._finalize_mouse_selection, args=[anchor, caret]).start()
+
+    def _finalize_mouse_selection(self, anchor, caret) -> None:
+        """Finalizes applying visual selection after mouse release (post-LO cursor update)."""
+        try:
+            cursor = _get_cursor()
+            if cursor is None:
+                return
+            _set_mode("visual")
+            _set_visual_anchor(anchor)
+            _set_visual_selection(cursor, anchor, caret)
+        except Exception:
+            pass
 
     def disposing(self, event):
         return None
