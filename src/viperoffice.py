@@ -2999,7 +2999,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def _normal_ctrl_actions(self, expand: bool, mode: Mode):
         count = self.count
-        b_code = int(getattr(Key, "B", 512))
+        a_code = int(getattr(Key, "A", 512))
+        b_code = int(getattr(Key, "B", 513))
         c_code = int(getattr(Key, "C", 514))
         d_code = int(getattr(Key, "D", 515))
         f_code = int(getattr(Key, "F", 517))
@@ -3008,6 +3009,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         scroll_count = _get_scroll()
 
         actions = {
+            a_code: lambda: _goto_mode("visual"),
             b_code: lambda: _scroll_window(expand, count, False, mode, False),
             c_code: lambda: self._ctrl_c_command(mode),
             d_code: lambda: _scroll_window(expand, count, True, mode, scroll_count),
@@ -3173,7 +3175,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if is_ctrl:
             run_command = self._match_ctrl_commands(key, expand, mode)
             if run_command is not None:
-                return True
+                # Allow LO to handle Ctrl-A.
+                a_code = int(getattr(Key, "A", 512))
+                if key.code == a_code:
+                    return False
+            return True
 
         # Pass other non-shift modified shortcuts through, except characters
         # made with AltGr.
