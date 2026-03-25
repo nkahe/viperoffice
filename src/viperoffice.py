@@ -3111,11 +3111,12 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if is_ctrl:
             run_command = self._match_ctrl_commands(key, expand, mode)
-            if run_command is not None:
-                # Allow LO to handle Ctrl-A.
-                a_code = int(getattr(Key, "A", 512))
-                if key.code == a_code:
-                    return False
+            if run_command is None:
+                return False
+            # Allow LO to handle Ctrl-A.
+            a_code = int(getattr(Key, "A", 512))
+            if key.code == a_code:
+                return False
             return True
 
         # Pass other non-shift modified shortcuts through, except characters
