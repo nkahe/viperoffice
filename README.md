@@ -4,7 +4,7 @@ ViperOffice is an extension for LibreOffice and OpenOffice that brings subset of
 Vi/(Neo)Vim text editors text editing and navigation capabilities to word processing.
 
 This is a new project under development and in it's early stages. Feature set is
-incomplete and breakage can happen since there is lots of moving parts. Code isn't very refined yet.
+incomplete and breakage can happen since there is lots of moving parts.
 
 Some of the of code is partially based on LibreOffice extensions
 - [jmagers/vibreoffice](https://github.com/jmagers/vibreoffice) and [fedorov-ao/vibreoffice](https://github.com/fedorov-ao/vibreoffice)
@@ -50,7 +50,7 @@ Currently supported commands:
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`, `S`
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
-- Text-objects: `as`, `ip`, `ap`, `iw`
+- Text-objects: `as`, `ip`, `ap`, `iw`, `iW`
 - Search: `/` (LibreOffice search bar)
 
 - In Visual mode: swap cursor position to other end of selection: `o`.
