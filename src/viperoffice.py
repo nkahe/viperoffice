@@ -2479,8 +2479,7 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
-# TODO: inner sentence.
-def _select_sentence_text_objects(count:int, key:KeyEvent):
+def _select_sentence_text_objects(count: int, key: KeyEvent):
     """Select "as" sentence text-objects forward from the start of current object.
        Visual or pending mode.
     """
@@ -2490,6 +2489,7 @@ def _select_sentence_text_objects(count:int, key:KeyEvent):
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
+    # TODO: inner sentence.
     if not is_around:
         return False
 
@@ -2519,15 +2519,17 @@ def _select_sentence_text_objects(count:int, key:KeyEvent):
     return moved
 
 
-def _select_sentences_from_cursor(count: int, key: KeyEvent) -> bool:
+def _expand_with_sentences_objects(count: int, key: KeyEvent) -> bool:
     """Select as sentence text-objects from cursor point to direction of selection"""
     cursor = _get_cursor()
     if cursor is None:
         return False
-    anchor = _state().get("visual_anchor")
-    select_backwards = anchor is not None and _range_starts_before(cursor, anchor)
+    select_forward = _is_forward_selection(cursor)
 
-    if not select_backwards:
+    if len(cursor.getString()) <= 1:
+        return _select_sentence_text_objects(count, key)
+
+    if select_forward:
         moved = _sentences_forward(True, count)
 
     else:
@@ -2625,16 +2627,6 @@ def _range_after_paragraph_break(text_range):
     except Exception:
         pass
     return None
-
-
-def _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty) -> bool:
-    if started_empty:
-        _move_to_empty_block_start(text_cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-        return True
-    if text_cursor.isStartOfParagraph():
-        return True
-    return _paragraphs_backward(False, 1)
 
 
 def _extend_selection_after_empty_block(text_cursor, cursor):
@@ -2791,7 +2783,8 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _select_paragraph_text_objects(count: int, key: KeyEvent):
+
+def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode):
     """
     Select "ip"/"ap" paragraph text-objects forward from the start of current object.
 
@@ -2806,8 +2799,21 @@ def _select_paragraph_text_objects(count: int, key: KeyEvent):
     is_around = key.pending is not None and key.pending[-1] == "a"
 
     started_empty = _is_current_paragraph_empty(text_cursor)
-    if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
+
+    if started_empty:
+        _move_to_empty_block_start(text_cursor)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        return True
+    if text_cursor.isStartOfParagraph():
+        return True
+    moved = _paragraphs_backward(False, 1)
+    if not moved:
         return False
+
+    if mode == "visual":
+        text_cursor = _get_text_cursor()
+        if text_cursor:
+            _set_visual_anchor(text_cursor.getStart())
 
     moved = _paragraphs_forward(True, count)
     if not moved:
@@ -2819,7 +2825,7 @@ def _select_paragraph_text_objects(count: int, key: KeyEvent):
     return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
 
 
-def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
+def _expand_with_paragraph_objects(count: int, key: KeyEvent, mode: Mode) -> bool:
     """Extend an existing visual selection by ip/ap paragraph text objects.
 
     Called when cursor already has a selection Determines direction from the
@@ -2831,11 +2837,13 @@ def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
     if text_cursor is None or cursor is None:
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
-    anchor = _state().get("visual_anchor")
     caret = _get_visual_caret_range(text_cursor)
 
-    # Backward when caret is the LEFT end (i.e. anchor is right of caret).
-    select_backwards = anchor is not None and _range_starts_before(caret, anchor)
+    select_forward = _is_forward_selection(cursor)
+
+    if len(cursor.getString()) <= 1:
+        _select_paragraph_text_objects(count, key, mode)
+        return True
 
     text_cursor.gotoRange(caret, False)
     started_empty = _is_current_paragraph_empty(text_cursor)
@@ -2843,7 +2851,7 @@ def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
         _move_to_empty_block_start(text_cursor)
         cursor.gotoRange(text_cursor.getStart(), True)
 
-    if select_backwards:
+    if not select_forward:
         if is_around:
             moved = _select_ap_units_backward_visual(cursor, count)
         else:
@@ -2855,7 +2863,7 @@ def _select_paragraphs_from_cursor(count: int, key: KeyEvent) -> bool:
 
     if not moved:
         return False
-    if select_backwards:
+    if not select_forward:
         return True
 
     text_cursor = _get_text_cursor()
@@ -3054,7 +3062,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         count = self.count
         text_objects = {
             "s": lambda: _select_sentence_text_objects(count, key),
-            "p": lambda: _select_paragraph_text_objects(count, key),
+            "p": lambda: _select_paragraph_text_objects(count, key, mode),
             "w": lambda: _select_word_text_objects(count, key, mode),
         }
         return text_objects
@@ -3062,8 +3070,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _visual_text_objects(self, key, mode):
         count = self.count
         text_objects = {
-            "s": lambda: _select_sentences_from_cursor(count, key),
-            "p": lambda: _select_paragraphs_from_cursor(count, key),
+            "s": lambda: _expand_with_sentences_objects(count, key),
+            "p": lambda: _expand_with_paragraph_objects(count, key, mode),
             "w": lambda: _expand_with_word_text_objects(count, key, mode),
         }
         return text_objects
