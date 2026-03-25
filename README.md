@@ -50,6 +50,7 @@ Currently supported commands:
 - Scrolling: `C-f`, `C-b`, `C-d`, `C-u`
 - Replace: `r`
 - Deletion: `x`, `X`, `d`, `dd`, `D`, `c`, `cc`, `C`, `s`, `S`
+- Registers: `"_`
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
 - Text-objects: `as`, `ip`, `ap`, `iw`, `iW`

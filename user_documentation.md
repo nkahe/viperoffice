@@ -129,6 +129,8 @@ Text-object commands work in Visual mode or after an operator. Commands starting
 
 ## Delete and copy
 
+- `"_` — Black hole register. Next delete command that would yank text to clipboard,
+  just deletes it instead leaving clipboard untouched.
 - `x` or `<Del>` — Delete [count] characters under and after the cursor
   (not linewise). The `<Del>` key does not take a [count].  Instead,
   it deletes the last character of the count.

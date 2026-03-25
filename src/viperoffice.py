@@ -1361,13 +1361,13 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
         return False
 
 
-def _yank_and_delete_to_end_of_line(count: int, mode: Mode, delete = True) -> bool:
+def _yank_and_delete_to_end_of_line(count: int, mode: Mode, yank: bool , delete: bool = True) -> bool:
     """ Delete the characters until the end of the line and
         [count] - 1 more lines. Normal mode commands 'C', 'D', 'Y'."""
     # Makes cursor to collapse to get correct range.
     motion_mode = "pending" if mode == "normal" else mode
     _to_end_of_line(True, count, motion_mode)
-    return _copy_and_delete(yank = True, delete = delete)
+    return _copy_and_delete(yank, delete)
 
 
 def _paste(count:int, mode, after_cursor:bool = True):
@@ -3001,8 +3001,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "A": lambda: _append_text_to_end_of_line(mode),
                 "c": lambda: self._c_d_commands(key, mode),
                 "d": lambda: self._c_d_commands(key, mode),
-                "C": lambda: _yank_and_delete_to_end_of_line(count, mode),
-                "D": lambda: _yank_and_delete_to_end_of_line(count, mode),
+                "C": lambda: _yank_and_delete_to_end_of_line(count, mode, "_" not in key.pending),
+                "D": lambda: _yank_and_delete_to_end_of_line(count, mode, "_" not in key.pending),
+                "Y": lambda: _yank_and_delete_to_end_of_line(count, mode, False, False),
                 "i": lambda: True,
                 "I": lambda: _insert_before_first_non_blank(mode),
                 "o": lambda: _begin_new_paragraph(above = False),
@@ -3018,7 +3019,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "x": lambda: _delete_characters(count, key),
                 "X": lambda: _delete_characters(count, key),
                 "y": lambda: self._y_command(key, mode),
-                "Y": lambda: _yank_and_delete_to_end_of_line(count, mode, False),
                 "/": _focus_findbar,
                 # "n": lambda: _repeat_search(count),
                 # "N": lambda: _repeat_search(count, backward=True),
@@ -3028,17 +3028,18 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def _visual_commands_keymap(self, key, mode):
         actions = {
-            "D": lambda: _copy_and_delete_linewise(yank = True, delete = True),
+            "C": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = True),
+            "D": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = True),
             "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
-            "Y": lambda: _copy_and_delete_linewise(yank = True, delete = False),
-            "X": lambda: _copy_and_delete_linewise(yank = True, delete = True),
+            "X": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = True),
+            "Y": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = False),
             "o": lambda: _go_to_other_end(mode),
             "O": lambda: _go_to_other_end(mode),
             "v": lambda: _goto_mode("visual"),
-            "c": lambda: _copy_and_delete(True, True),
-            "d": lambda: _copy_and_delete(yank = True, delete = True),
+            "c": lambda: _copy_and_delete("_" not in key.pending, True),
+            "d": lambda: _copy_and_delete("_" not in key.pending, True),
             "s": lambda: _copy_and_delete(yank = False, delete = True),
-            "x": lambda: _copy_and_delete(yank = True, delete = True),
+            "x": lambda: _copy_and_delete(yank = False, delete = True),
             "y": lambda: _yank(key, mode),
         }
         return actions
@@ -3239,26 +3240,35 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     # Match first letter for multi-part motions.
     def _match_motion_prefix(self, key, mode):
 
-        motion_prefixes = "fFtTgai"
+        motion_prefixes = 'fFtTgai'
         if key.pending and key.pending[-1] in motion_prefixes:
             return None
 
-        if key.char in ("fFtT"):
+        if key.char in ('fFtT"'):
             self._add_pending_key(key.char)
             return True
 
-        if key.char == "g" and key.pending in (None, "d", "y", "c"):
+        if key.char == "g" and (key.pending is None or mode == "pending"):
             self._add_pending_key("g")
             return True
+
+        if key.pending == '"':
+            if key.char == "_":
+                self._add_pending_key(key.char)
+                return True
+            else:
+                self._cancel_two_part_motion(mode)
+                return True
 
         if mode not in ("pending", "visual"):
             return None
 
         if key.char in ("ai"):
-            if key.pending is None or key.pending in ("cdy"):
+            if key.pending is None or mode == "pending":
                 return self._add_pending_key(key.char)
             else:
                 return self._cancel_two_part_motion(mode)
+
         return None
 
     def _match_motions(self, key, mode: Mode):
@@ -3280,8 +3290,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if key.pending[-1] in "fFtT":
                 motion = partial(self._ft_commands, expand, key, mode)
             # For dd, cc, yy, S do motion lines down from current line.
-            elif mode == "pending" and key.pending[0] == key.char or \
-                key.char == "S":
+            elif mode == "pending" and (key.pending[0] == key.char or key.char == "S"):
                 motion = partial(_lines_down, count -1, True, mode)
             else:
                 motion = motions.get(key.char)
@@ -3316,6 +3325,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if action is None:
             return None
         did_action = action()
+        # After doing action:
         self._reset_count()
         if key.char.lower() in ("cs"):
             _goto_mode("insert")
@@ -3338,6 +3348,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if action is None:
             return None
         did_action = action()
+        # After doing action:
         if key.char.lower() in ("aios"):
             self._reset_count()
             _goto_mode("insert")
@@ -3383,7 +3394,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if mode == "visual":
             self._reset_count()
             self.reset_pending_keys()
-        elif mode == "pending":
+        else:
             _goto_mode("normal")
         return True
 
@@ -3393,9 +3404,10 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if not key.pending:
             return False
 
-        if key.pending[0] in ("cd"):
-            _copy_and_delete(True, True)
-        elif key.pending[0] == "y":
+        if "c" in key.pending or "d" in key.pending:
+            print("applying d")
+            _copy_and_delete("_" not in key.pending, True)
+        elif "y" in key.pending:
             _yank(key, mode)
         else:
             return False
@@ -3408,7 +3420,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if mode == "normal" and key.char in ("cd"):
             self._add_pending_key(key.char)
             return True
-        return _copy_and_delete(True, True)
+        return _copy_and_delete("_" not in key.pending, True)
 
     def _ctrl_c_command(self, mode: Mode) -> bool:
         if mode == "normal":
