@@ -1077,7 +1077,8 @@ def _to_start_of_line(expand: bool, mode = "normal") -> bool:
         return False
     if mode == "pending":
         cursor.collapseToStart()
-    return cursor.gotoStartOfLine(expand)
+    cursor.gotoStartOfLine(expand)
+    return True
 
 
 def _to_first_non_blank(expand, count = 0, up: bool = False) -> bool:
