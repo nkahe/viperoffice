@@ -31,6 +31,8 @@ This will simply build the extension file from the template files in
 `extension/template`. These template files were auto-generated using
 [Extension Compiler](https://wiki.openoffice.org/wiki/Extensions_Packager#Download).
 
+For how to use different commands, please read [user documentation](user_documentation.md).
+
 ## Features
 
 - Multi-window support.
@@ -65,8 +67,8 @@ Mouse:
 Insert mode commands:
 - Switch to Normal mode: `Esc` or with alias `C-[`. 
 
-For info about commands you can refer to [Neovim docs](https://neovim.io/doc/user/) since
-they are similar in functionality.
+Commands are described in more detail in the [user documentation](user_documentation.md).
+
 
 ## Shortcuts for enabling and disabling
 
@@ -91,6 +93,7 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. You ca
 - `Y` does same as `y$`.
 - `C-d` and `C-u` default scrolling of 20 lines instead of half page since there's no reliable way to get position of half page. Number of scrolled lines can changed with extension's global variable `SCROLL`.
 - Sentence motions use LibreOffice's definition of a sentence. Selected language can have an effect for that. For example first alphabet of sentence may need to be in upper case for it to be considered as sentence.
+
 
 ## Known issues / missing features
 

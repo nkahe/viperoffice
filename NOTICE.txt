@@ -1,0 +1,3 @@
+This project includes user documentation derived from Vim documentation,
+which is licensed under Vim License. See. LICENCES/VIM-LICENSE.
+The original content has been modified.
