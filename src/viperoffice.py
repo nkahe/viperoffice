@@ -234,6 +234,41 @@ def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnused
         pass
 
 
+def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportUnusedFunction]
+    """Return a human-readable description of an XTextRange-like object.
+
+    Output includes the range text (trimmed) and start/end offsets measured from
+    the start of the containing paragraph (end is exclusive). Returns a short
+    placeholder if the range is None or unprintable.
+    """
+    try:
+        if range is None:
+            return "None"
+        text = range.getString()
+        para = range.getText()
+        # Compute start offset relative to paragraph start
+        start_range = range.getStart()
+        start_cursor = para.createTextCursorByRange(start_range)
+        start_cursor.gotoStartOfParagraph(False)
+        start_cursor.gotoRange(start_range, True)
+        start_offset = len(start_cursor.getString())
+        # Compute end offset relative to paragraph start (exclusive)
+        end_range = range.getEnd()
+        end_cursor = para.createTextCursorByRange(end_range)
+        end_cursor.gotoStartOfParagraph(False)
+        end_cursor.gotoRange(end_range, True)
+        end_offset = len(end_cursor.getString())
+        snippet = text.replace("\n", "\\n")
+        if len(snippet) > 120:
+            snippet = snippet[:117] + "..."
+        return f"'{snippet}' (start_offset={start_offset}, end_excl={end_offset})"
+    except Exception:
+        try:
+            return f"<unprintable range: {range}>"
+        except Exception:
+            return "<unprintable range>"
+
+
 def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Print debug info about view cursor and text cursor ranges to console. For development use."""
     cursor = _get_cursor()
