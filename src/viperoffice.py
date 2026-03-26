@@ -3189,17 +3189,18 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     def _visual_commands_keymap(self, key, mode):
+        do_yank = True if "_" not in (key.pending or "") else False
         actions = {
-            "C": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = True),
-            "D": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = True),
+            "C": lambda: _copy_and_delete_linewise(do_yank, delete = True),
+            "D": lambda: _copy_and_delete_linewise(do_yank, delete = True),
             "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
-            "X": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = True),
-            "Y": lambda: _copy_and_delete_linewise("_" not in key.pending, delete = False),
+            "X": lambda: _copy_and_delete_linewise(do_yank, delete = True),
+            "Y": lambda: _copy_and_delete_linewise(do_yank, delete = False),
             "o": lambda: _go_to_other_end(mode),
             "O": lambda: _go_to_other_end(mode),
             "v": lambda: _goto_mode("visual"),
-            "c": lambda: _copy_and_delete("_" not in key.pending, True),
-            "d": lambda: _copy_and_delete("_" not in key.pending, True),
+            "c": lambda: _copy_and_delete(do_yank, True),
+            "d": lambda: _copy_and_delete(do_yank, True),
             "s": lambda: _copy_and_delete(yank = False, delete = True),
             "x": lambda: _copy_and_delete(yank = False, delete = True),
             "y": lambda: _yank(key, mode),
