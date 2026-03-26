@@ -2128,6 +2128,26 @@ def _around_word_ranges_forward(text_cursor, steps: int, big_word: bool = False)
 
         for i in range(steps):
             paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+            if len(paragraph_text) == 0:
+                if start_range is None:
+                    start_range = _range_at_paragraph_offset(text_cursor, 0)
+                try:
+                    text_cursor.gotoEndOfParagraph(False)
+                    end_after = _range_after_paragraph_break(text_cursor.getEnd())
+                except Exception:
+                    end_after = None
+                end_range = end_after or text_cursor.getEnd()
+                if end_range is None or start_range is None:
+                    return None, None
+                text_cursor.gotoRange(end_range, False)
+                continue
+
+            if offset >= len(paragraph_text):
+                if not text_cursor.gotoNextParagraph(False):
+                    return None, None
+                text_cursor.gotoStartOfParagraph(False)
+                paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+
             bounds = _around_word_unit_bounds(paragraph_text, offset, FORWARD, big_word)
             if bounds is None:
                 return None, None
@@ -2172,6 +2192,11 @@ def _around_word_caret_backward(text_cursor, caret_range, steps: int, big_word: 
 
         for i in range(steps):
             paragraph_text, offset = _current_paragraph_text_and_offset(probe)
+            if offset == 0:
+                if not probe.gotoPreviousParagraph(False):
+                    return None
+                probe.gotoEndOfParagraph(False)
+                paragraph_text, offset = _current_paragraph_text_and_offset(probe)
             scan_offset = max(0, offset - 1)
             bounds = _around_word_unit_bounds(paragraph_text, scan_offset, BACKWARD, big_word)
 
