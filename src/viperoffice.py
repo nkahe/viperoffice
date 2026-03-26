@@ -2317,6 +2317,9 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
         if not condition:
             return True
 
+        if _is_current_paragraph_empty(text_cursor):
+            return False
+
         if condition == "after_sentence":
         # Walk backwards past whitespace and closing punctuation to find sentence end.
             probe.collapseToStart()
