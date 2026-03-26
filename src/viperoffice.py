@@ -2752,6 +2752,29 @@ def _move_to_empty_block_start(text_cursor) -> bool:
     return False
 
 
+def _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty: bool) -> bool:
+    """Normalize paragraph text-object selection start.
+
+    Moves the cursors to the start of the current paragraph or empty-line block
+    so 'ip'/'ap' selections expand from a stable anchor.
+    """
+    if text_cursor is None or cursor is None:
+        return False
+    try:
+        if started_empty:
+            if not _move_to_empty_block_start(text_cursor):
+                return False
+            cursor.gotoRange(text_cursor.getStart(), False)
+            return True
+
+        if not text_cursor.isStartOfParagraph():
+            text_cursor.gotoStartOfParagraph(False)
+        cursor.gotoRange(text_cursor.getStart(), False)
+        return True
+    except Exception:
+        return False
+
+
 def _consume_empty_block_forward(text_cursor):
     end_range = None
     for _ in _paragraph_scan_steps():
@@ -2947,15 +2970,7 @@ def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode):
     is_around = key.pending is not None and key.pending[-1] == "a"
 
     started_empty = _is_current_paragraph_empty(text_cursor)
-
-    if started_empty:
-        _move_to_empty_block_start(text_cursor)
-        cursor.gotoRange(text_cursor.getStart(), False)
-        return True
-    if text_cursor.isStartOfParagraph():
-        return True
-    moved = _paragraphs_backward(False, 1)
-    if not moved:
+    if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
         return False
 
     if mode == "visual":
@@ -3524,7 +3539,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
 
         if "c" in key.pending or "d" in key.pending:
-            print("applying d")
             _copy_and_delete("_" not in key.pending, True)
         elif "y" in key.pending:
             _yank(key, mode)
