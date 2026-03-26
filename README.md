@@ -38,6 +38,7 @@ For how to use different commands, please read [user documentation](user_documen
 - Multi-window support.
 - Modes: Normal, Operator-pending, Insert, Visual.
 - Vi(m) -like word, WORD, sentence and paragraph motions.
+- Word, sentence and paragraph text-objects.
 - Most command can take number count and use it like Vi(m).
 - Passthrough of not-used shortcuts so most of LibreOffice's shortcuts are still available.
 - Statusline with mode, count, pending commands.
@@ -53,7 +54,7 @@ Currently supported commands:
 - Registers: `"_`
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
-- Text-objects: `as`, `ip`, `ap`, `iw`, `iW`
+- Text-objects:  `iw`, `iW`, `aw`, `aW`, `as`, `ip`, `ap`
 - Search: `/` (LibreOffice search bar)
 
 - In Visual mode: swap cursor position to other end of selection: `o`.

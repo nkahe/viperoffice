@@ -112,8 +112,12 @@ space. An empty line is also considered to be a WORD.
 
 Text-object commands work in Visual mode or after an operator. Commands starting with `a` select an object including surrounding whitespace; commands starting with `i` select the "inner" object without surrounding whitespace. Inner commands select less text than the corresponding `a` commands.
 
-- `aw` — "a word": select [count] words (leading/trailing whitespace included but not counted). In Visual linewise mode `aw` becomes charwise.
-- `iw` — "inner word": select [count] words (whitespace is treated as word and is counted). In Visual linewise mode `iw` becomes charwise.
+- `aw` — "a word": select [count] words (leading/trailing whitespace included but not counted).
+- `aW —`"a WORD", select [count] WORDs. Leading or trailing white space is included,
+  but not counted.
+- `iw` — "inner word": select [count] words (whitespace is treated as word and
+  is counted). 
+- `iW` — "inner WORD", select [count] WORDs. White space between words is counted too.
 - `as` — "a sentence": select [count] sentences. In Visual mode it's charwise.
 - `ap` — "a paragraph": select [count] paragraphs. End of paragraph character is a paragraph boundary. In Visual mode it's linewise.
 - `ip` — "inner paragraph": select [count] paragraphs. End of paragraph character is a paragraph boundary. In Visual mode it's linewise.
