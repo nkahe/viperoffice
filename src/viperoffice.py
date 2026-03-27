@@ -632,7 +632,7 @@ def _same_pos(a, b):
     return _pos_xy(a) == _pos_xy(b)
 
 
-def _sync_view_cursor_to_text_cursor(view_cursor, text_cursor, expand: bool, backward: bool = False):
+def _sync_view_cursor_to_text_cursor(text_cursor, expand: bool, view_cursor, backward: bool = False):
     if expand and backward:
         edge = text_cursor.getStart()
     elif expand:
@@ -713,7 +713,7 @@ def _set_visual_selection(cursor, anchor, new_caret, force_backward: bool = Fals
 
 
 # Based on Commit f33d46f from fedorov-ao/vibreoffice
-def _go_to_other_end(mode: Mode) -> bool:
+def _go_to_other_end(mode: Mode, cursor) -> bool:
     """Move cursor to the other end of highlighted text. Command 'o' / 'O' in visual mode.
 
     The current cursor position becomes the start of the highlighted text and
@@ -722,10 +722,6 @@ def _go_to_other_end(mode: Mode) -> bool:
     """
     if mode != "visual":
         return False
-    cursor = _get_cursor()
-    if cursor is None:
-        return False
-
     s = cursor.getString()
     if not s:
         return False
@@ -823,20 +819,16 @@ def _to_line(expand: bool, raw_count: int, default_end: bool, mode, cursor) -> b
             cursor.goDown(raw_count - 1, expand)  # [count]G/gg
 
         if mode == "pending":
-            _select_linewise()
+            _select_linewise(cursor)
         return True
     except Exception:
         return False
 
 
-def _jump_to_page(expand: bool, target: str, count:int=1) -> bool:
+def _jump_to_page(expand: bool, count, cursor, target: str = "start") -> bool:
     """Motion to start or end of a page. Commands 'H' and 'L'."""
     target = target.lower()
     try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
-
         if target not in ("start", "end", "next", "previous"):
             return False
 
@@ -893,13 +885,12 @@ def _repeat_search(count, backward: bool = False) -> bool:
         return False
 
 
-def _to_character(expand:bool, count:int, command: str, char: str) -> bool:
+def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bool:
     """Motions to move to [count]'th next / previous occurances of a character [char].
        Commands 'f', 'F', 't', 'T'.
     """
-    cursor = _get_cursor()
     doc = _current_doc()
-    if cursor is None or doc is None:
+    if doc is None:
         return False
     try:
         if command not in ("f", "F", "t", "T"):
@@ -985,14 +976,14 @@ def _to_character(expand:bool, count:int, command: str, char: str) -> bool:
                 moved_any = True
 
             probe = text.createTextCursorByRange(target_range)
-            _sync_view_cursor_to_text_cursor(cursor, probe, expand, backward=backward)
+            _sync_view_cursor_to_text_cursor(probe, expand, cursor, backward=backward)
 
         return moved_any
     except Exception:
         return False
 
 
-def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent) -> bool:
+def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent, cursor) -> bool:
     """ Repeat last to-character motion (commands f, F, t, T). Commands ';' and ','.
         key.char ';' : use same direction
         key.char ',' : use opposite direction
@@ -1034,7 +1025,7 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent) -> bool:
         if len(search_type) != 1:
             return False
 
-        return _to_character(expand, count, search_type, ft_char)
+        return _to_character(expand, count, cursor, search_type, ft_char)
 
     except Exception:
         return False
@@ -1069,7 +1060,7 @@ def _lines_up(count:int, expand:bool, mode: Mode, cursor) -> bool:
     """Motion for [count] lines up. Command 'k' or <Up>. """
     try:
         if mode == "pending":
-            _to_end_of_line(cursor, False, 1, None)
+            _to_end_of_line(False, 1, None, cursor)
             # At a soft-wrap point the inter-word space sits at the start of
             # the next visual line. Step past it so the selection includes it
             # and doesn't get left behind as a leading space after deletion.
@@ -1094,7 +1085,7 @@ def _lines_down(count:int, expand:bool, mode: Mode, cursor) -> bool:
         return False
 
 
-def _to_start_of_line(expand: bool, cursor, mode = "normal") -> bool:
+def _to_start_of_line(expand: bool, mode, cursor) -> bool:
     """Motion to start of line. Command '0' or <Home>"""
     if mode == "pending":
         cursor.collapseToStart()
@@ -1102,13 +1093,10 @@ def _to_start_of_line(expand: bool, cursor, mode = "normal") -> bool:
     return True
 
 
-def _to_first_non_blank(cursor, expand, count = 0, up: bool = False) -> bool:
+def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
     """Motion to first non-blank character in current line, [count] lines down
        or up if 'up' is True. Commands '^', '-', '+', <CR>.
     """
-    cursor = _get_cursor()
-    if cursor is None:
-        return False
     try:
         if count:
             if up:
@@ -1149,7 +1137,7 @@ def _to_first_non_blank(cursor, expand, count = 0, up: bool = False) -> bool:
         return False
 
 
-def _to_end_of_line(cursor, expand:bool, count:int, mode) -> bool:
+def _to_end_of_line(expand:bool, count:int, mode, cursor) -> bool:
     """Motion to end of line and optionally [count] -1 lines down.
     Command '$' or <End>.
     """
@@ -1168,10 +1156,6 @@ def _to_end_of_line(cursor, expand:bool, count:int, mode) -> bool:
         _, old_y = _pos_xy(old_pos)
         _, new_y = _pos_xy(new_pos)
 
-        cursor = _get_cursor()
-        if cursor is None:
-            return True
-
         if not expand:
             # LibreOffice can place cursor visually at next line start; move left
             # back to previous line end unless this was an empty-line no-op.
@@ -1183,7 +1167,7 @@ def _to_end_of_line(cursor, expand:bool, count:int, mode) -> bool:
         return False
 
 
-def _select_linewise() -> bool:
+def _select_linewise(cursor) -> bool:
     """Expand selection to cover full lines. Command 'S' and in visual mode
        commands 'C', 'D', 'X', 'Y'."""
     text_cursor = _get_text_cursor()
@@ -1193,9 +1177,6 @@ def _select_linewise() -> bool:
         # X in visual mode: expand selection to cover full visual lines.
         # gotoStartOfLine/gotoEndOfLine are view cursor methods, so use
         # the view cursor to navigate to each end of the selection first.
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
         sel_start = text_cursor.getStart()
         sel_end   = text_cursor.getEnd()
         cursor.gotoRange(sel_start, False)
@@ -1226,7 +1207,7 @@ def _append_text():
         pass
 
 
-def _append_text_to_end_of_line(cursor, mode: Mode = "normal"):
+def _append_text_to_end_of_line(mode: Mode = "normal", cursor=None):
     """Command 'A'."""
     try:
         cursor = _get_cursor()
@@ -1235,7 +1216,7 @@ def _append_text_to_end_of_line(cursor, mode: Mode = "normal"):
         if mode == "visual":
             if cursor is not None:
                 cursor.gotoRange(cursor.getEnd(), False)
-        _to_end_of_line(cursor, False, 1, None)
+        _to_end_of_line(False, 1, None, cursor)
         return
     except Exception:
         pass
@@ -1250,7 +1231,7 @@ def _insert_before_first_non_blank(mode):
         if mode == "visual":
             # Move to the line where the selection starts before going to line start.
             cursor.gotoRange(cursor.getStart(), False)
-        return _to_first_non_blank(cursor, False)
+        return _to_first_non_blank(False, 0, cursor)
     except Exception:
         pass
 
@@ -1266,7 +1247,7 @@ def _begin_new_paragraph(above: bool):
         if above:
             cursor.gotoStartOfLine(False)
         else:
-            _to_end_of_line(cursor, False, 0, None)
+            _to_end_of_line(False, 0, None, cursor)
             cursor.goRight(1, False)
 
         cursor.setString(chr(13))  # CR
@@ -1284,7 +1265,10 @@ def _copy_and_delete_linewise(yank: bool, delete: bool) -> bool:
     """Copy and/or delete whole lines where selection is.
        Command 'S' and 'C', 'D', 'X', 'Y' in Visual mode.
     """
-    _select_linewise()
+    cursor = _get_cursor()
+    if cursor is None:
+        return False
+    _select_linewise(cursor)
     return _copy_and_delete(yank, delete)
 
 
@@ -1386,7 +1370,7 @@ def _yank_and_delete_to_end_of_line(count: int, mode: Mode, yank: bool , delete:
     cursor = _get_cursor()
     if cursor is None:
         return False
-    _to_end_of_line(cursor, True, count, motion_mode)
+    _to_end_of_line(True, count, motion_mode, cursor)
     return _copy_and_delete(yank, delete)
 
 
@@ -2352,7 +2336,7 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
         return False
 
 
-def _move_to_whitespace_end_before_next_sentence(text_cursor, cursor, expand: bool) -> bool:
+def _move_to_whitespace_end_before_next_sentence(text_cursor, expand: bool, cursor) -> bool:
     try:
         probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
         if not probe.gotoNextSentence(False):
@@ -2360,13 +2344,13 @@ def _move_to_whitespace_end_before_next_sentence(text_cursor, cursor, expand: bo
         if not probe.goLeft(1, False):
             return False
         text_cursor.gotoRange(probe.getStart(), expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return True
     except Exception:
         return False
 
 
-def _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, expand: bool) -> bool:
+def _move_to_whitespace_start_after_prev_sentence(text_cursor, expand: bool, cursor) -> bool:
     try:
         probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
         for _ in _paragraph_scan_steps():
@@ -2377,7 +2361,7 @@ def _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, expand: b
             if ch not in (" ", "\t", "\n"):
                 probe.goRight(1, False)
                 text_cursor.gotoRange(probe.getStart(), expand)
-                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+                _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
                 return True
     except Exception:
         return False
@@ -2434,13 +2418,13 @@ def _to_end_of_sentence(expand: bool) -> bool:
         # Move to start of the punctuation char, then one right to include it.
         text_cursor.gotoRange(probe.getStart(), expand)
         text_cursor.goRight(1, True)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return True
     except Exception:
         return False
 
 
-def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
+def _to_next_sentence(text_cursor, expand: bool, cursor) -> bool:
     """Move cursor to the start of the next sentence, implementing one ')' motion step.
 
     Handles edge cases: empty paragraphs (jumps to next non-empty), leading paragraph
@@ -2454,7 +2438,7 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
         if moved:
             if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
                 text_cursor.gotoNextWord(expand)
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return moved
 
     # From leading whitespace of a paragraph, gotoNextSentence would skip the
@@ -2463,16 +2447,16 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
     if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
         moved = text_cursor.gotoNextWord(expand)
         if moved:
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return moved
 
     text_cursor.gotoNextSentence(expand)
-    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+    _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
 
     # Some backends land on the paragraph end marker first; skip that stop.
     if text_cursor.isEndOfParagraph() and not _is_current_paragraph_empty(text_cursor):
         text_cursor.gotoNextParagraph(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return True
 
     if _same_pos(old_pos, cursor.getPosition()):
@@ -2484,15 +2468,14 @@ def _to_next_sentence(text_cursor, cursor, expand: bool) -> bool:
         else:
             text_cursor.goRight(1, expand)
             text_cursor.gotoNextSentence(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
     return True
 
 
-def _sentences_forward(expand: bool, count: int) -> bool:
+def _sentences_forward(expand: bool, count: int, cursor) -> bool:
     """Sentences forward motion."""
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     try:
         if expand:
@@ -2504,7 +2487,7 @@ def _sentences_forward(expand: bool, count: int) -> bool:
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _to_next_sentence(text_cursor, cursor, expand):
+            if not _to_next_sentence(text_cursor, expand, cursor):
                 break
             moved_any = True
         return moved_any
@@ -2539,7 +2522,7 @@ def _is_at_sentence_start(text_cursor) -> bool:
         return False
 
 
-def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
+def _to_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
     """Move cursor to the start of the previous sentence, implementing one '(' motion step.
 
     Handles edge cases: leading paragraph whitespace (collapses to paragraph start to
@@ -2555,7 +2538,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
     force_paragraph_boundary = False
     if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
         text_cursor.gotoStartOfParagraph(False)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         force_paragraph_boundary = True
         # Fall through — cursor is now at isStartOfParagraph(), handled below.
 
@@ -2565,7 +2548,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
             and not _is_at_sentence_start(text_cursor)
             and not _is_current_paragraph_empty(text_cursor)):
         text_cursor.gotoStartOfSentence(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return True
 
     # If cursor is at the first non-whitespace character after leading paragraph
@@ -2578,7 +2561,7 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
             para_probe.gotoRange(text_cursor.getStart(), True)
             if all(c in (" ", "\t") for c in para_probe.getString()):
                 text_cursor.gotoStartOfParagraph(False)
-                _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+                _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         except Exception:
             pass
 
@@ -2590,35 +2573,34 @@ def _to_previous_sentence(text_cursor, cursor, expand:bool) -> bool:
                 return False
             while _is_current_paragraph_empty(text_cursor):
                 if not text_cursor.gotoPreviousParagraph(expand):
-                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+                    _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
                     return True
         else:
             if text_cursor.gotoPreviousParagraph(expand):
                 if _is_current_paragraph_empty(text_cursor):
-                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+                    _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
                     return True
 
         text_cursor.gotoEndOfParagraph(expand)
         if not text_cursor.isStartOfParagraph():
             text_cursor.goLeft(1, expand)
         text_cursor.gotoStartOfSentence(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return True
 
     text_cursor.gotoPreviousSentence(expand)
-    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+    _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
     if _same_pos(old_pos, cursor.getPosition()):
         if text_cursor.goLeft(1, expand):
             text_cursor.gotoPreviousSentence(expand)
-        _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
     return True
 
 
 # Repeats '(' motion by count times.
-def _sentences_backwards(expand: bool, count: int = 1) -> bool:
+def _sentences_backwards(expand: bool, count, cursor) -> bool:
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     try:
         if expand:
@@ -2628,7 +2610,7 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _to_previous_sentence(text_cursor, cursor, expand):
+            if not _to_previous_sentence(text_cursor, expand, cursor):
                 break
             moved_any = True
         return moved_any
@@ -2636,13 +2618,12 @@ def _sentences_backwards(expand: bool, count: int = 1) -> bool:
         return False
 
 
-def _select_sentence_text_objects(count: int, key: KeyEvent):
+def _select_sentence_text_objects(count: int, key: KeyEvent, cursor):
     """Select "as" sentence text-objects forward from the start of current object.
        Visual or pending mode.
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
@@ -2653,7 +2634,7 @@ def _select_sentence_text_objects(count: int, key: KeyEvent):
     moved = False
 
     if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
-        _move_to_whitespace_start_after_prev_sentence(text_cursor, cursor, False)
+        _move_to_whitespace_start_after_prev_sentence(text_cursor, False, cursor)
         # After moving back without selection, re-anchor at sentence start
         # so _sentences_forward expands from there, not from the original
         # mid-sentence position.
@@ -2663,20 +2644,20 @@ def _select_sentence_text_objects(count: int, key: KeyEvent):
         return _to_end_of_sentence(True)
 
     elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-        _sentences_forward(False, 1)
+        _sentences_forward(False, 1, cursor)
 
     elif not _is_at_sentence_start(text_cursor):
-        _sentences_backwards(False, 1)
+        _sentences_backwards(False, 1, cursor)
 
     new_tc = _get_text_cursor()
     if new_tc is not None:
         _set_visual_anchor(new_tc.getStart())
-        moved =_sentences_forward(True, count)
+        moved =_sentences_forward(True, count, cursor)
 
     return moved
 
 
-def _expand_with_sentences_objects(count: int, key: KeyEvent) -> bool:
+def _expand_with_sentences_objects(count: int, key: KeyEvent, cursor) -> bool:
     """Select as sentence text-objects from cursor point to direction of selection"""
     cursor = _get_cursor()
     if cursor is None:
@@ -2684,20 +2665,20 @@ def _expand_with_sentences_objects(count: int, key: KeyEvent) -> bool:
     select_forward = _is_forward_selection(cursor)
 
     if len(cursor.getString()) <= 1:
-        return _select_sentence_text_objects(count, key)
+        return _select_sentence_text_objects(count, key, cursor)
 
     if select_forward:
-        moved = _sentences_forward(True, count)
+        moved = _sentences_forward(True, count, cursor)
 
     else:
-        moved = _sentences_backwards(True, count)
+        moved = _sentences_backwards(True, count, cursor)
         # Include whitespace before the newly selected sentence start,
         # so "as" grabs the spacing between sentences when going backward.
         new_tc = _get_text_cursor()
         new_cursor = _get_cursor()
         if new_tc is not None and new_cursor is not None:
             if moved and not new_tc.isStartOfParagraph():
-                _move_to_whitespace_start_after_prev_sentence(new_tc, new_cursor, True)
+                _move_to_whitespace_start_after_prev_sentence(new_tc, True, new_cursor)
 
     return moved
 
@@ -2858,11 +2839,11 @@ def _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_e
     return True
 
 
-def _select_ap_units_forward_visual(cursor, count: int, started_empty: bool) -> bool:
+def _select_ap_units_forward_visual(count: int, cursor, started_empty: bool) -> bool:
     steps = max(1, int(count))
     moved = False
     for i in range(steps):
-        if not _paragraphs_forward(True, 1):
+        if not _paragraphs_forward(True, 1, cursor):
             break
         moved = True
         text_cursor = _get_text_cursor()
@@ -2875,11 +2856,11 @@ def _select_ap_units_forward_visual(cursor, count: int, started_empty: bool) -> 
     return moved
 
 
-def _select_ap_units_backward_visual(cursor, count: int) -> bool:
+def _select_ap_units_backward_visual(count: int, cursor) -> bool:
     steps = max(1, int(count))
     moved = False
     for _ in range(steps):
-        if not _paragraphs_backward(True, 1):
+        if not _paragraphs_backward(True, 1, cursor):
             break
         moved = True
         text_cursor = _get_text_cursor()
@@ -2889,7 +2870,7 @@ def _select_ap_units_backward_visual(cursor, count: int) -> bool:
     return moved
 
 
-def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
+def _paragraphs_forward(expand: bool, count: int, cursor) -> bool:
     """Motion to for [count] paragraphs forward. Command '}'.
 
     From a non-empty paragraph, moves to the start of the next paragraph
@@ -2898,8 +2879,7 @@ def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
     paragraph start.
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     try:
         if expand:
@@ -2916,17 +2896,17 @@ def _paragraphs_forward(expand: bool, count: int = 1) -> bool:
                 # Last paragraph with no following empty line: move to end of it.
                 if not text_cursor.isEndOfParagraph():
                     text_cursor.gotoEndOfParagraph(expand)
-                    _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+                    _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
                 break
             moved_any = True
         if moved_any:
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand)
+            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return moved_any
     except Exception:
         return False
 
 
-def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
+def _paragraphs_backward(expand: bool, count: int, cursor) -> bool:
     """Motion for [count] paragraphs backward. Command '{'.
 
     From inside a paragraph, moves to the start of the current paragraph.
@@ -2936,8 +2916,7 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
     to the start of the previous non-empty paragraph.
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     try:
         if expand:
@@ -2957,14 +2936,14 @@ def _paragraphs_backward(expand: bool, count: int = 1) -> bool:
                 break
             moved_any = True
         if moved_any:
-            _sync_view_cursor_to_text_cursor(cursor, text_cursor, expand, backward=True)
+            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return moved_any
     except Exception:
         return False
 
 
 
-def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode):
+def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode, cursor):
     """
     Select "ip"/"ap" paragraph text-objects forward from the start of current object.
 
@@ -2987,7 +2966,7 @@ def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode):
         if text_cursor:
             _set_visual_anchor(text_cursor.getStart())
 
-    moved = _paragraphs_forward(True, count)
+    moved = _paragraphs_forward(True, count, cursor)
     if not moved:
         return False
 
@@ -2997,7 +2976,7 @@ def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode):
     return _post_adjust_paragraph_text_object(text_cursor, cursor, is_around, started_empty)
 
 
-def _expand_with_paragraph_objects(count: int, key: KeyEvent, mode: Mode) -> bool:
+def _expand_with_paragraph_objects(count: int, key: KeyEvent, mode: Mode, cursor) -> bool:
     """Extend an existing visual selection by ip/ap paragraph text objects.
 
     Called when cursor already has a selection Determines direction from the
@@ -3014,7 +2993,7 @@ def _expand_with_paragraph_objects(count: int, key: KeyEvent, mode: Mode) -> boo
     select_forward = _is_forward_selection(cursor)
 
     if len(cursor.getString()) <= 1:
-        _select_paragraph_text_objects(count, key, mode)
+        _select_paragraph_text_objects(count, key, mode, cursor)
         return True
 
     text_cursor.gotoRange(caret, False)
@@ -3025,13 +3004,13 @@ def _expand_with_paragraph_objects(count: int, key: KeyEvent, mode: Mode) -> boo
 
     if not select_forward:
         if is_around:
-            moved = _select_ap_units_backward_visual(cursor, count)
+            moved = _select_ap_units_backward_visual(count, cursor)
         else:
-            moved = _paragraphs_backward(True, count)
+            moved = _paragraphs_backward(True, count, cursor)
     elif is_around:
-        return _select_ap_units_forward_visual(cursor, count, started_empty)
+        return _select_ap_units_forward_visual(count, cursor, started_empty)
     else:
-        moved = _paragraphs_forward(True, count)
+        moved = _paragraphs_forward(True, count, cursor)
 
     if not moved:
         return False
@@ -3169,7 +3148,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return actions
 
-    def _visual_commands_keymap(self, key, mode):
+    def _visual_commands_keymap(self, key, mode, cursor):
         do_yank = True if "_" not in (key.pending or "") else False
         actions = {
             "C": lambda: _copy_and_delete_linewise(do_yank, delete = True),
@@ -3177,8 +3156,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
             "X": lambda: _copy_and_delete_linewise(do_yank, delete = True),
             "Y": lambda: _copy_and_delete_linewise(do_yank, delete = False),
-            "o": lambda: _go_to_other_end(mode),
-            "O": lambda: _go_to_other_end(mode),
+            "o": lambda: _go_to_other_end(mode, cursor),
+            "O": lambda: _go_to_other_end(mode, cursor),
             "v": lambda: _goto_mode("visual"),
             "c": lambda: _copy_and_delete(do_yank, True),
             "d": lambda: _copy_and_delete(do_yank, True),
@@ -3210,43 +3189,43 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
                 "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
-                "^": lambda: _to_first_non_blank(cursor, expand),
-                "$": lambda: _to_end_of_line(cursor, expand, count, mode),
-                "H": lambda: _jump_to_page(expand, "start"),
-                "L": lambda: _jump_to_page(expand, "end"),
+                "^": lambda: _to_first_non_blank(expand, 0, cursor),
+                "$": lambda: _to_end_of_line(expand, count, mode, cursor),
+                "H": lambda: _jump_to_page(expand, count, cursor, "start"),
+                "L": lambda: _jump_to_page(expand, count, cursor, "end"),
                 "G": lambda: _to_line(expand, self.get_raw_count(), True, mode, cursor),
-                ")": lambda: _sentences_forward(expand, count),
-                "(": lambda: _sentences_backwards(expand, count),
-                "}": lambda: _paragraphs_forward(expand, count),
-                "{": lambda: _paragraphs_backward(expand, count),
+                ")": lambda: _sentences_forward(expand, count, cursor),
+                "(": lambda: _sentences_backwards(expand, count, cursor),
+                "}": lambda: _paragraphs_forward(expand, count, cursor),
+                "{": lambda: _paragraphs_backward(expand, count, cursor),
                 # For testing.
                 # "m": lambda: _to_end_of_sentence(expand),
-                ";": lambda: _repeat_last_to_character(count, expand, key),
-                ",": lambda: _repeat_last_to_character(count, expand, key),
-                "+": lambda: _to_first_non_blank(cursor, expand, count, False),
-                "-": lambda: _to_first_non_blank(cursor, expand, count, True),
-                "_": lambda: _to_first_non_blank(cursor, expand, count - 1, False),
+                ";": lambda: _repeat_last_to_character(count, expand, key, cursor),
+                ",": lambda: _repeat_last_to_character(count, expand, key, cursor),
+                "+": lambda: _to_first_non_blank(expand, count, cursor, False),
+                "-": lambda: _to_first_non_blank(expand, count, cursor, True),
+                "_": lambda: _to_first_non_blank(expand, count - 1, cursor, False),
             }
             if key.char == "0" and self.get_raw_count() == 0:
                 motions["0"] = lambda: _to_start_of_line(expand, mode, cursor)
 
         return motions
 
-    def _normal_text_objects(self, key, mode):
+    def _normal_text_objects(self, key, mode, cursor):
         count = self.count
         text_objects = {
-            "s": lambda: _select_sentence_text_objects(count, key),
-            "p": lambda: _select_paragraph_text_objects(count, key, mode),
+            "s": lambda: _select_sentence_text_objects(count, key, cursor),
+            "p": lambda: _select_paragraph_text_objects(count, key, mode, cursor),
             "w": lambda: _select_word_objects_forward(count, key, mode),
             "W": lambda: _select_word_objects_forward(count, key, mode),
         }
         return text_objects
 
-    def _visual_text_objects(self, key, mode):
+    def _visual_text_objects(self, key, mode, cursor):
         count = self.count
         text_objects = {
-            "s": lambda: _expand_with_sentences_objects(count, key),
-            "p": lambda: _expand_with_paragraph_objects(count, key, mode),
+            "s": lambda: _expand_with_sentences_objects(count, key, cursor),
+            "p": lambda: _expand_with_paragraph_objects(count, key, mode, cursor),
             "w": lambda: _expand_with_word_text_objects(count, key, mode),
             "W": lambda: _expand_with_word_text_objects(count, key, mode),
         }
@@ -3345,7 +3324,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return True
 
         if mode == "visual":
-            run_command = self._match_visual_commands(key, mode)
+            run_command = self._match_visual_commands(key, mode, cursor)
             if run_command is not None:
                 return True
 
@@ -3424,9 +3403,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if has_text_obj_prefix:
             if mode == "visual":
-                motions = self._visual_text_objects(key, mode)
+                motions = self._visual_text_objects(key, mode, cursor)
             else:
-                motions = self._normal_text_objects(key, mode)
+                motions = self._normal_text_objects(key, mode, cursor)
         else:
             motions = self._motions_keymap(key, expand, mode, cursor)
 
@@ -3462,10 +3441,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return False
         _set_last_ft(key.pending[-1], key.char)
         count = self.count
-        return _to_character(expand, count, key.pending[-1], key.char)
+        cursor = _get_cursor()
+        if cursor is None:
+            return False
+        return _to_character(expand, count, cursor, key.pending[-1], key.char)
 
-    def _match_visual_commands(self, key, mode):
-        visual_actions = self._visual_commands_keymap(key, mode)
+    def _match_visual_commands(self, key, mode, cursor):
+        visual_actions = self._visual_commands_keymap(key, mode, cursor)
         action = visual_actions.get(key.char)
         if action is None:
             return None
@@ -3521,7 +3503,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         # with operators and for pageup/pagedown handle selection.
         return {
             backspace: "h",
-            enter:     lambda: _to_first_non_blank(cursor, expand, count),
+            enter:     lambda: _to_first_non_blank(expand, count, cursor),
             left:      "h",
             right:     "l",
             up:        "k",
