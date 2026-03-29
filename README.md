@@ -54,7 +54,7 @@ Currently supported commands:
 - Registers: `"_`
 - Undo/redo: `u`, `C-r` / `U`
 - Copy/paste: `y`, `yy`, `Y`, `p`, `P`
-- Text-objects:  `iw`, `iW`, `aw`, `aW`, `as`, `ip`, `ap`
+- Text-objects:  `iw`, `iW`, `aw`, `aW`, `is`, `as`, `ip`, `ap`
 - Search: `/` (LibreOffice search bar)
 
 - In Visual mode: swap cursor position to other end of selection: `o`.

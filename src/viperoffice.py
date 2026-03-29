@@ -303,19 +303,21 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 char = text_cursor.getString()[:40]
                 anchor = _state().get("visual_anchor")
                 caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
-                lines.append("-- text cursor --")
+                lines.append("-- text cursor LO API --")
+                lines.append(f"String: {char}")
                 lines.append(f"collapsed: {text_cursor.isCollapsed()}")
                 lines.append(f"start of paragraph: {text_cursor.isStartOfParagraph()}")
                 lines.append(f"end of paragraph: {text_cursor.isEndOfParagraph()}")
+                # Cursor needs to be collapsed for this to give True.
+                lines.append(f"start of sentence: {text_cursor.isStartOfSentence()}")
                 lines.append(f"start of word: {text_cursor.isStartOfWord()}")
                 lines.append(f"end of word: {text_cursor.isEndOfWord()}")
-                lines.append(f"String: {char}")
-                lines.append("-- custom functions --")
+                lines.append("-- ViperOffice custom functions --")
                 lines.append(f"caret before anchor: {caret_before_anchor}")
                 lines.append(f"Is at whitespace: {_is_cursor_at_whitespace(text_cursor)}")
                 lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(text_cursor, "after_sentence")}")
                 lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(text_cursor, "before_paragraph")}")
-                lines.append(f"Is current paragraph empty: {_is_current_paragraph_empty(text_cursor)}")
+                lines.append(f"Is at empty paragraph: {_is_current_paragraph_empty(text_cursor)}")
                 lines.append(f"Paragraph length: {len(paragraph_text)}")
                 lines.append(f"Paragraph offset: {offset}")
                 lines.append(f"start of sentence: {_is_at_sentence_start(text_cursor)}")
@@ -443,9 +445,10 @@ def _show_cursor(mode: Mode):
             # Coming from Normal mode (1-char cursor): collapse and re-select so
             # anchor and caret are known.
             if len(cursor.getString()) == 1:
+                # text_cursor.collapseToStart()
                 text_cursor.gotoRange(text_cursor.getStart(), False)
                 _set_visual_anchor(text_cursor.getStart())
-                text_cursor.goRight(1, True)
+                # text_cursor.goRight(1, True)
             # else:
                 # Mouse selection: use the saved press position as anchor.
                 # press_anchor = _state().pop("mouse_press_anchor", None)
@@ -1335,7 +1338,7 @@ def _yank(key, mode:Mode) -> bool:
             if key.char != "h":
                 cursor.gotoRange(position, False)
             _show_cursor("normal")
-        threading.Timer(0.08, _flash_restore).start()
+        threading.Timer(0.1, _flash_restore).start()
     return True
 
 
@@ -1575,7 +1578,7 @@ def _normalize_motion_range(result, for_operator:bool = False):
     return normalized
 
 
-def _clone_text_range(text_cursor) -> object | None:
+def _clone_text_range(text_cursor) -> XTextCursor | None:
     """Return a cloned TextCursor positioned at the start of text_cursor.
     """
     try:
@@ -2336,96 +2339,155 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
         return False
 
 
-def _move_to_whitespace_end_before_next_sentence(text_cursor, expand: bool, cursor) -> bool:
+def _move_to_sentence_whitespace_start(text_cursor) -> bool:
+    """Move text cursor to the start of the current whitespace unit."""
+    if text_cursor is None:
+        return False
     try:
         probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-        if not probe.gotoNextSentence(False):
-            return False
-        if not probe.goLeft(1, False):
-            return False
-        text_cursor.gotoRange(probe.getStart(), expand)
-        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
+        for _ in _paragraph_scan_steps():
+            if probe.isStartOfParagraph():
+                break
+            if not probe.goLeft(1, True):
+                break
+            if probe.getString() not in (" ", "\t", "\n"):
+                probe.collapseToEnd()
+                break
+            probe.collapseToStart()
+        text_cursor.gotoRange(probe.getStart(), False)
         return True
     except Exception:
         return False
 
 
-def _move_to_whitespace_start_after_prev_sentence(text_cursor, expand: bool, cursor) -> bool:
+def _normalize_sentence_unit_start(text_cursor) -> bool:
+    """Normalize to the start of current sentence unit for 'is'."""
+    if text_cursor is None:
+        return False
     try:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-        for _ in _paragraph_scan_steps():
-            if not probe.goLeft(1, True):
-                break
-            ch = probe.getString()
-            probe.collapseToStart()
-            if ch not in (" ", "\t", "\n"):
-                probe.goRight(1, False)
-                text_cursor.gotoRange(probe.getStart(), expand)
-                _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
-                return True
+        if _is_current_paragraph_empty(text_cursor):
+            text_cursor.gotoStartOfParagraph(False)
+            return True
+        if _is_cursor_at_whitespace(text_cursor, "after_sentence") or \
+                _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+            return _move_to_sentence_whitespace_start(text_cursor)
+        if not _is_at_sentence_start(text_cursor):
+            text_cursor.gotoStartOfSentence(False)
+        return True
     except Exception:
         return False
-    return False
 
 
-def _to_end_of_sentence(expand: bool) -> bool:
-    """Move cursor to the end (last punctuation char) of the next sentence.
+def _move_probe_to_sentence_end(probe) -> bool:
+    """Move probe to the sentence-ending punctuation. Returns False if not found."""
+    ch = ""
+    for _ in _paragraph_scan_steps():
+        if not probe.goLeft(1, True):
+            break
+        ch = probe.getString()
+        probe.collapseToStart()
+        if ch not in (" ", "\t", "\n"):
+            break
+    return ch in (".", "!", "?")
 
-    If cursor is already at a sentence end, moves to the end of the following
-    sentence. Returns True if moved.
+
+def _to_end_of_sentence(text_cursor) -> bool:
+    """Move text cursor to end of current sentence for 'is'."""
+    if text_cursor is None:
+        return False
+    try:
+        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        if not probe.gotoNextSentence(False):
+            probe.gotoEndOfParagraph(False)
+        if not _move_probe_to_sentence_end(probe):
+            return False
+        text_cursor.gotoRange(probe.getStart(), False)
+        text_cursor.goRight(1, False)
+        return True
+    except Exception:
+        return False
+
+
+def _advance_empty_paragraph_unit_forward(text_cursor) -> bool:
+    """Advance cursor over a single empty paragraph unit."""
+    if text_cursor is None or not _is_current_paragraph_empty(text_cursor):
+        return False
+    try:
+        if not text_cursor.isCollapsed():
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+        text_cursor.gotoStartOfParagraph(False)
+        if text_cursor.gotoNextParagraph(False):
+            return True
+        if text_cursor.goDown(1, False):
+            return True
+        end_after = _range_after_paragraph_break(text_cursor.getEnd())
+        if end_after is not None:
+            text_cursor.gotoRange(end_after, False)
+            return True
+        text_cursor.gotoEndOfParagraph(False)
+        return True
+    except Exception:
+        return False
+
+
+def _inner_sentences_forward(text_cursor, count: int) -> bool:
+    """Advance over [count] inner sentences forward for 'is'. Whitespace
+    before paragraph or between sentences is also inner sentence.
     """
-
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     try:
-        # Find sentence end by going to next sentence start, then stepping back
-        # past inter-sentence whitespace to land on the punctuation character.
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-
-        # If cursor is on inter-sentence whitespace, skip forward past it first
-        # so gotoNextSentence lands on the *next* sentence start, not the current one.
-        if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
-            probe.gotoNextSentence(False)
-
-        # If already at sentence end, advance past it first so we target the next one.
-        probe_ch = text_cursor.getText().createTextCursorByRange(probe.getStart())
-        if probe_ch.goRight(1, True):
-            at_end = probe_ch.getString() in (".", "!", "?")
-        else:
-            at_end = False
-        if at_end:
-            probe.goRight(1, False)
-
-        if not probe.gotoNextSentence(False):
-            return False
-
-        # Walk back past whitespace to find the sentence-ending punctuation.
-        ch = ""
-        for _ in _paragraph_scan_steps():
-            if not probe.goLeft(1, True):
+        if not text_cursor.isCollapsed():
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if _is_current_paragraph_empty(text_cursor):
+                moved = _advance_empty_paragraph_unit_forward(text_cursor)
+            elif _is_cursor_at_whitespace(text_cursor, "after_sentence"):
+                moved = text_cursor.gotoNextWord(False)
+            else:
+                moved = _to_end_of_sentence(text_cursor)
+            if not moved:
                 break
-            ch = probe.getString()
-            probe.collapseToStart()
-            if ch not in (" ", "\t", "\n"):
+            moved_any = True
+        return moved_any
+    except Exception:
+        return False
+
+
+def _inner_sentences_backward(text_cursor, count: int) -> bool:
+    """Advance backward over [count] inner sentence units for 'is'."""
+    if text_cursor is None:
+        return False
+    try:
+        steps = max(1, int(count))
+        moved_any = False
+        for _ in range(steps):
+            if not text_cursor.goLeft(1, False):
                 break
+            if not _normalize_sentence_unit_start(text_cursor):
+                break
+            moved_any = True
+        return moved_any
+    except Exception:
+        return False
 
-        if ch not in (".", "!", "?"):
+
+def _to_whitespace_start(text_cursor, expand: bool, cursor) -> bool:
+    try:
+        if not _move_to_sentence_whitespace_start(text_cursor):
             return False
-
-        # Move to start of the punctuation char, then one right to include it.
-        text_cursor.gotoRange(probe.getStart(), expand)
-        text_cursor.goRight(1, True)
-        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return True
     except Exception:
         return False
 
 
-def _to_next_sentence(text_cursor, expand: bool, cursor) -> bool:
-    """Move cursor to the start of the next sentence, implementing one ')' motion step.
+def _to_start_of_next_sentence(text_cursor, expand: bool, cursor) -> bool:
+    """To next start of a sentence. Commands ')' and 'as' text-objects.
 
     Handles edge cases: empty paragraphs (jumps to next non-empty), leading paragraph
     whitespace, and backends that stall on paragraph-end markers.
@@ -2472,22 +2534,20 @@ def _to_next_sentence(text_cursor, expand: bool, cursor) -> bool:
     return True
 
 
-def _sentences_forward(expand: bool, count: int, cursor) -> bool:
-    """Sentences forward motion."""
+def _start_of_sentences_forward(expand: bool, count: int, cursor) -> bool:
+    """To start of [count] sentences forward. Commands ')', 'as'."""
     text_cursor = _get_text_cursor()
     if text_cursor is None:
         return False
     try:
         if expand:
             # Collapse to the caret end so forward scan starts from the right place.
-            print(f"_sentences_forward: tc before collapse={repr(text_cursor.getString()[:40])}, len={len(text_cursor.getString())}")
             caret = _get_visual_caret_range(text_cursor)
             text_cursor.gotoRange(caret, False)
-            print(f"_sentences_forward: tc after collapse={repr(text_cursor.getString()[:40])}")
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _to_next_sentence(text_cursor, expand, cursor):
+            if not _to_start_of_next_sentence(text_cursor, expand, cursor):
                 break
             moved_any = True
         return moved_any
@@ -2495,6 +2555,8 @@ def _sentences_forward(expand: bool, count: int, cursor) -> bool:
         return False
 
 
+# LibreOffice isStartOfSentence() doesn't work with non-collapsed cursors and
+# have locale boundary quirks, so we use a punctuation/whitespace heuristic.
 def _is_at_sentence_start(text_cursor) -> bool:
     if text_cursor is None:
         return False
@@ -2522,8 +2584,8 @@ def _is_at_sentence_start(text_cursor) -> bool:
         return False
 
 
-def _to_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
-    """Move cursor to the start of the previous sentence, implementing one '(' motion step.
+def _to_start_of_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
+    """Move cursor to the start of the previous sentence. Commands '(', 'is'.
 
     Handles edge cases: leading paragraph whitespace (collapses to paragraph start to
     trigger boundary crossing), first non-whitespace after leading whitespace (detected
@@ -2542,7 +2604,7 @@ def _to_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
         force_paragraph_boundary = True
         # Fall through — cursor is now at isStartOfParagraph(), handled below.
 
-    # From inside a sentence, first "(" should go to current sentence start.
+    # From inside a sentence, first motion should go to current sentence start.
     # Skip this for empty paragraphs so we can cross to previous sentence.
     if (not force_paragraph_boundary
             and not _is_at_sentence_start(text_cursor)
@@ -2597,8 +2659,8 @@ def _to_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
     return True
 
 
-# Repeats '(' motion by count times.
-def _sentences_backwards(expand: bool, count, cursor) -> bool:
+def _to_start_of_sentences_backwards(expand: bool, count, cursor) -> bool:
+    """Repeats the motion [count] times. Commands '(', 'is'."""
     text_cursor = _get_text_cursor()
     if text_cursor is None:
         return False
@@ -2610,7 +2672,9 @@ def _sentences_backwards(expand: bool, count, cursor) -> bool:
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not _to_previous_sentence(text_cursor, expand, cursor):
+            moved = _to_start_of_previous_sentence(text_cursor, expand, cursor)
+            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
+            if not moved:
                 break
             moved_any = True
         return moved_any
@@ -2619,68 +2683,110 @@ def _sentences_backwards(expand: bool, count, cursor) -> bool:
 
 
 def _select_sentence_text_objects(count: int, key: KeyEvent, cursor):
-    """Select "as" sentence text-objects forward from the start of current object.
-       Visual or pending mode.
+    """Select 'as' or 'is' sentence text-objects forward from current object.
+       Operator-pending mode or Visual mode without extended selection.
     """
     text_cursor = _get_text_cursor()
     if text_cursor is None:
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
-    # TODO: inner sentence.
-    if not is_around:
-        return False
-
-    moved = False
-
     if _is_cursor_at_whitespace(text_cursor, "after_sentence"):
-        _move_to_whitespace_start_after_prev_sentence(text_cursor, False, cursor)
+        _to_whitespace_start(text_cursor, False, cursor)
         # After moving back without selection, re-anchor at sentence start
         # so _sentences_forward expands from there, not from the original
         # mid-sentence position.
         new_tc = _get_text_cursor()
         if new_tc is not None:
             _set_visual_anchor(new_tc.getStart())
-        return _to_end_of_sentence(True)
+        # If leading whitespace + text sentences are selected which is same
+        # as two inner sentences.
+        if is_around:
+            count *= 2
+            is_around = False
 
     elif _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-        _sentences_forward(False, 1, cursor)
+        _start_of_sentences_forward(False, 1, cursor)
+
+    elif _is_current_paragraph_empty(text_cursor):
+        if is_around:
+            # Empty paragraph counts as one unit; around includes trailing whitespace unit.
+            count = count * 2
+            is_around = False
 
     elif not _is_at_sentence_start(text_cursor):
-        _sentences_backwards(False, 1, cursor)
+        _to_start_of_sentences_backwards(False, 1, cursor)
 
-    new_tc = _get_text_cursor()
-    if new_tc is not None:
-        _set_visual_anchor(new_tc.getStart())
-        moved =_sentences_forward(True, count, cursor)
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
 
-    return moved
+    _set_visual_anchor(text_cursor.getStart())
+
+    if is_around:
+        return _start_of_sentences_forward(True, count, cursor)
+
+    probe = _clone_text_range(text_cursor)
+    if probe is None:
+        return False
+    start_range = probe.getStart()
+    if not _inner_sentences_forward(probe, count):
+        return False
+    end_range = probe.getStart()
+    _set_visual_anchor(start_range)
+    _set_visual_selection(cursor, start_range, end_range)
+    return True
 
 
 def _expand_with_sentences_objects(count: int, key: KeyEvent, cursor) -> bool:
-    """Select as sentence text-objects from cursor point to direction of selection"""
+    """Select 'as' or 'is' sentence text-objects in Visual mode with extended
+    selection to direction of selection."""
     cursor = _get_cursor()
     if cursor is None:
         return False
     select_forward = _is_forward_selection(cursor)
+    is_around = key.pending is not None and key.pending[-1] == "a"
 
     if len(cursor.getString()) <= 1:
         return _select_sentence_text_objects(count, key, cursor)
 
+    if is_around:
+        if select_forward:
+            moved = _start_of_sentences_forward(True, count, cursor)
+        else:
+            moved = _to_start_of_sentences_backwards(True, count, cursor)
+            # Include whitespace before the newly selected sentence start,
+            # so "as" grabs the spacing between sentences when going backward.
+            new_tc = _get_text_cursor()
+            new_cursor = _get_cursor()
+            if new_tc is not None and new_cursor is not None:
+                if moved and not new_tc.isStartOfParagraph():
+                    _to_whitespace_start(new_tc, True, new_cursor)
+        return moved
+
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+
+    anchor = cursor.getStart() if select_forward else cursor.getEnd()
+    _set_visual_anchor(anchor)
+    caret = cursor.getEnd() if select_forward else cursor.getStart()
+    if caret is None:
+        return False
+
+    probe = text_cursor.getText().createTextCursorByRange(caret)
+
     if select_forward:
-        moved = _sentences_forward(True, count, cursor)
-
+        moved = _inner_sentences_forward(probe, count)
     else:
-        moved = _sentences_backwards(True, count, cursor)
-        # Include whitespace before the newly selected sentence start,
-        # so "as" grabs the spacing between sentences when going backward.
-        new_tc = _get_text_cursor()
-        new_cursor = _get_cursor()
-        if new_tc is not None and new_cursor is not None:
-            if moved and not new_tc.isStartOfParagraph():
-                _move_to_whitespace_start_after_prev_sentence(new_tc, True, new_cursor)
+        moved = _inner_sentences_backward(probe, count)
 
-    return moved
+    if not moved:
+        return False
+
+    new_caret = probe.getStart()
+    _set_visual_selection(cursor, anchor, new_caret)
+    return True
 
 
 # ------------------
@@ -3194,12 +3300,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "H": lambda: _jump_to_page(expand, count, cursor, "start"),
                 "L": lambda: _jump_to_page(expand, count, cursor, "end"),
                 "G": lambda: _to_line(expand, self.get_raw_count(), True, mode, cursor),
-                ")": lambda: _sentences_forward(expand, count, cursor),
-                "(": lambda: _sentences_backwards(expand, count, cursor),
+                ")": lambda: _start_of_sentences_forward(expand, count, cursor),
+                "(": lambda: _to_start_of_sentences_backwards(expand, count, cursor),
                 "}": lambda: _paragraphs_forward(expand, count, cursor),
                 "{": lambda: _paragraphs_backward(expand, count, cursor),
                 # For testing.
-                # "m": lambda: _to_end_of_sentence(expand),
                 ";": lambda: _repeat_last_to_character(count, expand, key, cursor),
                 ",": lambda: _repeat_last_to_character(count, expand, key, cursor),
                 "+": lambda: _to_first_non_blank(expand, count, cursor, False),
@@ -4190,4 +4295,4 @@ def _show_insert_cursor_for_controller(controller):
 
 
 g_exportedScripts = (toggle_viper_office, enable_viper_office, disable_viper_office, \
-                     _debug_cursor_state, _move_to_whitespace_start_after_prev_sentence)
+                     _debug_cursor_state)

@@ -118,7 +118,8 @@ Text-object commands work in Visual mode or after an operator. Commands starting
 - `iw` — "inner word": select [count] words (whitespace is treated as word and
   is counted). 
 - `iW` — "inner WORD", select [count] WORDs. White space between words is counted too.
-- `as` — "a sentence": select [count] sentences. In Visual mode it's charwise.
+- `as` — "a sentence": select [count] sentences.
+- `is` - "inner sentence", select [count] sentences.
 - `ap` — "a paragraph": select [count] paragraphs. End of paragraph character is a paragraph boundary. In Visual mode it's linewise.
 - `ip` — "inner paragraph": select [count] paragraphs. End of paragraph character is a paragraph boundary. In Visual mode it's linewise.
 
@@ -133,8 +134,8 @@ Text-object commands work in Visual mode or after an operator. Commands starting
 
 ## Delete and copy
 
-- `"_` — Black hole register. Next delete command that would yank text to clipboard,
-  just deletes it instead leaving clipboard untouched.
+- `"_` — Black hole register. Next delete command that would also yank text to clipboard,
+  just deletes it instead.
 - `x` or `<Del>` — Delete [count] characters under and after the cursor
   (not linewise). The `<Del>` key does not take a [count].  Instead,
   it deletes the last character of the count.
