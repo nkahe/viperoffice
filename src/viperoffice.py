@@ -1067,11 +1067,13 @@ def _lines_down(count:int, expand:bool, mode: Mode, cursor) -> bool:
         return False
 
 
-def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
+def _to_first_non_blank(expand, count, cursor, up: bool = False, mode: Mode | None = None) -> bool:
     """Motion to first non-blank character in current line, [count] lines down
        or up if 'up' is True. Commands '^', '-', '+', <CR>.
     """
     try:
+        if mode == "pending":
+            cursor.collapseToStart()
         if count > 0:
             if up:
                 cursor.goUp(count, expand)
@@ -1084,17 +1086,14 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
 
         # Select all of the current line and put it into a string.
         cursor.gotoEndOfLine(False)
-
         if cursor.getPosition().Y > old_line:
             # If gotoEndOfLine moved cursor to next line then move it back.
             cursor.goLeft(1, False)
-
         cursor.gotoStartOfLine(True)
         text_cursor = _get_text_cursor()
         line_text = cursor.getString()
-        cursor.gotoRange(text_cursor, False)
-        cursor.gotoStartOfLine(expand)
 
+        # Compute index of first non-space/tab in the captured line_text.
         i = 0
         while i < len(line_text):
             ch = line_text[i]
@@ -1102,9 +1101,26 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
                 break
             i += 1
 
-        # Move the cursor to the first non space/tab character.
-        if i > 0:
-            cursor.goRight(i, expand)
+        # Build a text range pointing to the first non-blank character and move
+        # the view cursor there without selecting the entire line.
+        try:
+            text = text_cursor.getText()
+            target_cursor = text.createTextCursorByRange(text_cursor.getStart())
+            if i > 0:
+                target_cursor.goRight(i, False)
+            target_range = target_cursor.getStart()
+            anchor = _state().get("visual_anchor")
+            # anchor = _state().get("visual_anchor") if expand else None
+            if anchor is not None:
+                _set_visual_selection(cursor, anchor, target_range)
+            else:
+                cursor.gotoRange(target_range, expand)
+        except Exception:
+            # Fallback to conservative behavior if probe creation fails.
+            cursor.gotoRange(text_cursor, False)
+            cursor.gotoStartOfLine(expand)
+            if i > 0:
+                cursor.goRight(i, expand)
 
         return True
     except Exception:
