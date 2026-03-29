@@ -1038,31 +1038,11 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent, cursor) -
 # ------------------
 
 
-def _characters_left(count, expand, mode, cursor) -> bool:
-    """Motion for [count] characters left. Command 'h', <Left> or <BS>."""
-    try:
-        if mode == "pending":
-            cursor.collapseToStart()
-        return bool(cursor.goLeft(count, expand))
-    except Exception:
-        return False
-
-
-def _characters_right(count, expand, mode, cursor) -> bool:
-    """Motion for [count] characters right. Command 'l' or <Right>. """
-    try:
-        if mode == "pending":
-            cursor.collapseToStart()
-        return bool(cursor.goRight(count, expand))
-    except Exception:
-        return False
-
-
 def _lines_up(count:int, expand:bool, mode: Mode, cursor) -> bool:
     """Motion for [count] lines up. Command 'k' or <Up>. """
     try:
         if mode == "pending":
-            _to_end_of_line(False, 1, None, cursor)
+            _to_end_of_line(False, 1, cursor)
             # At a soft-wrap point the inter-word space sits at the start of
             # the next visual line. Step past it so the selection includes it
             # and doesn't get left behind as a leading space after deletion.
@@ -1087,20 +1067,12 @@ def _lines_down(count:int, expand:bool, mode: Mode, cursor) -> bool:
         return False
 
 
-def _to_start_of_line(expand: bool, mode, cursor) -> bool:
-    """Motion to start of line. Command '0' or <Home>"""
-    if mode == "pending":
-        cursor.collapseToStart()
-    cursor.gotoStartOfLine(expand)
-    return True
-
-
 def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
     """Motion to first non-blank character in current line, [count] lines down
        or up if 'up' is True. Commands '^', '-', '+', <CR>.
     """
     try:
-        if count:
+        if count > 0:
             if up:
                 cursor.goUp(count, expand)
             else:
@@ -1139,15 +1111,11 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
         return False
 
 
-def _to_end_of_line(expand:bool, count:int, mode, cursor) -> bool:
+def _to_end_of_line(expand:bool, count:int, cursor) -> bool:
     """Motion to end of line and optionally [count] -1 lines down.
     Command '$' or <End>.
     """
     try:
-        # Range of motion needs start where caret is, not after Normal/Pending mode cursor.
-        if mode == "pending":
-            cursor.collapseToStart()
-
         if count > 1:
             cursor.goDown(count - 1, expand)
         old_pos = cursor.getPosition()
@@ -1212,7 +1180,7 @@ def _append_text_to_end_of_line(mode: Mode = "normal", cursor=None):
         if mode == "visual":
             if cursor is not None:
                 cursor.gotoRange(cursor.getEnd(), False)
-        _to_end_of_line(False, 1, None, cursor)
+        _to_end_of_line(False, 1, cursor)
         return
     except Exception:
         pass
@@ -1236,7 +1204,7 @@ def _begin_new_paragraph(above: bool, cursor):
         if above:
             cursor.gotoStartOfLine(False)
         else:
-            _to_end_of_line(False, 0, None, cursor)
+            _to_end_of_line(False, 0, cursor)
             cursor.goRight(1, False)
 
         cursor.setString(chr(13))  # CR
@@ -1352,11 +1320,10 @@ def _yank_and_delete_to_end_of_line(count: int, mode: Mode, yank: bool , delete:
     """ Delete the characters until the end of the line and
         [count] - 1 more lines. Normal mode commands 'C', 'D', 'Y'."""
     # Makes cursor to collapse to get correct range.
-    motion_mode = "pending" if mode == "normal" else mode
     cursor = _get_cursor()
     if cursor is None:
         return False
-    _to_end_of_line(True, count, motion_mode, cursor)
+    _to_end_of_line(True, count, cursor)
     return _copy_and_delete(yank, delete)
 
 
@@ -3191,7 +3158,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         }
         return actions
 
-    # Keymap for Normal mode commands and Visual mode commands which
+    # Keymap for Normal/Pending mode commands and Visual mode commands which
     # aren't included in Visual mode keymap.
     def _normal_commands_keymap(self, key, mode, cursor):
         # Available commands after "g" command.
@@ -3262,9 +3229,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "E": lambda: _word_motion(_WORD_MOTION_G_BIG_E, expand, count, mode)
             }
         else:
+            if mode == "pending":
+                cursor.collapseToStart()
             motions = {
-                "h": lambda: _characters_left(count, expand, mode, cursor),
-                "l": lambda: _characters_right(count, expand, mode, cursor),
+                "h": lambda: cursor.goLeft(count, expand),
+                "l": lambda: cursor.goRight(count, expand),
                 "j": lambda: _lines_down(count, expand, mode, cursor),
                 "k": lambda: _lines_up(count, expand, mode, cursor),
                 "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
@@ -3274,7 +3243,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
                 "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
                 "^": lambda: _to_first_non_blank(expand, 0, cursor),
-                "$": lambda: _to_end_of_line(expand, count, mode, cursor),
+                "$": lambda: _to_end_of_line(expand, count, cursor),
                 "H": lambda: _jump_to_page(expand, count, cursor, "start"),
                 "L": lambda: _jump_to_page(expand, count, cursor, "end"),
                 "G": lambda: _to_line(expand, self.get_raw_count(), True, mode, cursor),
@@ -3290,8 +3259,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "_": lambda: _to_first_non_blank(expand, count - 1, cursor, False),
             }
             if key.char == "0" and self.get_raw_count() == 0:
-                motions["0"] = lambda: _to_start_of_line(expand, mode, cursor)
-
+                # make return True.
+                motions["0"] = (lambda: cursor.gotoStartOfLine(expand) or True)
         return motions
 
     def _normal_text_objects(self, key, mode, cursor):
@@ -3511,6 +3480,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return None
 
         moved = motion()
+
+        print("moved: " + str(moved))
         self._reset_prefix()
         self._reset_count()
         return moved
