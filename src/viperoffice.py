@@ -603,8 +603,6 @@ def _ensure_visual_caret(cursor, at_end: bool) -> None:
 # this can be used.
 def _is_forward_selection(cursor) -> bool:
     """Return True if caret is at right end of selection, False if at left end."""
-    if cursor is None:
-        return True
     try:
         original_len = len(cursor.getString())
         moved = cursor.goRight(1, True)
@@ -871,6 +869,7 @@ def _focus_findbar() -> bool:
     except Exception:
         # dispatcher.executeDispatch(frame, ".uno:SearchDialog", "", 0, ())
         return False
+
 
 def _repeat_search(count, backward: bool = False) -> bool:
     """Repeat last LibreOffice search count times. Commands 'n' and 'N'."""
@@ -1197,11 +1196,8 @@ def _select_linewise(cursor) -> bool:
 
 # Insert, delete, replace characters
 
-def _append_text():
+def _append_text(cursor):
     """Command 'a'."""
-    cursor = _get_cursor()
-    if cursor is None:
-        return False
     textCursor = _get_text_cursor()
     try:
         if textCursor is not None and not textCursor.isEndOfParagraph():
@@ -1213,9 +1209,6 @@ def _append_text():
 def _append_text_to_end_of_line(mode: Mode = "normal", cursor=None):
     """Command 'A'."""
     try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
         if mode == "visual":
             if cursor is not None:
                 cursor.gotoRange(cursor.getEnd(), False)
@@ -1225,11 +1218,8 @@ def _append_text_to_end_of_line(mode: Mode = "normal", cursor=None):
         pass
 
 
-def _insert_before_first_non_blank(mode):
+def _insert_before_first_non_blank(mode, cursor):
     """Command 'I'."""
-    cursor = _get_cursor()
-    if cursor is None:
-        return False
     try:
         if mode == "visual":
             # Move to the line where the selection starts before going to line start.
@@ -1239,14 +1229,10 @@ def _insert_before_first_non_blank(mode):
         pass
 
 
-def _begin_new_paragraph(above: bool):
+def _begin_new_paragraph(above: bool, cursor):
     """Begin to write new paragraph above or below current line.
        Normal mode commands 'o', 'O'."""
     try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
-
         if above:
             cursor.gotoStartOfLine(False)
         else:
@@ -1275,7 +1261,7 @@ def _copy_and_delete_linewise(yank: bool, delete: bool) -> bool:
     return _copy_and_delete(yank, delete)
 
 
-def _delete_characters(count:int, key:KeyEvent) -> bool:
+def _delete_characters(count:int, backward: bool = False) -> bool:
     """Delete single characters. Normal mode commands 'x','X' and 's'."""
     try:
         text_cursor = _get_text_cursor()
@@ -1283,7 +1269,7 @@ def _delete_characters(count:int, key:KeyEvent) -> bool:
             return False
         # Collapse to start of normal-mode block cursor position
         text_cursor.gotoRange(text_cursor.getStart(), False)
-        if key.char == "X":
+        if backward:
             # Delete count chars to the left; bail if already at start of line
             if not text_cursor.goLeft(count, True):
                 return False
@@ -1297,15 +1283,12 @@ def _delete_characters(count:int, key:KeyEvent) -> bool:
         return False
 
 
-def _replace_characters(count:int, key:KeyEvent) -> bool:
+def _replace_characters(count:int, key:KeyEvent, cursor) -> bool:
     """Replace character(s) under cursor with {key_char}.
        With count replace [count] characters with [count] {key_char}.
        Command 'r'.
     """
     try:
-        cursor = _get_cursor()
-        if cursor is None:
-            return False
         length = len(cursor.getString())
 
         if length > 1:
@@ -2192,14 +2175,13 @@ def _around_word_caret_backward(text_cursor, caret_range, steps: int, big_word: 
         return None
 
 
-def _select_word_objects_forward(count: int, key: KeyEvent, mode: Mode) -> bool:
+def _select_word_objects_forward(count: int, key: KeyEvent, mode: Mode, cursor) -> bool:
     """Select [count] words forward starting from beginning of current word unit.
     Commands 'iw', 'iW, 'aw', 'aW', in Operator-pending mode or Visual without
     extended selection.
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
 
     big_word = True if key.char == "W" else False
@@ -2226,13 +2208,12 @@ def _select_word_objects_forward(count: int, key: KeyEvent, mode: Mode) -> bool:
     return True
 
 
-def _expand_with_word_text_objects(count, key, mode) -> bool:
+def _expand_with_word_text_objects(count, key, mode, cursor) -> bool:
     """Expand selection with [count] word text-objects 'iw' in Visual mode to
     direction of selection. Command 'iw' in Visual mode with extended selection.
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
 
     is_around = True if key.pending and key.pending[-1] == "a" else False
@@ -2244,7 +2225,7 @@ def _expand_with_word_text_objects(count, key, mode) -> bool:
         if start_range is None:
             return False
         cursor.gotoRange(start_range, False)
-        return _select_word_objects_forward(count, key, mode)
+        return _select_word_objects_forward(count, key, mode, cursor)
 
     big_word = True if key.char == "W" else False
 
@@ -2546,6 +2527,7 @@ def _start_of_sentences_forward(expand: bool, count: int, cursor) -> bool:
             text_cursor.gotoRange(caret, False)
         steps = max(1, int(count))
         moved_any = False
+
         for _ in range(steps):
             if not _to_start_of_next_sentence(text_cursor, expand, cursor):
                 break
@@ -2741,9 +2723,6 @@ def _select_sentence_text_objects(count: int, key: KeyEvent, cursor):
 def _expand_with_sentences_objects(count: int, key: KeyEvent, cursor) -> bool:
     """Select 'as' or 'is' sentence text-objects in Visual mode with extended
     selection to direction of selection."""
-    cursor = _get_cursor()
-    if cursor is None:
-        return False
     select_forward = _is_forward_selection(cursor)
     is_around = key.pending is not None and key.pending[-1] == "a"
 
@@ -3058,8 +3037,7 @@ def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode, cursor
         leading empty lines (backward in visual mode).
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
 
@@ -3090,8 +3068,7 @@ def _expand_with_paragraph_objects(count: int, key: KeyEvent, mode: Mode, cursor
     forward/backward helper.
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
     is_around = key.pending is not None and key.pending[-1] == "a"
     caret = _get_visual_caret_range(text_cursor)
@@ -3216,7 +3193,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     # Keymap for Normal mode commands and Visual mode commands which
     # aren't included in Visual mode keymap.
-    def _normal_commands_keymap(self, key, mode):
+    def _normal_commands_keymap(self, key, mode, cursor):
         # Available commands after "g" command.
         count = self.count
         if "g" in (key.pending or ""):
@@ -3224,28 +3201,29 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 # Currently "g" has only motions.
             }
         else:
+            do_yank = True if "_" not in (key.pending or "") else False
             actions = {
-                "a": _append_text,
-                "A": lambda: _append_text_to_end_of_line(mode),
+                "a": lambda: _append_text(cursor),
+                "A": lambda: _append_text_to_end_of_line(mode, cursor),
                 "c": lambda: self._c_d_commands(key, mode),
                 "d": lambda: self._c_d_commands(key, mode),
-                "C": lambda: _yank_and_delete_to_end_of_line(count, mode, "_" not in key.pending),
-                "D": lambda: _yank_and_delete_to_end_of_line(count, mode, "_" not in key.pending),
+                "C": lambda: _yank_and_delete_to_end_of_line(count, mode, do_yank),
+                "D": lambda: _yank_and_delete_to_end_of_line(count, mode, do_yank),
                 "Y": lambda: _yank_and_delete_to_end_of_line(count, mode, False, False),
                 "i": lambda: True,
-                "I": lambda: _insert_before_first_non_blank(mode),
-                "o": lambda: _begin_new_paragraph(above = False),
-                "O": lambda: _begin_new_paragraph(above = True),
+                "I": lambda: _insert_before_first_non_blank(mode, cursor),
+                "o": lambda: _begin_new_paragraph(above = False, cursor = cursor),
+                "O": lambda: _begin_new_paragraph(above = True, cursor = cursor),
                 "p": lambda: _paste(count, mode),
                 "P": lambda: _paste(count, mode, after_cursor=False),
-                "r": lambda: self._r_command(count, key),
-                "s": lambda: _delete_characters(count, key),
+                "r": lambda: self._r_command(count, key, cursor),
+                "s": lambda: _delete_characters(count),
                 "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
                 "u": lambda: _undo(count),
                 "U": lambda: _redo(count),
                 "v": lambda: _goto_mode("visual"),
-                "x": lambda: _delete_characters(count, key),
-                "X": lambda: _delete_characters(count, key),
+                "x": lambda: _delete_characters(count),
+                "X": lambda: _delete_characters(count, backward = True),
                 "y": lambda: self._y_command(key, mode),
                 "/": _focus_findbar,
                 # "n": lambda: _repeat_search(count),
@@ -3321,8 +3299,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         text_objects = {
             "s": lambda: _select_sentence_text_objects(count, key, cursor),
             "p": lambda: _select_paragraph_text_objects(count, key, mode, cursor),
-            "w": lambda: _select_word_objects_forward(count, key, mode),
-            "W": lambda: _select_word_objects_forward(count, key, mode),
+            "w": lambda: _select_word_objects_forward(count, key, mode, cursor),
+            "W": lambda: _select_word_objects_forward(count, key, mode, cursor),
         }
         return text_objects
 
@@ -3331,8 +3309,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         text_objects = {
             "s": lambda: _expand_with_sentences_objects(count, key, cursor),
             "p": lambda: _expand_with_paragraph_objects(count, key, mode, cursor),
-            "w": lambda: _expand_with_word_text_objects(count, key, mode),
-            "W": lambda: _expand_with_word_text_objects(count, key, mode),
+            "w": lambda: _expand_with_word_text_objects(count, key, mode, cursor),
+            "W": lambda: _expand_with_word_text_objects(count, key, mode, cursor),
         }
         return text_objects
 
@@ -3390,7 +3368,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if key.pending == "r":
             if key.char.isprintable() or key.code in (1280, 1282):  # enter, tab
-                _replace_characters(count, key)
+                _replace_characters(count, key, cursor)
                 self._reset_count()
                 _goto_mode("normal")
             self.reset_pending_keys()
@@ -3433,7 +3411,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             if run_command is not None:
                 return True
 
-        run_command = self._match_normal_commands(key, mode)
+        run_command = self._match_normal_commands(key, mode, cursor)
         if run_command is not None:
             return True
 
@@ -3574,8 +3552,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         self._reset_count()
         return did_action
 
-    def _match_normal_commands(self, key, mode):
-        normal_actions = self._normal_commands_keymap(key, mode)
+    def _match_normal_commands(self, key, mode, cursor):
+        normal_actions = self._normal_commands_keymap(key, mode, cursor)
         action = normal_actions.get(key.char)
         if action is None:
             return None
@@ -3673,7 +3651,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     def _reset_prefix(self) -> bool:
         """Remove last pending command if it's a command prefix:
-           g, a/i, or f/F/t/T."""
+           g, a/i, or f/F/t/T.
+        """
         pending_keys = self._pending_keys
         if not pending_keys or pending_keys[-1] not in "aigfFtT":
             return False
@@ -3684,11 +3663,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             self.reset_pending_keys()
         return True
 
-    def _r_command(self, count, key) -> bool:
+    def _r_command(self, count, key, cursor) -> bool:
         if key.pending is None:
             self._add_pending_key("r")
             return True
-        return _replace_characters(count, key)
+        return _replace_characters(count, key, cursor)
 
     def _y_command(self, key, mode) -> bool:
         if mode == "normal" and key.pending is None:

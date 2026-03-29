@@ -29,6 +29,7 @@ class Key:
     END: int
     DELETE: int
     BACKSPACE: int
+    RETURN: int
     PAGEUP: int
     PAGEDOWN: int
 
