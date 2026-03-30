@@ -1754,12 +1754,24 @@ def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
         return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
 
     if offset >= length:
-        return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
+        if _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty):
+            return True
+        # No next paragraph (EOF): move to end of current paragraph.
+        if not text_cursor.isEndOfParagraph():
+            text_cursor.gotoEndOfParagraph(expand)
+            return True
+        return False
 
     next_offset = _scan_forward_word_target(paragraph_text, offset, spec)
 
     if next_offset is None or next_offset >= length:
-        return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
+        if _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty):
+            return True
+        # No next paragraph (EOF): move to end of current paragraph.
+        if not text_cursor.isEndOfParagraph():
+            text_cursor.gotoEndOfParagraph(expand)
+            return True
+        return False
 
     text_cursor.gotoStartOfParagraph(False)
     move = next_offset
@@ -3042,6 +3054,7 @@ def _paragraphs_forward(expand: bool, count: int, cursor) -> bool:
                 if not text_cursor.isEndOfParagraph():
                     text_cursor.gotoEndOfParagraph(expand)
                     _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
+                    moved_any = True
                 break
             moved_any = True
         if moved_any:
