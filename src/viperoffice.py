@@ -744,7 +744,7 @@ def _go_to_other_end(mode: Mode, cursor) -> bool:
     the cursor is moved to the other end of the highlighted text. The highlighted
     area remains the same.
     """
-    if mode != "visual":
+    if not mode.startswith("visual"):
         return False
     s = cursor.getString()
     if not s:
@@ -1230,12 +1230,11 @@ def _append_text(cursor):
         pass
 
 
-def _append_text_to_end_of_line(mode: Mode = "normal", cursor=None):
+def _append_text_to_end_of_line(mode, cursor):
     """Command 'A'."""
     try:
-        if mode == "visual":
-            if cursor is not None:
-                cursor.gotoRange(cursor.getEnd(), False)
+        if mode.startswith("visual"):
+            cursor.gotoRange(cursor.getEnd(), False)
         _to_end_of_line(False, 1, cursor)
         return
     except Exception as e:
@@ -1246,7 +1245,7 @@ def _append_text_to_end_of_line(mode: Mode = "normal", cursor=None):
 def _insert_before_first_non_blank(mode, cursor):
     """Command 'I'."""
     try:
-        if mode == "visual":
+        if mode.startswith("visual"):
             # Move to the line where the selection starts before going to line start.
             cursor.gotoRange(cursor.getStart(), False)
         return _to_first_non_blank(False, 0, cursor)
@@ -1342,7 +1341,7 @@ def _yank(key, mode:Mode) -> bool:
     position = _get_position()
     cursor = _get_cursor()
     if (position is not None and cursor is not None) and \
-        (mode != "visual" or key.char == "Y"):
+        (not mode.startswith("visual") or key.char == "Y"):
         # Keep yanked range visually selected briefly, then restore cursor.
         # Use _set_mode instead of _goto_mode so the selection isn't
         # collapsed immediately by _show_cursor("normal")().
@@ -2255,7 +2254,7 @@ def _select_word_objects_forward(count: int, key: KeyEvent, mode: Mode, cursor) 
                                                FORWARD, big_word)
     if end_range is None:
         return False
-    if mode == "visual":
+    if mode.startswith("visual"):
         _set_visual_anchor(start_range)
         _set_visual_selection(cursor, start_range, end_range)
         return True
@@ -3120,7 +3119,7 @@ def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode, cursor
     if not _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty):
         return False
 
-    if mode == "visual":
+    if mode.startswith("visual"):
         text_cursor = _get_text_cursor()
         if text_cursor:
             _set_visual_anchor(text_cursor.getStart())
@@ -3485,7 +3484,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                     _goto_mode("normal")
             return True
 
-        if mode == "visual":
+        if mode.startswith("visual"):
             run_command = self._match_visual_commands(key, mode, cursor)
             if run_command is not None:
                 return True
@@ -3564,7 +3563,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         has_text_obj_prefix = key.pending[-1] in ("ai") if key.pending else False
 
         if has_text_obj_prefix:
-            if mode == "visual":
+            if mode.startswith("visual"):
                 motions = self._visual_text_objects_keymap(key, mode, cursor)
             else:
                 motions = self._normal_text_objects_keymap(key, mode, cursor)
@@ -3680,7 +3679,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _cancel_two_part_motion(self, mode):
         """In Pending mode, return to Normal. In Visual, reset pending
            keys and count but don't change mode."""
-        if mode == "visual":
+        if mode.startswith("visual"):
             self._reset_count()
             self.reset_pending_keys()
         else:
@@ -3713,13 +3712,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _ctrl_c_command(self, mode: Mode) -> bool:
         if mode == "normal":
             self.reset_pending_keys()
-        elif mode == "visual":
+        elif mode.startswith("visual"):
             _copy_and_delete(True, False)
         _goto_mode("normal")
         return True
 
     def _del_key(self, key, mode) -> bool:
-        if mode == "visual":
+        if mode.startswith("visual"):
             _copy_and_delete(yank = True, delete = True)
         else:
              count = self.count
@@ -3787,7 +3786,7 @@ def _goto_mode(new_mode: Mode) -> bool:
                 cursor.goLeft(1, False)
             _show_cursor("normal")
 
-        elif old_mode == "visual":
+        elif old_mode.startswith("visual"):
             # Place caret to correct end of selection.
             cursor = _get_cursor()
             controller = _get_controller()
@@ -3812,7 +3811,7 @@ def _goto_mode(new_mode: Mode) -> bool:
         _clear_visual_anchor()
         _show_cursor("insert")
 
-    elif new_mode == "visual":
+    elif new_mode.startswith("visual"):
         _reset_pending_keys()
         _show_cursor("visual")
 
@@ -3841,7 +3840,7 @@ def _show_cursor(mode: Mode):
             if moved:
                 text_cursor.goLeft(1, True)
 
-        elif mode == "visual":
+        elif mode.startswith("visual"):
             # Collapse cursor since caret is the anchor point in LibreOffice.
             text_cursor.gotoRange(text_cursor.getStart(), False)
             _set_visual_anchor(text_cursor.getStart())
@@ -4273,7 +4272,8 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
         state = _state()
         if not state["enabled"]:
             return False
-        if _get_mode() == "visual":
+        mode = _get_mode()
+        if mode.startswith("visual"):
             _goto_mode("normal")
             _reset_count()
         return False
