@@ -1067,13 +1067,11 @@ def _lines_down(count:int, expand:bool, mode: Mode, cursor) -> bool:
         return False
 
 
-def _to_first_non_blank(expand, count, cursor, up: bool = False, mode: Mode | None = None) -> bool:
+def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
     """Motion to first non-blank character in current line, [count] lines down
        or up if 'up' is True. Commands '^', '-', '+', <CR>.
     """
     try:
-        if mode == "pending":
-            cursor.collapseToStart()
         if count > 0:
             if up:
                 cursor.goUp(count, expand)
@@ -1082,6 +1080,12 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False, mode: Mode | No
 
         # This variable represents the original line the cursor was on before
         # any of the following changes.
+        anchor = _state().get("visual_anchor") if expand else None
+        start_pos = cursor.getStart() if anchor is None else None
+        caret_pos = None
+        if anchor is not None:
+            caret_pos = cursor.getEnd() if _is_forward_selection(cursor) else cursor.getStart()
+
         old_line = cursor.getPosition().Y
 
         # Select all of the current line and put it into a string.
@@ -1093,7 +1097,19 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False, mode: Mode | No
         text_cursor = _get_text_cursor()
         line_text = cursor.getString()
 
-        # Compute index of first non-space/tab in the captured line_text.
+        # Undo any changes made to the view cursor, then move to start of line.
+        # This way any previous selection made by the user will remain.
+        if anchor is not None and caret_pos is not None:
+            _set_visual_selection(cursor, anchor, caret_pos)
+        elif start_pos is not None:
+            cursor.gotoRange(start_pos, False)
+        if anchor is not None:
+            cursor.gotoStartOfLine(False)
+            _set_visual_selection(cursor, anchor, cursor.getStart())
+        else:
+            cursor.gotoStartOfLine(expand)
+
+        # Get x position of first non-blank character of line.
         i = 0
         while i < len(line_text):
             ch = line_text[i]
@@ -1101,25 +1117,12 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False, mode: Mode | No
                 break
             i += 1
 
-        # Build a text range pointing to the first non-blank character and move
-        # the view cursor there without selecting the entire line.
-        try:
-            text = text_cursor.getText()
-            target_cursor = text.createTextCursorByRange(text_cursor.getStart())
-            if i > 0:
-                target_cursor.goRight(i, False)
-            target_range = target_cursor.getStart()
-            anchor = _state().get("visual_anchor")
-            # anchor = _state().get("visual_anchor") if expand else None
+        # Move the cursor to the first non-blank character.
+        if i > 0:
             if anchor is not None:
-                _set_visual_selection(cursor, anchor, target_range)
+                cursor.goRight(i, False)
+                _set_visual_selection(cursor, anchor, cursor.getStart())
             else:
-                cursor.gotoRange(target_range, expand)
-        except Exception:
-            # Fallback to conservative behavior if probe creation fails.
-            cursor.gotoRange(text_cursor, False)
-            cursor.gotoStartOfLine(expand)
-            if i > 0:
                 cursor.goRight(i, expand)
 
         return True
