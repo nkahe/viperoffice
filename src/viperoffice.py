@@ -426,45 +426,6 @@ def _update_statusline(controller=None):
         pass
 
 
-def _show_cursor(mode: Mode):
-    """Sets cursor style and saves cursor position info. """
-    text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    controller = _get_controller()
-    if text_cursor is None or controller is None or cursor is None:
-        return False
-    try:
-        if mode in ("normal", "pending"):
-            # Select 1 character right side of caret as Normal mode cursor.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            moved = text_cursor.goRight(1, False)
-            if moved:
-                text_cursor.goLeft(1, True)
-
-        elif mode == "visual":
-            # Coming from Normal mode (1-char cursor): collapse and re-select so
-            # anchor and caret are known.
-            if len(cursor.getString()) == 1:
-                # text_cursor.collapseToStart()
-                text_cursor.gotoRange(text_cursor.getStart(), False)
-                _set_visual_anchor(text_cursor.getStart())
-                # text_cursor.goRight(1, True)
-            # else:
-                # Mouse selection: use the saved press position as anchor.
-                # press_anchor = _state().pop("mouse_press_anchor", None)
-                # if press_anchor is not None:
-                #     _set_visual_anchor(press_anchor)
-        elif mode == "insert":
-            # Use collapsed cursor.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-        else:
-            return False
-
-        controller.select(text_cursor)
-    except Exception:
-        return False
-
-
 # --------------------
 # Cursor and selection
 # --------------------
@@ -3687,6 +3648,7 @@ def _goto_mode(new_mode: Mode) -> bool:
     old_mode = _get_mode()
     if new_mode == "normal":
         _reset_pending_keys()
+        _clear_visual_anchor()
         if old_mode in ("normal", "pending"):
             pass
 
@@ -3697,8 +3659,8 @@ def _goto_mode(new_mode: Mode) -> bool:
                 cursor.goLeft(1, False)
             _show_cursor("normal")
 
-        # Make selection start where caret is in Normal mode.
         elif old_mode == "visual":
+            # Place caret to correct end of selection.
             cursor = _get_cursor()
             controller = _get_controller()
             text_cursor = _get_text_cursor()
@@ -3719,6 +3681,7 @@ def _goto_mode(new_mode: Mode) -> bool:
 
     elif new_mode == "insert":
         _reset_pending_keys()
+        _clear_visual_anchor()
         _show_cursor("insert")
 
     elif new_mode == "visual":
@@ -3726,12 +3689,52 @@ def _goto_mode(new_mode: Mode) -> bool:
         _show_cursor("visual")
 
     elif new_mode == "pending":
+        _clear_visual_anchor()
         _show_cursor("pending")
     else:
         return False
 
     _set_mode(new_mode)
     return True
+
+
+def _show_cursor(mode: Mode):
+    """Sets cursor style and saves cursor position info. """
+    text_cursor = _get_text_cursor()
+    cursor = _get_cursor()
+    controller = _get_controller()
+    if text_cursor is None or controller is None or cursor is None:
+        return False
+    try:
+        if mode in ("normal", "pending"):
+            # Select 1 character right side of caret as Normal mode cursor.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            moved = text_cursor.goRight(1, False)
+            if moved:
+                text_cursor.goLeft(1, True)
+
+        elif mode == "visual":
+            # Coming from Normal mode (1-char cursor): collapse and re-select so
+            # anchor and caret are known.
+            if len(cursor.getString()) == 1:
+                # text_cursor.collapseToStart()
+                text_cursor.gotoRange(text_cursor.getStart(), False)
+                _set_visual_anchor(text_cursor.getStart())
+                # text_cursor.goRight(1, True)
+            # else:
+                # Mouse selection: use the saved press position as anchor.
+                # press_anchor = _state().pop("mouse_press_anchor", None)
+                # if press_anchor is not None:
+                #     _set_visual_anchor(press_anchor)
+        elif mode == "insert":
+            # Use collapsed cursor.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+        else:
+            return False
+
+        controller.select(text_cursor)
+    except Exception:
+        return False
 
 
 # Normalize UNO key event payload into a single-character command key when possible.
