@@ -2275,7 +2275,7 @@ def _expand_with_word_text_objects(count, key, mode, cursor) -> bool:
     is_around = True if key.pending and key.pending[-1] == "a" else False
 
     # Start from beginning of current word if haven't expanded selection.
-    if len(cursor.getString()) <= 1:
+    if len(cursor.getString()) == 0:
         big_word = True if key.char == "W" else False
         start_range = _word_object_start_range(text_cursor, big_word)
         if start_range is None:
@@ -2795,7 +2795,7 @@ def _expand_with_sentences_objects(count: int, key: KeyEvent, cursor) -> bool:
     select_forward = _is_forward_selection(cursor)
     is_around = key.pending is not None and key.pending[-1] == "a"
 
-    if len(cursor.getString()) <= 1:
+    if len(cursor.getString()) == 0:
         return _select_sentence_text_objects(count, key, cursor)
 
     if is_around:
@@ -3150,7 +3150,7 @@ def _expand_with_paragraph_objects(count: int, key: KeyEvent, mode: Mode, cursor
 
     select_forward = _is_forward_selection(cursor)
 
-    if len(cursor.getString()) <= 1:
+    if len(cursor.getString()) == 0:
         _select_paragraph_text_objects(count, key, mode, cursor)
         return True
 
@@ -3842,23 +3842,14 @@ def _show_cursor(mode: Mode):
                 text_cursor.goLeft(1, True)
 
         elif mode == "visual":
-            # Coming from Normal mode (1-char cursor): collapse and re-select so
-            # anchor and caret are known.
-            if len(cursor.getString()) == 1:
-                # text_cursor.collapseToStart()
-                text_cursor.gotoRange(text_cursor.getStart(), False)
-                _set_visual_anchor(text_cursor.getStart())
-                # text_cursor.goRight(1, True)
-            # else:
-                # Mouse selection: use the saved press position as anchor.
-                # press_anchor = _state().pop("mouse_press_anchor", None)
-                # if press_anchor is not None:
-                #     _set_visual_anchor(press_anchor)
+            # Collapse cursor since caret is the anchor point in LibreOffice.
+            text_cursor.gotoRange(text_cursor.getStart(), False)
+            _set_visual_anchor(text_cursor.getStart())
         elif mode == "insert":
             # Use collapsed cursor.
             text_cursor.gotoRange(text_cursor.getStart(), False)
         else:
-            return False
+            raise ValueError("Unknown mode: " + str(mode))
 
         controller.select(text_cursor)
     except Exception as e:
