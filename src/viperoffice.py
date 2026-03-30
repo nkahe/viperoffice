@@ -2,6 +2,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable, Final, Literal, NamedTuple
 import builtins
 import datetime
+import inspect
+import os
+import tempfile
+import traceback
 from functools import partial
 import threading
 import unohelper
@@ -90,7 +94,8 @@ def _get_text_cursor() -> XTextCursor | None:
         return None
     try:
         return cursor.getText().createTextCursorByRange(cursor)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -136,7 +141,8 @@ def _set_position() -> bool:
             return False
         _state()["cursor_position"] = cursor.getStart()
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -151,7 +157,8 @@ def _get_scroll() -> int:
         lines_to_scroll = int(SCROLL)
         if 1 <= lines_to_scroll <= 99:
             return lines_to_scroll
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
     return default
 
@@ -163,7 +170,8 @@ def _get_scroll() -> int:
 def _current_doc():
     try:
         return XSCRIPTCONTEXT.getDocument()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -173,7 +181,8 @@ def _get_controller():
         return None
     try:
         return doc.getCurrentController()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -183,7 +192,8 @@ def _get_dispatcher():
         smgr = ctx.getServiceManager()
         dispatcher = smgr.createInstanceWithContext("com.sun.star.frame.DispatchHelper", ctx)
         return dispatcher
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -194,7 +204,8 @@ def _get_frame():
             return None
         frame = controller.getFrame()
         return frame
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 # For debugging
@@ -204,9 +215,34 @@ def _dbg(msg):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     if not DEBUG:
         return
     try:
-        ts = datetime.datetime.now().strftime("%m-%d %H:%M:%S.%f")
-        with open("/tmp/viperffice-debug.log", "a", encoding="utf-8") as f:
+        ts = datetime.datetime.now().strftime("%m-%d %H:%M:%S")
+        log_path = os.path.join(tempfile.gettempdir(), "viperffice-debug.log")
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"{ts} {msg}\n")
+    except Exception:
+        pass
+
+
+def _handle_exc(err: Exception | None = None) -> None:
+    """Log and print exception details for current caller."""
+    try:
+        frame = inspect.currentframe()
+        if frame is not None and frame.f_back is not None:
+            func_name = frame.f_back.f_code.co_name
+        else:
+            func_name = "<unknown>"
+    except Exception:
+        func_name = "<unknown>"
+
+    try:
+        if err is None:
+            details = traceback.format_exc()
+        else:
+            details = f"{type(err).__name__}: {err}"
+
+        msg = f"Exception in {func_name}: {details}"
+        _dbg(msg)
+        print(msg)
     except Exception:
         pass
 
@@ -224,13 +260,15 @@ def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnused
             box = toolkit.createMessageBox(
                 parent, Rectangle(), "infobox", 1, title, str(text),
             )
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             # Newer UNO signature used by some versions.
             box = toolkit.createMessageBox(
                 parent, 1, 1, title, str(text),
             )
         box.execute()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -262,10 +300,12 @@ def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportU
         if len(snippet) > 120:
             snippet = snippet[:117] + "..."
         return f"'{snippet}' (start_offset={start_offset}, end_excl={end_offset})"
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         try:
             return f"<unprintable range: {range}>"
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             return "<unprintable range>"
 
 
@@ -285,12 +325,14 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
             y = pos.Y() if callable(pos.Y) else pos.Y
             lines.append("-- view cursor --")
             lines.append(f"position: X={x}, Y={y}")
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             lines.append("Position: unavailable")
         try:
             lines.append(f"Collapsed: {cursor.isCollapsed()}")
             lines.append(f"At start of line: {cursor.isAtStartOfLine()}")
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             lines.append("Range: unavailable")
 
         # Text cursor info
@@ -324,6 +366,7 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 lines.append(f"Word character class: {_word_char_class(char)}")
                 lines.append("")
             except Exception as e:
+                _handle_exc(err=e)
                 lines.append(f"TextCursor info error: {e}")
 
         if pop_up:
@@ -331,7 +374,7 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
         else:
             print("ViperOffice cursor debug:\n" + "\n".join(lines))
     except Exception as e:
-        print(f"ViperOffice cursor debug: Error: {e}")
+        _handle_exc(e)
 
 
 # ------------------
@@ -347,7 +390,8 @@ def _get_pending_keys() -> None | str:
             return None
         pending_keys = handler.pending_keys
         return pending_keys
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -356,7 +400,8 @@ def _reset_pending_keys():
     try:
         if handler is not None and hasattr(handler, "reset_pending_keys"):
             return bool(handler.reset_pending_keys())
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
     _update_statusline()
     return True
@@ -370,7 +415,8 @@ def _get_count() -> int:
             return 1
         count = int(handler.count)
         return count
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return 1
 
 
@@ -382,7 +428,8 @@ def _get_raw_count() -> int:
             return 0
         count = int(handler.get_raw_count())
         return count
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return 0
 
 
@@ -396,7 +443,8 @@ def _reset_count() -> bool:
     try:
         if handler is not None and hasattr(handler, "_reset_count"):
             return bool(handler._reset_count())
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
     _update_statusline()
     return True
@@ -421,7 +469,8 @@ def _update_statusline(controller=None):
             text += padding + pendings_keys
         text = mode_name.upper() + text
         controller.StatusIndicator.start(text, 0)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         # Non-fatal for status update.
         pass
 
@@ -449,7 +498,8 @@ def _get_visual_caret_range(text_cursor):
             return text_cursor.getEnd()   # forward selection
         else:
             return text_cursor.getStart() # backward selection
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return text_cursor.getEnd()
 
 
@@ -463,7 +513,8 @@ def _range_length_between(left_range, right_range) -> int:
         span = text.createTextCursorByRange(left_range)
         span.gotoRange(right_range, True)
         return len(span.getString())
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return 0
 
 
@@ -474,7 +525,8 @@ def _range_starts_before(range_a, range_b) -> bool:
         text = range_a.getText()
         # compareRegionStarts returns 1 when range_a starts before range_b.
         return text.compareRegionStarts(range_a, range_b) == 1
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -484,7 +536,8 @@ def _range_ends_before(range_a, range_b) -> bool:
     try:
         text = range_a.getText()
         return text.compareRegionEnds(range_a, range_b) == 1
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -502,13 +555,15 @@ def _try_go_left(cursor, distance: int) -> bool:
         visible_before = None
         try:
             visible_before = cursor.isVisible()
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             visible_before = None
         if visible_before:
             cursor.setVisible(False)
             hide_cursor = True
         moved = cursor.goLeft(distance, True)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         moved = False
     finally:
         if hide_cursor:
@@ -530,13 +585,15 @@ def _try_go_right(cursor, distance: int) -> bool:
         visible_before = None
         try:
             visible_before = cursor.isVisible()
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             visible_before = None
         if visible_before:
             cursor.setVisible(False)
             hide_cursor = True
         moved = cursor.goRight(distance, True)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         moved = False
     finally:
         if hide_cursor:
@@ -555,7 +612,8 @@ def _ensure_visual_caret(cursor, at_end: bool) -> None:
             cursor.gotoRange(cursor.getEnd(), True)
         else:
             cursor.gotoRange(cursor.getStart(), True)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -572,7 +630,8 @@ def _is_forward_selection(cursor) -> bool:
             cursor.goLeft(1, True)
             return new_len > original_len
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return True
 
 
@@ -632,7 +691,8 @@ def _set_visual_selection(cursor, anchor, new_caret, force_backward: bool = Fals
             new_length = _range_length_between(anchor, new_caret)
             try:
                 current_right = cursor.getEnd()
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 current_right = None
             prev_length = _range_length_between(anchor, current_right) if current_right is not None else 0
             # Only use incremental goRight when extending an existing forward selection
@@ -653,7 +713,8 @@ def _set_visual_selection(cursor, anchor, new_caret, force_backward: bool = Fals
             _ensure_visual_caret(cursor, False)
             try:
                 current_left = cursor.getStart()
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 current_left = None
             prev_length = _range_length_between(current_left, anchor) if current_left is not None else 0
             new_length = _range_length_between(new_caret, anchor)
@@ -670,7 +731,8 @@ def _set_visual_selection(cursor, anchor, new_caret, force_backward: bool = Fals
 
         # Fallback: collapse directly to the requested caret range.
         cursor.gotoRange(new_caret, True)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -752,7 +814,8 @@ def _scroll_window(expand:bool, count:int, forward:bool, mode:Mode, lines:int|No
             if anchor is not None:
                 _set_visual_selection(cursor, anchor, cursor.getStart())
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -783,7 +846,8 @@ def _to_line(expand: bool, raw_count: int, default_end: bool, mode, cursor) -> b
         if mode == "pending":
             _select_linewise(cursor)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -814,7 +878,8 @@ def _jump_to_page(expand: bool, count, cursor, target: str = "start") -> bool:
             cursor.gotoRange(new_pos, True)
 
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -827,7 +892,8 @@ def _focus_findbar() -> bool:
             return False
         dispatcher.executeDispatch(frame, "vnd.sun.star.findbar:FocusToFindbar", "", 0, ())
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         # dispatcher.executeDispatch(frame, ".uno:SearchDialog", "", 0, ())
         return False
 
@@ -844,7 +910,8 @@ def _repeat_search(count, backward: bool = False) -> bool:
         for _ in range(max(1, count)):
             dispatcher.executeDispatch(frame, cmd, "", 0, ())
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -877,7 +944,8 @@ def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bo
             try:
                 text = range_a.getText()
                 return text.compareRegionStarts(range_a, range_b) == 0
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 return False
 
         def _offset_range(text, base_range, delta: int):
@@ -890,7 +958,8 @@ def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bo
                 if delta > 0 and not probe.goRight(delta, False):
                     return None
                 return probe.getStart()
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 return None
 
         for _ in range(steps):
@@ -942,7 +1011,8 @@ def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bo
             _sync_view_cursor_to_text_cursor(probe, expand, cursor, backward=backward)
 
         return moved_any
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -990,7 +1060,8 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent, cursor) -
 
         return _to_character(expand, count, cursor, search_type, ft_char)
 
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1013,7 +1084,8 @@ def _lines_up(count:int, expand:bool, mode: Mode, cursor) -> bool:
                 cursor.gotoStartOfLine(True)
                 count += 1
         return bool(cursor.goUp(count, expand))
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1024,7 +1096,8 @@ def _lines_down(count:int, expand:bool, mode: Mode, cursor) -> bool:
             cursor.gotoStartOfLine(False)
             count += 1
         return bool(cursor.goDown(count, expand))
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1055,7 +1128,6 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
             # If gotoEndOfLine moved cursor to next line then move it back.
             cursor.goLeft(1, False)
         cursor.gotoStartOfLine(True)
-        text_cursor = _get_text_cursor()
         line_text = cursor.getString()
 
         # Undo any changes made to the view cursor, then move to start of line.
@@ -1087,7 +1159,8 @@ def _to_first_non_blank(expand, count, cursor, up: bool = False) -> bool:
                 cursor.goRight(i, expand)
 
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(e)
         return False
 
 
@@ -1113,7 +1186,8 @@ def _to_end_of_line(expand:bool, count:int, cursor) -> bool:
                 cursor.goLeft(1, expand)
 
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1134,7 +1208,8 @@ def _select_linewise(cursor) -> bool:
         cursor.gotoRange(sel_end, True)
         cursor.gotoEndOfLine(True)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1150,7 +1225,8 @@ def _append_text(cursor):
     try:
         if textCursor is not None and not textCursor.isEndOfParagraph():
             cursor.goRight(1, False)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -1162,7 +1238,8 @@ def _append_text_to_end_of_line(mode: Mode = "normal", cursor=None):
                 cursor.gotoRange(cursor.getEnd(), False)
         _to_end_of_line(False, 1, cursor)
         return
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -1173,7 +1250,8 @@ def _insert_before_first_non_blank(mode, cursor):
             # Move to the line where the selection starts before going to line start.
             cursor.gotoRange(cursor.getStart(), False)
         return _to_first_non_blank(False, 0, cursor)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -1194,7 +1272,8 @@ def _begin_new_paragraph(above: bool, cursor):
             cursor.goRight(1, False)
         return True
 
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1227,7 +1306,8 @@ def _delete_characters(count:int, backward: bool = False) -> bool:
                 return False
         text_cursor.setString("")
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1245,7 +1325,8 @@ def _replace_characters(count:int, key:KeyEvent, cursor) -> bool:
             cursor.setString(key.char * count)
 
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1292,7 +1373,8 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
             if text_cursor is not None:
                 text_cursor.setString("")
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1335,7 +1417,8 @@ def _paste(count:int, mode, after_cursor:bool = True):
         for _ in range(count):
             dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
 
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1348,7 +1431,8 @@ def _undo(count=1) -> bool:
         for _ in range(count):
             doc.getUndoManager().undo()
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         # Non-fatal when no more undo actions exist.
         return False
 
@@ -1362,7 +1446,8 @@ def _redo(count=1) -> bool:
         for _ in range(count):
             doc.getUndoManager().redo()
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         # Non-fatal when no more undo actions exist.
         return False
 
@@ -1513,7 +1598,8 @@ def _clone_text_range(text_cursor) -> XTextCursor | None:
     """
     try:
         return text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -1625,7 +1711,8 @@ def _scan_backward_word_target(paragraph_text, offset, spec):
                     f"len={length}",
                     f"bounds={bounds}",
                 )
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 pass
         if bounds is None:
             return None
@@ -1718,7 +1805,8 @@ def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
                 f"prev_offset={prev_offset}",
                 f"text_snip={paragraph_text[max(0, offset-10):offset+10]!r}",
             )
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             pass
 
     if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty):
@@ -1828,7 +1916,8 @@ def _word_motion(spec, expand: bool, count: int, mode: Mode) -> bool:
             return False
 
         return _apply_motion_result(result, expand)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -1863,7 +1952,8 @@ def _apply_motion_result(result, expand:bool) -> bool:
             # in _word_motion_once_forward never fired. Extend one more char to
             # include the last character of the word.
             cursor.goRight(1, True)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
     return True
 
@@ -1935,7 +2025,8 @@ def _range_at_paragraph_offset(paragraph_cursor, offset: int):
         if offset > 0:
             probe.goRight(offset, False)
         return probe.getStart()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -1947,7 +2038,8 @@ def _word_object_start_range(text_cursor, big_word: bool = False):
             return _range_at_paragraph_offset(text_cursor, 0)
         start_offset, _ = _word_unit_bounds(paragraph_text, offset, big_word)
         return _range_at_paragraph_offset(text_cursor, start_offset)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -1970,7 +2062,8 @@ def _advance_word_object_caret(text_cursor, caret_range, steps: int, direction: 
             if not _word_motion_once(probe, expand, spec):
                 return None
         return probe.getEnd() if direction == FORWARD else probe.getStart()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -2032,7 +2125,8 @@ def _around_word_ranges_forward(text_cursor, steps: int, big_word: bool = False)
                 try:
                     text_cursor.gotoEndOfParagraph(False)
                     end_after = _range_after_paragraph_break(text_cursor.getEnd())
-                except Exception:
+                except Exception as e:
+                    _handle_exc(err=e)
                     end_after = None
                 end_range = end_after or text_cursor.getEnd()
                 if end_range is None or start_range is None:
@@ -2062,7 +2156,8 @@ def _around_word_ranges_forward(text_cursor, steps: int, big_word: bool = False)
             # would raise on empty paragraphs).
             try:
                 text_cursor.gotoRange(end_range, False)
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 # Fallback to paragraph-relative movement but cap the offset.
                 text_cursor.gotoStartOfParagraph(False)
                 para_len = len(paragraph_text)
@@ -2076,7 +2171,8 @@ def _around_word_ranges_forward(text_cursor, steps: int, big_word: bool = False)
                 text_cursor.gotoStartOfParagraph(False)
 
         return start_range, end_range
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None, None
 
 
@@ -2118,7 +2214,8 @@ def _around_word_caret_backward(text_cursor, caret_range, steps: int, big_word: 
                     probe.gotoEndOfParagraph(False)
 
         return probe.getStart()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -2208,7 +2305,8 @@ def _expand_with_word_text_objects(count, key, mode, cursor) -> bool:
         else:
             _set_visual_selection(cursor, anchor, new_caret)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2263,7 +2361,8 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
             return len(leading) == 0 or all(c in (" ", "\t") for c in leading)
         else:
             return False
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2284,7 +2383,8 @@ def _move_to_sentence_whitespace_start(text_cursor) -> bool:
             probe.collapseToStart()
         text_cursor.gotoRange(probe.getStart(), False)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2302,7 +2402,8 @@ def _normalize_sentence_unit_start(text_cursor) -> bool:
         if not _is_at_sentence_start(text_cursor):
             text_cursor.gotoStartOfSentence(False)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2332,7 +2433,8 @@ def _to_end_of_sentence(text_cursor) -> bool:
         text_cursor.gotoRange(probe.getStart(), False)
         text_cursor.goRight(1, False)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(e)
         return False
 
 
@@ -2355,7 +2457,8 @@ def _advance_empty_paragraph_unit_forward(text_cursor) -> bool:
             return True
         text_cursor.gotoEndOfParagraph(False)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2382,7 +2485,8 @@ def _inner_sentences_forward(text_cursor, count: int) -> bool:
                 break
             moved_any = True
         return moved_any
-    except Exception:
+    except Exception as e:
+        _handle_exc(e)
         return False
 
 
@@ -2400,7 +2504,8 @@ def _inner_sentences_backward(text_cursor, count: int) -> bool:
                 break
             moved_any = True
         return moved_any
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2410,7 +2515,8 @@ def _to_whitespace_start(text_cursor, expand: bool, cursor) -> bool:
             return False
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2480,7 +2586,8 @@ def _start_of_sentences_forward(expand: bool, count: int, cursor) -> bool:
                 break
             moved_any = True
         return moved_any
-    except Exception:
+    except Exception as e:
+        _handle_exc(e)
         return False
 
 
@@ -2509,7 +2616,8 @@ def _is_at_sentence_start(text_cursor) -> bool:
             if ch not in (" ", "\t", "\"", "'", ")", "]"):
                 break
         return ch in (".", "!", "?")
-    except Exception:
+    except Exception as e:
+        _handle_exc(e)
         return False
 
 
@@ -2553,7 +2661,8 @@ def _to_start_of_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
             if all(c in (" ", "\t") for c in para_probe.getString()):
                 text_cursor.gotoStartOfParagraph(False)
                 _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             pass
 
     # Paragraph-boundary behavior matching logic.
@@ -2607,7 +2716,8 @@ def _to_start_of_sentences_backwards(expand: bool, count, cursor) -> bool:
                 break
             moved_any = True
         return moved_any
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2727,7 +2837,8 @@ def _is_current_paragraph_empty(text_cursor) -> bool:
         probe.gotoStartOfParagraph(False)
         probe.gotoEndOfParagraph(True)
         return len(probe.getString()) == 0
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2793,7 +2904,8 @@ def _normalize_paragraph_text_object_start(text_cursor, cursor, started_empty: b
             text_cursor.gotoStartOfParagraph(False)
         cursor.gotoRange(text_cursor.getStart(), False)
         return True
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2817,7 +2929,8 @@ def _range_after_paragraph_break(text_range):
         probe = text_obj.createTextCursorByRange(text_range)
         if probe.goRight(1, False):
             return probe.getStart()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
     return None
 
@@ -2934,7 +3047,8 @@ def _paragraphs_forward(expand: bool, count: int, cursor) -> bool:
         if moved_any:
             _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return moved_any
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2970,7 +3084,8 @@ def _paragraphs_backward(expand: bool, count: int, cursor) -> bool:
         if moved_any:
             _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return moved_any
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -3090,7 +3205,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     def _add_to_count(self, n: int) -> bool:
         try:
             digit = int(n)
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             return False
         if digit < 0:
             return False
@@ -3116,7 +3232,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _update_statusline()
         return
 
-    def _normal_ctrl_actions(self, expand: bool, mode: Mode):
+    def _normal_ctrl_actions(self, expand: bool, mode: Mode) -> dict:
         count = self.count
         a_code = int(getattr(Key, "A", 512))
         b_code = int(getattr(Key, "B", 513))
@@ -3140,7 +3256,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
     # Keymap for Normal/Pending mode commands and Visual mode commands which
     # aren't included in Visual mode keymap.
-    def _normal_commands_keymap(self, key, mode, cursor):
+    def _normal_commands_keymap(self, key, mode, cursor) -> dict:
         # Available commands after "g" command.
         count = self.count
         if "g" in (key.pending or ""):
@@ -3179,7 +3295,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         return actions
 
-    def _visual_commands_keymap(self, key, mode, cursor):
+    def _visual_commands_keymap(self, key, mode, cursor) -> dict:
         do_yank = True if "_" not in (key.pending or "") else False
         actions = {
             "C": lambda: _copy_and_delete_linewise(do_yank, delete = True),
@@ -3199,7 +3315,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         return actions
 
     # These can be used independently or with operators.
-    def _motions_keymap(self, key, expand, mode: Mode, cursor):
+    def _motions_keymap(self, key, expand, mode: Mode, cursor) -> dict:
         count = self.count
         # Available motions after "g" command.
         if "g" in (key.pending or ""):
@@ -3238,12 +3354,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "-": lambda: _to_first_non_blank(expand, count, cursor, True),
                 "_": lambda: _to_first_non_blank(expand, count - 1, cursor, False),
             }
-            if key.char == "0" and self.get_raw_count() == 0:
+            # Monkey patch "0" so it can be used as motion or part of count.
+            if self.get_raw_count() == 0:
                 # make return True.
                 motions["0"] = (lambda: cursor.gotoStartOfLine(expand) or True)
         return motions
 
-    def _normal_text_objects(self, key, mode, cursor):
+    def _normal_text_objects_keymap(self, key, mode, cursor) -> dict:
         count = self.count
         text_objects = {
             "s": lambda: _select_sentence_text_objects(count, key, cursor),
@@ -3253,7 +3370,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         }
         return text_objects
 
-    def _visual_text_objects(self, key, mode, cursor):
+    def _visual_text_objects_keymap(self, key, mode, cursor) -> dict:
         count = self.count
         text_objects = {
             "s": lambda: _expand_with_sentences_objects(count, key, cursor),
@@ -3435,9 +3552,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         if has_text_obj_prefix:
             if mode == "visual":
-                motions = self._visual_text_objects(key, mode, cursor)
+                motions = self._visual_text_objects_keymap(key, mode, cursor)
             else:
-                motions = self._normal_text_objects(key, mode, cursor)
+                motions = self._normal_text_objects_keymap(key, mode, cursor)
         else:
             motions = self._motions_keymap(key, expand, mode, cursor)
 
@@ -3460,8 +3577,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             return None
 
         moved = motion()
-
-        print("moved: " + str(moved))
         self._reset_prefix()
         self._reset_count()
         return moved
@@ -3733,7 +3848,8 @@ def _show_cursor(mode: Mode):
             return False
 
         controller.select(text_cursor)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -3776,12 +3892,14 @@ def _normalize_key_char(event):
             inner = s[len(prefix):-1]
             if len(inner) == 1:
                 return inner
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
     try:
         code = int(k)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         code = -1
 
     if 0 <= code <= 255:
@@ -3803,7 +3921,8 @@ def _normalize_key_char(event):
         if 1 <= key_code <= 255:
             return chr(key_code)
 
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
     return ""
@@ -3812,7 +3931,8 @@ def _normalize_key_char(event):
 def _event_modifiers(event):
     try:
         return int(event.Modifiers)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return 0
 
 
@@ -3860,7 +3980,8 @@ def _is_altgr_char(event, key) -> bool:
 def _key_code(event):
     try:
         return int(event.KeyCode)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return -1
 
 
@@ -3874,14 +3995,16 @@ def _is_escape(key_code, is_ctrl):
 def _is_insert_key(event):
     try:
         return _key_code(event) == int(getattr(Key, "INSERT"))
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
 def _is_del_key(event):
     try:
         return _key_code(event) == int(getattr(Key, "DELETE"))
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -3891,7 +4014,8 @@ def _is_function_key(event):
         try:
             if key_code == int(getattr(Key, f"F{i}")):
                 return True
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             continue
     return False
 
@@ -3976,7 +4100,8 @@ def _restore_status_for_controller(controller):
         layout = controller.getFrame().LayoutManager
         layout.destroyElement("private:resource/statusbar/statusbar")
         layout.createElement("private:resource/statusbar/statusbar")
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -3986,7 +4111,8 @@ def _iter_text_document_controllers():
         return
     try:
         components = desktop.getComponents()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return
     if components is None:
         return
@@ -4000,18 +4126,21 @@ def _iter_text_document_controllers():
                 continue
             try:
                 controller = component.getCurrentController()
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 controller = None
             if controller is not None:
                 yield controller
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return
 
 
 def _desktop():
     try:
         return XSCRIPTCONTEXT.getDesktop()
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -4021,7 +4150,8 @@ def _is_text_document(doc):
         return False
     try:
         return bool(doc.supportsService("com.sun.star.text.TextDocument"))
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -4037,14 +4167,16 @@ def _detach_controller(controller):
     for _ in range(MAX_HANDLER_REMOVE_ATTEMPTS):
         try:
             controller.removeKeyHandler(state["key_handler"])
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             break
     listener = state.get("mouse_listener")
     controllers = state.get("mouse_listener_controllers")
     if listener is not None and controllers and id(controller) in controllers:
         try:
             controller.removeMouseClickHandler(listener)
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             pass
         controllers.discard(id(controller))
 
@@ -4063,7 +4195,8 @@ def _attach_controller(controller):
         return
     try:
         controller.addKeyHandler(state["key_handler"])
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
     listener = state.get("mouse_listener")
     if listener is None:
@@ -4074,7 +4207,8 @@ def _attach_controller(controller):
         try:
             controller.addMouseClickHandler(listener)
             controllers.add(id(controller))
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             pass
 
 
@@ -4088,7 +4222,8 @@ def _start_view_event_listener():
     try:
         broadcaster.addEventListener(listener)
         state["view_event_listener"] = listener
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         state["view_event_listener"] = None
 
 
@@ -4099,7 +4234,8 @@ def _stop_view_event_listener():
     if broadcaster is not None and listener is not None:
         try:
             broadcaster.removeEventListener(listener)
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             pass
     state["view_event_listener"] = None
 
@@ -4113,7 +4249,8 @@ def _global_event_broadcaster():
         broadcaster = ctx.getByName("/singletons/com.sun.star.frame.theGlobalEventBroadcaster")
         state["global_event_broadcaster"] = broadcaster
         return broadcaster
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         return None
 
 
@@ -4147,14 +4284,16 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
         if controller is not None:
             try:
                 state["view_cursor"] = controller.getViewCursor()
-            except Exception:
+            except Exception as e:
+                _handle_exc(err=e)
                 pass
         cursor = _get_cursor()
         if cursor is None:
             return False
         try:
             sel_len = len(cursor.getString())
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             sel_len = 0
 
         if sel_len < 2:
@@ -4195,7 +4334,8 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
             _set_mode("visual")
             _set_visual_anchor(anchor)
             _set_visual_selection(cursor, anchor, caret)
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             pass
 
     def disposing(self, event):
@@ -4216,7 +4356,8 @@ class ViewEventListener(unohelper.Base, XEventListener):
                 controller = None
             else:
                 controller = source.getCurrentController()
-        except Exception:
+        except Exception as e:
+            _handle_exc(err=e)
             controller = None
         if event_name == "OnFocus":
             # Do not reattach on every focus change: in Python UNO this can
@@ -4250,7 +4391,8 @@ def _show_normal_cursor_for_controller(controller):
         if moved:
             textCursor.goLeft(1, True)
         controller.select(textCursor)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 
@@ -4262,7 +4404,8 @@ def _show_insert_cursor_for_controller(controller):
         textCursor = cursor.getText().createTextCursorByRange(cursor)
         textCursor.gotoRange(textCursor.getStart(), False)
         controller.select(textCursor)
-    except Exception:
+    except Exception as e:
+        _handle_exc(err=e)
         pass
 
 

@@ -91,8 +91,8 @@ Select function, in `Shortcut keys` select key for it and click `Assign`. You ca
 - For yank/paste system clipboard is used instead of registers. `x`, `X`, `s` and `S` don't yank but just delete.
 - Paragraph motions `{}` stop at start of paragraphs in addition to possible
   first empty line between them.
-- `H` and `L` motions move cursor to start and end of page instead of screen.
-- `Y` does same as `y$`.
+- `H` and `L` motions move cursor to start and end of document page instead of screen.
+- `Y` does same as `y$` similarly to Neovim.
 - `C-d` and `C-u` default scrolling of 20 lines instead of half page since there's no reliable way to get position of half page. Number of scrolled lines can changed with extension's global variable `SCROLL`.
 - Sentence motions use LibreOffice's definition of a sentence. Selected language can have an effect for that. For example first alphabet of sentence may need to be in upper case for it to be considered as sentence.
 
