@@ -1333,14 +1333,13 @@ def _replace_characters(count:int, key:KeyEvent, cursor) -> bool:
 # Operators and clipboard
 # -----------------------
 
-def _yank(key, mode:Mode) -> bool:
+def _yank(key, mode:Mode, cursor) -> bool:
     """Yanks text {motion} moves over. Commands `y`, `yy`.
        Flashes yanked range.
     """
     _copy_and_delete(True, False)
     position = _get_position()
-    cursor = _get_cursor()
-    if (position is not None and cursor is not None) and \
+    if (position is not None) and \
         (not mode.startswith("visual") or key.char == "Y"):
         # Keep yanked range visually selected briefly, then restore cursor.
         # Use _set_mode instead of _goto_mode so the selection isn't
@@ -1388,13 +1387,12 @@ def _yank_and_delete_to_end_of_line(count: int, mode: Mode, yank: bool , delete:
     return _copy_and_delete(yank, delete)
 
 
-def _paste(count:int, mode, after_cursor:bool = True):
+def _paste(count:int, mode, cursor, after_cursor:bool = True):
     """Paste text from clipboard after or before cursor [count] times.
        Commands 'p' and 'P'.
     """
     text_cursor = _get_text_cursor()
-    cursor = _get_cursor()
-    if text_cursor is None or cursor is None:
+    if text_cursor is None:
         return False
 
     try:
@@ -1702,17 +1700,6 @@ def _scan_backward_word_target(paragraph_text, offset, spec):
 
     if unit_mode and target == START:
         bounds = _word_unit_bounds_backward(paragraph_text, offset, big_word)
-        if DEBUG:
-            try:
-                print(
-                    "iw debug: unit_mode backward",
-                    f"offset={offset}",
-                    f"len={length}",
-                    f"bounds={bounds}",
-                )
-            except Exception as e:
-                _handle_exc(err=e)
-                pass
         if bounds is None:
             return None
         start, _ = bounds
@@ -1761,8 +1748,8 @@ def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
             return True
         return False
 
-    next_offset = _scan_forward_word_target(paragraph_text, offset, spec)
 
+    next_offset = _scan_forward_word_target(paragraph_text, offset, spec)
     if next_offset is None or next_offset >= length:
         if _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty):
             return True
@@ -1806,19 +1793,6 @@ def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
         if prev_offset > 0:
             text_cursor.goRight(prev_offset, expand)
         return True
-
-    if DEBUG:
-        try:
-            print(
-                "iw debug: backward fell through",
-                f"offset={offset}",
-                f"len={length}",
-                f"prev_offset={prev_offset}",
-                f"text_snip={paragraph_text[max(0, offset-10):offset+10]!r}",
-            )
-        except Exception as e:
-            _handle_exc(err=e)
-            pass
 
     if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty):
         return False
@@ -2307,7 +2281,6 @@ def _expand_with_word_text_objects(count, key, mode, cursor) -> bool:
         else:
             new_caret = _advance_word_object_caret(text_cursor, caret, steps, \
                                                    direction, big_word)
-
         if new_caret is None:
             return False
 
@@ -3289,8 +3262,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "I": lambda: _insert_before_first_non_blank(mode, cursor),
                 "o": lambda: _begin_new_paragraph(above = False, cursor = cursor),
                 "O": lambda: _begin_new_paragraph(above = True, cursor = cursor),
-                "p": lambda: _paste(count, mode),
-                "P": lambda: _paste(count, mode, after_cursor=False),
+                "p": lambda: _paste(count, mode, cursor),
+                "P": lambda: _paste(count, mode, cursor, after_cursor=False),
                 "r": lambda: self._r_command(count, key, cursor),
                 "s": lambda: _delete_characters(count),
                 "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),
@@ -3322,7 +3295,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             "d": lambda: _copy_and_delete(do_yank, True),
             "s": lambda: _copy_and_delete(yank = False, delete = True),
             "x": lambda: _copy_and_delete(yank = False, delete = True),
-            "y": lambda: _yank(key, mode),
+            "y": lambda: _yank(key, mode, cursor),
         }
         return actions
 
@@ -3695,7 +3668,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if "c" in key.pending or "d" in key.pending:
             _copy_and_delete("_" not in key.pending, True)
         elif "y" in key.pending:
-            _yank(key, mode)
+            _yank(key, mode, cursor,
         else:
             return False
 
@@ -4265,7 +4238,7 @@ class MouseSelectionListener(unohelper.Base, XMouseClickHandler):
     Returns False to not consume the event (pass through to LibreOffice).
     """
 
-    # NOTE: It isn't reliable way to get start of selection by setting it in
+    # NOTE: It wouldn't be reliable way to get start of selection by setting it in
     # this function. This gets called before LO has moved the cursor to position
     # where click happened.
     def mousePressed(self, event):
