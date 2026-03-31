@@ -1,27 +1,38 @@
-# Architecture
+# ViperOffice architecture
 
-## Main extension source code
+Extension source code consist of following modules:
 
-Main code consist of different sections. Main class of extension is KeyHandler. Order
-is same as they are in code.
+- **infra.py** - Non-editing functionality: initialization, enable and disable extension, listen events,
+handle controllers and attach KeyHandler.
+- **viperoffice.py** - Main source code file which includes functionality related for editing document.
+
+
+## Main viperoffice.py
+
+File consists of different sections listed below. Order is same as in source code.
+Main class of extension is KeyHandler. 
 
 ### Global state
 
 Global state of extension and all helper functions to manage it. It's used mainly by
 KeyHandler. 
 
+
 ### Utility funtions
 
 Other general helper functions.
+
 
 ### UI and input modes
 
 Update statusline and cursor appearance and general Vi input mode changing which affects those. Used mainly made by KeyHandler.
 
+
 ### Cursor and selection
 
 Get information or make changes to cursor which includes selection and caret position.
 Used by actions.
+
 
 ### Actions
 
@@ -35,7 +46,7 @@ Jump cursor to different places in document or scroll view. Commands `gg`, `G`, 
 
 #### Lines
 
-Moving in line and line based motions. Commands `hjkl`, `$`, `0`, `^`, `S`, `X`.
+Moving in line and line based motions. Commands `hjkl`, `$`, `0`, `^`, `S`, `X`, `<CR>`, `+`, `-`, `_`
 
 #### Character editing
 
@@ -47,7 +58,7 @@ Vi operators delete, change and yank, clipboard operations, undo/redo. Commands 
 
 #### Word motions
 
-Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`.
+Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
 
 #### Sentence motions
 
@@ -55,14 +66,16 @@ Commands `()`, `is`, `as`
 
 #### Paragraph motions
 
-Commands `{}`, `ip`, `ap`.
+Commands `{}`, `ip`, `ap`
+
 
 ### Input handling
 
 Contains KeyHandler class which is backbone of extension. It interprets and processes user
 input, manages (global) state and calls actions based on them.
 
+
 ### Infra
 
-Non-editing functionality: initialization, enable and disable extension, listen events,
-handle controllers and attach KeyHandler.
+Imports infra.py -module.
+
