@@ -1,31 +1,38 @@
 # ViperOffice architecture
 
-Extension source code consist of following modules:
+Extension source code consists of following modules:
 
-- **infra.py** - Non-editing functionality: initialization, enable and disable extension, listen events,
+- **core** - Global state, utility function, UI related functions.
+- **infra** - Initialization, enabling and disabling extension, listen events,
 handle controllers and attach KeyHandler.
-- **viperoffice.py** - Main source code file which includes functionality related for editing document.
+- **viperoffice** - Main file. Actions for editing and navigating text, input handling.
 
+Modules have different sections which are described below.
 
-## Main viperoffice.py
-
-File consists of different sections listed below. Order is same as in source code.
-Main class of extension is KeyHandler. 
+## core.py
 
 ### Global state
 
-Global state of extension and all helper functions to manage it. It's used mainly by
-KeyHandler. 
+Global state of extension and helper functions to manage it.
 
+### UI and input modes
+
+Update statusline and cursor appearance and general Vi input mode changing which affects those. Used mainly made by KeyHandler.
 
 ### Utility funtions
 
 Other general helper functions.
 
 
-### UI and input modes
+## viperoffice.py module
 
-Update statusline and cursor appearance and general Vi input mode changing which affects those. Used mainly made by KeyHandler.
+File consists of different sections listed below. Order is same as in source code.
+Main class of extension is KeyHandler. 
+
+
+### Import modules
+
+Functions for importing other modules.
 
 
 ### Cursor and selection
@@ -74,8 +81,4 @@ Commands `{}`, `ip`, `ap`
 Contains KeyHandler class which is backbone of extension. It interprets and processes user
 input, manages (global) state and calls actions based on them.
 
-
-### Infra
-
-Imports infra.py -module.
 

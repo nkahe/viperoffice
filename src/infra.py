@@ -8,8 +8,7 @@ from com.sun.star.document import XEventListener
 from com.sun.star.awt import XMouseClickHandler
 
 if TYPE_CHECKING:
-    from viperoffice import (  # noqa: F401
-        KeyHandler,
+    from core import (  # noqa: F401
         XSCRIPTCONTEXT,
         _get_controller,
         _goto_mode,
@@ -25,6 +24,10 @@ if TYPE_CHECKING:
         _update_statusline,
     )
 
+    from viperoffice import (  # noqa: F401
+        KeyHandler
+    )
+
 # This module includes non-editing functionality: initialization, enabling and
 # disabling extension, handling controllers, listening events.
 
@@ -33,7 +36,6 @@ if _HOST is None:
     _HOST = sys.modules.get("viperoffice_host")
 if _HOST is None:
     raise ImportError("viperoffice host module not registered")
-
 
 # Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
 MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 3
