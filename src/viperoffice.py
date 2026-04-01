@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable, Final, NamedTuple
-# import builtins
 from functools import partial
 import threading
 import unohelper
@@ -46,7 +45,7 @@ class KeyEvent(NamedTuple):
     pending: str | None
 
 
-# API to enable extension
+# API calls which can be assigned to shortcuts.
 
 def enable_viper_office():
     """Enable ViperOffice"""
@@ -120,25 +119,44 @@ def _module_base_path():
     return pathlib.Path(base).resolve()
 
 
-def _load_core():
-    """Load core module from same directory for LO packaging."""
+def _load_module_from_dir(module_name: str, filename: str,
+                          required_attr: str | None = None,
+                          inject_xscriptcontext: bool = False,
+                          inject_host: bool = False):
+    """Load a sibling module from this directory with optional injections."""
     import importlib.util
+    import types
     import sys
-    mod = sys.modules.get("core")
-    if mod is not None and hasattr(mod, "_state"):
+    mod = sys.modules.get(module_name)
+    if mod is not None and (required_attr is None or hasattr(mod, required_attr)):
         return mod
     base_path = _module_base_path()
-    core_path = str(base_path.parent / "core.py")
-    spec = importlib.util.spec_from_file_location("core", core_path)
+    module_path = str(base_path.parent / filename)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
-        raise ModuleNotFoundError("No module named 'core'")
+        raise ModuleNotFoundError(f"No module named '{module_name}'")
     mod = importlib.util.module_from_spec(spec)
-    # Propagate XSCRIPTCONTEXT to core module if LO provided it.
-    if "XSCRIPTCONTEXT" in globals():
+    if inject_xscriptcontext and "XSCRIPTCONTEXT" in globals():
         mod.__dict__["XSCRIPTCONTEXT"] = globals().get("XSCRIPTCONTEXT")
-    sys.modules["core"] = mod
+    if inject_host:
+        host = sys.modules.get(__name__)
+        if host is None:
+            host = types.ModuleType("viperoffice_host")
+            host.__dict__.update(globals())
+        mod.__dict__["_HOST"] = host
+    sys.modules[module_name] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+def _load_core():
+    """Load core module from same directory for LO packaging."""
+    return _load_module_from_dir(
+        "core",
+        "core.py",
+        required_attr="_state",
+        inject_xscriptcontext=True,
+    )
 
 
 _core = _load_core()
@@ -151,30 +169,12 @@ def _infra():
     """Load infra module from same directory which includes non-editing
     functionality. Avoids LO/PYTHONPATH import issues.
     """
-    import importlib.util
-    import types
-    import sys
-    mod = sys.modules.get("infra")
-    if mod is not None and hasattr(mod, "enable_viper_office"):
-        return mod
-    base_path = _module_base_path()
-    infra_path = str(base_path.parent / "infra.py")
-    spec = importlib.util.spec_from_file_location("infra", infra_path)
-
-    if spec is None or spec.loader is None:
-        raise ModuleNotFoundError("No module named 'infra'")
-
-    mod = importlib.util.module_from_spec(spec)
-    host = sys.modules.get(__name__)
-
-    if host is None:
-        host = types.ModuleType("viperoffice_host")
-        host.__dict__.update(globals())
-
-    mod.__dict__["_HOST"] = host
-    sys.modules["infra"] = mod
-    spec.loader.exec_module(mod)
-    return mod
+    return _load_module_from_dir(
+        "infra",
+        "infra.py",
+        required_attr="enable_viper_office",
+        inject_host=True,
+    )
 
 
 # --------------------
