@@ -31,7 +31,7 @@ This will simply build the extension file from the template files in
 `extension/template`. These template files were auto-generated using
 [Extension Compiler](https://wiki.openoffice.org/wiki/Extensions_Packager#Download).
 
-For how to use different commands, please read [user documentation](user_documentation.md).
+For how to use different commands, please read [user documentation](docs/user_documentation.md).
 
 ## Features
 
@@ -69,7 +69,7 @@ Mouse:
 Insert mode commands:
 - Switch to Normal mode: `Esc` or with alias `C-[`. 
 
-Commands are described in more detail in the [user documentation](user_documentation.md).
+Commands are described in more detail in the [user documentation](docs/user_documentation.md).
 
 
 ## Shortcuts for enabling and disabling
