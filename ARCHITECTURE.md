@@ -2,14 +2,15 @@
 
 Extension source code consists of following modules:
 
-- **core** - Global state, utility function, UI related functions.
-- **infra** - Initialization, enabling and disabling extension, listen events,
-handle controllers and attach KeyHandler.
-- **viperoffice** - Main file. Actions for editing and navigating text, input handling.
+- **core** - Common functionality imported by other modules. Global state, utility-
+  and UI related functions.
+- **viperoffice** - Enabling and disabling extension, exposes API for it, listens events, handles controllers and attachs KeyHandler to them.
+- **editor** - Handles input and calls editor actions, which manipulate view and
+  text document.
 
 Modules have different sections which are described below.
 
-## core.py
+## Core module
 
 ### Global state
 
@@ -24,7 +25,7 @@ Update statusline and cursor appearance and general Vi input mode changing which
 Other general helper functions.
 
 
-## viperoffice.py module
+## Editor module
 
 File consists of different sections listed below. Order is same as in source code.
 Main class of extension is KeyHandler. 
