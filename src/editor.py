@@ -376,16 +376,17 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
     if text_cursor is None:
         return False
     try:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        caret = _get_visual_caret_range(text_cursor)
+        probe = text_cursor.getText().createTextCursorByRange(caret)
         if not probe.goRight(1, True):
             return False
         if probe.getString() not in (" ", "\t", "\n"):
             return False
 
-        if not condition:
+        if condition is None:
             return True
 
-        if _is_current_paragraph_empty(text_cursor):
+        if _is_current_paragraph_empty(probe):
             return False
 
         if condition == "after_sentence":
@@ -402,10 +403,11 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
             return ch in (".", "!", "?")
 
         elif condition == "before_paragraph":
-            # Check that the cursor is within leading whitespace of the paragraph.
-            para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+            # Check that the caret is within leading whitespace of the paragraph.
+            caret = _get_visual_caret_range(text_cursor)
+            para_probe = text_cursor.getText().createTextCursorByRange(caret)
             para_probe.gotoStartOfParagraph(False)
-            para_probe.gotoRange(text_cursor.getStart(), True)
+            para_probe.gotoRange(caret, True)
             leading = para_probe.getString()
             return len(leading) == 0 or all(c in (" ", "\t") for c in leading)
         else:
@@ -416,7 +418,7 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
 
 
 def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
-    """Print debug info about view cursor and text cursor ranges to console. For development use."""
+    """Print debug info about view cursor and text cursor ranges to console."""
     cursor = _get_cursor()
     if cursor is None:
         print("ViperOffice cursor debug: No view cursor available.")
@@ -452,7 +454,8 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 anchor = _state().get("visual_anchor")
                 caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
                 lines.append("-- text cursor LO API --")
-                lines.append(f"String: {char}")
+                lines.append(f"char: {char}")
+                lines.append(f"getString: {text_cursor.getString()}")
                 lines.append(f"collapsed: {text_cursor.isCollapsed()}")
                 lines.append(f"start of paragraph: {text_cursor.isStartOfParagraph()}")
                 lines.append(f"end of paragraph: {text_cursor.isEndOfParagraph()}")
@@ -2156,45 +2159,37 @@ def _to_start_of_next_sentence(text_cursor, expand: bool, cursor) -> bool:
     Handles edge cases: empty paragraphs (jumps to next non-empty), leading paragraph
     whitespace, and backends that stall on paragraph-end markers.
     """
-    old_pos = cursor.getPosition()
-
+    moved = None
     # From an empty line, jump directly to the next non-empty paragraph.
     if _is_current_paragraph_empty(text_cursor):
         moved = _to_next_non_empty_paragraph(text_cursor, expand)
-        if moved:
-            if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-                text_cursor.gotoNextWord(expand)
-            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
-        return moved
 
     # From leading whitespace of a paragraph, gotoNextSentence would skip the
     # first sentence entirely. Jump to the next word instead, which lands at
     # the start of that sentence.
     if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-        moved = text_cursor.gotoNextWord(expand)
-        if moved:
-            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
+        text_cursor.gotoNextWord(expand)
+        moved = True
+
+    if moved is not None:
+        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
         return moved
 
     text_cursor.gotoNextSentence(expand)
+
+    # If checks won't work if fresh text_cursor isn't get.
     _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
+    text_cursor = _get_text_cursor()
 
     # Some backends land on the paragraph end marker first; skip that stop.
     if text_cursor.isEndOfParagraph() and not _is_current_paragraph_empty(text_cursor):
         text_cursor.gotoNextParagraph(expand)
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
-        return True
 
-    if _same_pos(old_pos, cursor.getPosition()):
-        if text_cursor.isEndOfParagraph():
-            if _is_current_paragraph_empty(text_cursor):
-                _to_next_non_empty_paragraph(text_cursor, expand)
-            else:
-                text_cursor.gotoNextParagraph(expand)
-        else:
-            text_cursor.goRight(1, expand)
-            text_cursor.gotoNextSentence(expand)
+    if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+        text_cursor.gotoNextWord(expand)
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
+
     return True
 
 
@@ -3553,4 +3548,3 @@ def _is_function_key(event):
             _handle_exc(err=e)
             continue
     return False
-
