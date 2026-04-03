@@ -2216,31 +2216,14 @@ def _start_of_sentences_forward(expand: bool, count: int, cursor) -> bool:
         return False
 
 
-# LibreOffice isStartOfSentence() doesn't work with non-collapsed cursors and
-# have locale boundary quirks, so we use a punctuation/whitespace heuristic.
+# If paragraph starts with whitespace or is empty.isStartOfSentence() can gives
+# True which this fixes.
 def _is_at_sentence_start(text_cursor) -> bool:
-    if text_cursor is None:
-        return False
     try:
-        # Whitespace is never a sentence start.
-        if _is_cursor_at_whitespace(text_cursor):
+        if text_cursor is None or _is_cursor_at_whitespace(text_cursor):
             return False
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-        if probe.isStartOfParagraph():
-            return True
-        ch = ""
-        while True:
-            if not probe.goLeft(1, True):
-                # Reached document start through whitespace only.
-                return True
-            ch = probe.getString()
-            probe.collapseToStart()
-            if probe.isStartOfParagraph():
-                # Walked back to paragraph start through whitespace only.
-                return True
-            if ch not in (" ", "\t", "\"", "'", ")", "]"):
-                break
-        return ch in (".", "!", "?")
+        probe = _clone_text_range(text_cursor)
+        return True if probe.isStartOfSentence() else False
     except Exception as e:
         _handle_exc(e)
         return False
