@@ -417,6 +417,23 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
         return False
 
 
+def _is_at_first_non_whitespace_after_leading_ws(text_cursor) -> bool:
+    """Return True if cursor is at first non-whitespace after leading paragraph whitespace.
+    """
+    if text_cursor is None:
+        return False
+    try:
+        if text_cursor.isStartOfParagraph():
+            return False
+        para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        para_probe.gotoStartOfParagraph(False)
+        para_probe.gotoRange(text_cursor.getStart(), True)
+        return all(c in (" ", "\t") for c in para_probe.getString())
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
 def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Print debug info about view cursor and text cursor ranges to console."""
     cursor = _get_cursor()
@@ -1998,8 +2015,7 @@ def _expand_with_word_text_objects(count, key, mode, cursor) -> bool:
 # Sentence motions
 # ------------------
 
-
-def _move_to_sentence_whitespace_start(text_cursor) -> bool:
+def _to_sentence_whitespace_start(text_cursor) -> bool:
     """Move text cursor to the start of the current whitespace unit."""
     if text_cursor is None:
         return False
@@ -2031,7 +2047,7 @@ def _normalize_sentence_unit_start(text_cursor) -> bool:
             return True
         if _is_cursor_at_whitespace(text_cursor, "after_sentence") or \
                 _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-            return _move_to_sentence_whitespace_start(text_cursor)
+            return _to_sentence_whitespace_start(text_cursor)
         if not _is_at_sentence_start(text_cursor):
             text_cursor.gotoStartOfSentence(False)
         return True
@@ -2144,7 +2160,7 @@ def _inner_sentences_backward(text_cursor, count: int) -> bool:
 
 def _to_whitespace_start(text_cursor, expand: bool, cursor) -> bool:
     try:
-        if not _move_to_sentence_whitespace_start(text_cursor):
+        if not _to_sentence_whitespace_start(text_cursor):
             return False
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return True
@@ -2177,11 +2193,13 @@ def _to_start_of_next_sentence(text_cursor, expand: bool, cursor) -> bool:
 
     text_cursor.gotoNextSentence(expand)
 
-    # If checks won't work if fresh text_cursor isn't get.
+    # If checks below won't work if fresh text_cursor isn't get.
     _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
     text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
 
-    # Some backends land on the paragraph end marker first; skip that stop.
+    # Some backends land on the paragraph end marker first, skip that stop.
     if text_cursor.isEndOfParagraph() and not _is_current_paragraph_empty(text_cursor):
         text_cursor.gotoNextParagraph(expand)
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
@@ -2189,7 +2207,6 @@ def _to_start_of_next_sentence(text_cursor, expand: bool, cursor) -> bool:
     if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
         text_cursor.gotoNextWord(expand)
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
-
     return True
 
 
@@ -2229,7 +2246,7 @@ def _is_at_sentence_start(text_cursor) -> bool:
         return False
 
 
-def _to_start_of_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
+def _to_previous_sentence_start(text_cursor, expand:bool, cursor) -> bool:
     """Move cursor to the start of the previous sentence. Commands '(', 'is'.
 
     Handles edge cases: leading paragraph whitespace (collapses to paragraph start to
@@ -2238,53 +2255,30 @@ def _to_start_of_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
     """
     old_pos = cursor.getPosition()
 
-    # From leading whitespace of a paragraph, gotoStartOfSentence moves forward
-    # to the first sentence content rather than backward. Collapse to the real
-    # paragraph start so the isStartOfParagraph() branch below handles crossing
-    # to the previous paragraph correctly.
-    force_paragraph_boundary = False
-    if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+    # Normalize paragraph starting position for crossing to previous paragraph.
+    if _is_cursor_at_whitespace(text_cursor, "before_paragraph") or \
+    _is_at_first_non_whitespace_after_leading_ws(text_cursor):
         text_cursor.gotoStartOfParagraph(False)
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
-        force_paragraph_boundary = True
         # Fall through — cursor is now at isStartOfParagraph(), handled below.
 
     # From inside a sentence, first motion should go to current sentence start.
     # Skip this for empty paragraphs so we can cross to previous sentence.
-    if (not force_paragraph_boundary
-            and not _is_at_sentence_start(text_cursor)
-            and not _is_current_paragraph_empty(text_cursor)):
+    elif not _is_at_sentence_start(text_cursor) and \
+    not _is_current_paragraph_empty(text_cursor):
         text_cursor.gotoStartOfSentence(expand)
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
         return True
 
-    # If cursor is at the first non-whitespace character after leading paragraph
-    # whitespace, isStartOfParagraph() is False but we must treat it as paragraph
-    # start so the boundary logic below crosses to the previous paragraph.
-    if not force_paragraph_boundary and not text_cursor.isStartOfParagraph():
-        try:
-            para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-            para_probe.gotoStartOfParagraph(False)
-            para_probe.gotoRange(text_cursor.getStart(), True)
-            if all(c in (" ", "\t") for c in para_probe.getString()):
-                text_cursor.gotoStartOfParagraph(False)
-                _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
-        except Exception as e:
-            _handle_exc(err=e)
-            pass
-
     # Paragraph-boundary behavior matching logic.
     if text_cursor.isStartOfParagraph():
         if _is_current_paragraph_empty(text_cursor):
-            moved = text_cursor.gotoPreviousParagraph(expand)
-            if not moved:
-                return False
-            while _is_current_paragraph_empty(text_cursor):
-                if not text_cursor.gotoPreviousParagraph(expand):
-                    _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
-                    return True
+          if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty=False):
+              _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
+              return True
         else:
             if text_cursor.gotoPreviousParagraph(expand):
+                # Vi/Vim like behavior where we stop at first empty line.
                 if _is_current_paragraph_empty(text_cursor):
                     _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
                     return True
@@ -2298,6 +2292,7 @@ def _to_start_of_previous_sentence(text_cursor, expand:bool, cursor) -> bool:
 
     text_cursor.gotoPreviousSentence(expand)
     _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
+
     if _same_pos(old_pos, cursor.getPosition()):
         if text_cursor.goLeft(1, expand):
             text_cursor.gotoPreviousSentence(expand)
@@ -2318,7 +2313,7 @@ def _to_start_of_sentences_backwards(expand: bool, count, cursor) -> bool:
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            moved = _to_start_of_previous_sentence(text_cursor, expand, cursor)
+            moved = _to_previous_sentence_start(text_cursor, expand, cursor)
             _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
             if not moved:
                 break
@@ -2374,8 +2369,10 @@ def _select_sentence_text_objects(count: int, key: KeyEvent, cursor):
         return _start_of_sentences_forward(True, count, cursor)
 
     probe = _clone_text_range(text_cursor)
+
     if probe is None:
         return False
+
     start_range = probe.getStart()
     if not _inner_sentences_forward(probe, count):
         return False
