@@ -1,9 +1,17 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Callable, Final, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, Final
 from functools import partial
 import threading
 import unohelper
 from com.sun.star.awt import KeyModifier, XKeyHandler, Key
+from utils import (   # type: ignore[reportMissingImports]
+    _clone_text_range,
+    _is_current_paragraph_empty,
+    _is_cursor_at_whitespace,
+    _is_forward_selection,
+    _range_after_paragraph_break,
+    msg
+)
 
 if TYPE_CHECKING:
     from core import (  # noqa: F401
@@ -20,9 +28,10 @@ if TYPE_CHECKING:
         _get_position,
         _get_raw_count,
         _get_text_cursor,
+        _get_visual_caret_range,
         _goto_mode,
         _handle_exc,
-        _is_forward_selection,
+        _paragraph_scan_steps,
         _reset_count,
         _set_last_ft,
         _set_position,
@@ -30,11 +39,7 @@ if TYPE_CHECKING:
         _show_cursor,
         _state,
         _update_statusline,
-        msg,
     )
-
-if TYPE_CHECKING:
-    from com.sun.star.text import XViewCursor, XTextCursor
 
 # Current vi input mode. "pending" is short for Operator-pending mode. Happens
 # after operator command "d", "c" or "y". ViperOffice is then waiting for motion.
@@ -54,9 +59,6 @@ ISWORD: Final[dict] = {
 
 # How many lines should C-d and C-u scroll.
 SCROLL: Final[int] = 21
-# Guard for paragraph scans to avoid malformed cursor loops freezing the UI.
-PARAGRAPH_SCAN_LIMIT: Final[int] = 10000
-
 
 def _get_scroll() -> int:
     """Lines to scroll with C-b and C-u commands."""
@@ -74,30 +76,6 @@ def _get_scroll() -> int:
 # --------------------
 # Cursor and selection
 # --------------------
-
-def _get_visual_caret_range(text_cursor):
-    """Return the caret (active/moving) end of the visual selection as an XTextRange.
-
-    LibreOffice's getStart()/getEnd() always return left/right ends regardless of
-    direction, so we compare against the saved anchor to determine which end is fixed.
-    - If anchor == getStart(): forward selection, caret is at getEnd().
-    - Otherwise: backward selection, caret is at getStart().
-    """
-    anchor = _state().get("visual_anchor")
-    if anchor is None:
-        return text_cursor.getEnd()
-    try:
-        text = text_cursor.getText()
-        probe = text.createTextCursorByRange(text_cursor.getStart())
-        probe.gotoRange(anchor, True)
-        if len(probe.getString()) == 0:
-            return text_cursor.getEnd()   # forward selection
-        else:
-            return text_cursor.getStart() # backward selection
-    except Exception as e:
-        _handle_exc(err=e)
-        return text_cursor.getEnd()
-
 
 def _range_length_between(left_range, right_range) -> int:
     if left_range is None or right_range is None:
@@ -363,60 +341,6 @@ def _go_to_other_end(mode: Mode, cursor) -> bool:
     return True
 
 
-def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
-    """Return True if cursor is on a whitespace character.
-
-    condition: optional qualifier for additional check:
-        None               – any whitespace at cursor position.
-        "after_sentence"   – whitespace that immediately follows a sentence end
-                             (., !, ?), ruling out mid-sentence whitespace.
-        "before_paragraph" – whitespace at the start of a paragraph (paragraph
-                             begins with whitespace characters).
-    """
-    if text_cursor is None:
-        return False
-    try:
-        caret = _get_visual_caret_range(text_cursor)
-        probe = text_cursor.getText().createTextCursorByRange(caret)
-        if not probe.goRight(1, True):
-            return False
-        if probe.getString() not in (" ", "\t", "\n"):
-            return False
-
-        if condition is None:
-            return True
-
-        if _is_current_paragraph_empty(probe):
-            return False
-
-        if condition == "after_sentence":
-        # Walk backwards past whitespace and closing punctuation to find sentence end.
-            probe.collapseToStart()
-            ch = ""
-            for _ in _paragraph_scan_steps():
-                if not probe.goLeft(1, True):
-                    break
-                ch = probe.getString()
-                probe.collapseToStart()
-                if ch not in (" ", "\t", "\"", "'", ")", "]"):
-                    break
-            return ch in (".", "!", "?")
-
-        elif condition == "before_paragraph":
-            # Check that the caret is within leading whitespace of the paragraph.
-            caret = _get_visual_caret_range(text_cursor)
-            para_probe = text_cursor.getText().createTextCursorByRange(caret)
-            para_probe.gotoStartOfParagraph(False)
-            para_probe.gotoRange(caret, True)
-            leading = para_probe.getString()
-            return len(leading) == 0 or all(c in (" ", "\t") for c in leading)
-        else:
-            return False
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
 def _is_at_first_non_whitespace_after_leading_ws(text_cursor) -> bool:
     """Return True if cursor is at first non-whitespace after leading paragraph whitespace.
     """
@@ -477,7 +401,7 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 lines.append(f"start of paragraph: {text_cursor.isStartOfParagraph()}")
                 lines.append(f"end of paragraph: {text_cursor.isEndOfParagraph()}")
                 # Cursor needs to be collapsed for this to give True.
-                lines.append(f"start of sentence: {text_cursor.isStartOfSentence()}")
+                lines.append(f"start of sentence: {text_cursor.isStartOfSentence()}")  # type: ignore[reportAttributeAccessIssue]
                 lines.append(f"start of word: {text_cursor.isStartOfWord()}")
                 lines.append(f"end of word: {text_cursor.isEndOfWord()}")
                 lines.append("-- ViperOffice custom functions --")
@@ -1307,16 +1231,6 @@ def _normalize_motion_range(result, for_operator:bool = False):
     return normalized
 
 
-def _clone_text_range(text_cursor) -> XTextCursor | None:
-    """Return a cloned TextCursor positioned at the start of text_cursor.
-    """
-    try:
-        return text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-    except Exception as e:
-        _handle_exc(err=e)
-        return None
-
-
 def _query_word_motion(spec, count:int, expand:bool=False):
     text_cursor = _get_text_cursor()
     cursor = _get_cursor()
@@ -2020,7 +1934,7 @@ def _to_sentence_whitespace_start(text_cursor) -> bool:
     if text_cursor is None:
         return False
     try:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        probe = _clone_text_range(text_cursor)
         for _ in _paragraph_scan_steps():
             if probe.isStartOfParagraph():
                 break
@@ -2042,7 +1956,7 @@ def _to_end_of_sentence(text_cursor) -> bool:
     if text_cursor is None:
         return False
     try:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        probe = _clone_text_range(text_cursor)
         if not probe.gotoNextSentence(False):
             probe.gotoEndOfParagraph(False)
         if not _move_probe_to_sentence_end(probe):
@@ -2066,30 +1980,6 @@ def _move_probe_to_sentence_end(probe) -> bool:
         if ch not in (" ", "\t", "\n"):
             break
     return ch in (".", "!", "?")
-
-
-def _advance_empty_paragraph_unit_forward(text_cursor) -> bool:
-    """Advance cursor over a single empty paragraph unit."""
-    if text_cursor is None or not _is_current_paragraph_empty(text_cursor):
-        return False
-    try:
-        if not text_cursor.isCollapsed():
-            caret = _get_visual_caret_range(text_cursor)
-            text_cursor.gotoRange(caret, False)
-        text_cursor.gotoStartOfParagraph(False)
-        if text_cursor.gotoNextParagraph(False):
-            return True
-        if text_cursor.goDown(1, False):
-            return True
-        end_after = _range_after_paragraph_break(text_cursor.getEnd())
-        if end_after is not None:
-            text_cursor.gotoRange(end_after, False)
-            return True
-        text_cursor.gotoEndOfParagraph(False)
-        return True
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
 
 
 def _inner_sentences_forward(text_cursor, count: int) -> bool:
@@ -2117,6 +2007,30 @@ def _inner_sentences_forward(text_cursor, count: int) -> bool:
         return moved_any
     except Exception as e:
         _handle_exc(e)
+        return False
+
+
+def _advance_empty_paragraph_unit_forward(text_cursor) -> bool:
+    """Advance cursor over a single empty paragraph unit."""
+    if text_cursor is None or not _is_current_paragraph_empty(text_cursor):
+        return False
+    try:
+        if not text_cursor.isCollapsed():
+            caret = _get_visual_caret_range(text_cursor)
+            text_cursor.gotoRange(caret, False)
+        text_cursor.gotoStartOfParagraph(False)
+        if text_cursor.gotoNextParagraph(False):
+            return True
+        if text_cursor.goDown(1, False):
+            return True
+        end_after = _range_after_paragraph_break(text_cursor.getEnd())
+        if end_after is not None:
+            text_cursor.gotoRange(end_after, False)
+            return True
+        text_cursor.gotoEndOfParagraph(False)
+        return True
+    except Exception as e:
+        _handle_exc(err=e)
         return False
 
 
@@ -2205,7 +2119,7 @@ def _to_start_of_next_sentence(text_cursor, expand: bool, cursor) -> bool:
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
 
     if _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-        text_cursor.gotoNextWord(expand)
+        text_cursor.gotoNextWord(expand)  # type: ignore[reportAttributeAccessIssue]
         _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor)
     return True
 
@@ -2434,23 +2348,6 @@ def _expand_with_sentences_objects(count: int, key: KeyEvent, cursor) -> bool:
 # Paragraph motions
 # ------------------
 
-def _is_current_paragraph_empty(text_cursor) -> bool:
-    if text_cursor is None:
-        return False
-    try:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor)
-        probe.gotoStartOfParagraph(False)
-        probe.gotoEndOfParagraph(True)
-        return len(probe.getString()) == 0
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
-def _paragraph_scan_steps(limit: int = PARAGRAPH_SCAN_LIMIT):
-    # Guard against malformed cursor loops freezing the UI.
-    return range(limit)
-
 
 def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
     moved = False
@@ -2526,18 +2423,6 @@ def _consume_empty_block_forward(text_cursor):
             text_cursor.gotoStartOfParagraph(False)
             return end_range, True
     return end_range, False
-
-
-def _range_after_paragraph_break(text_range):
-    try:
-        text_obj = text_range.getText()
-        probe = text_obj.createTextCursorByRange(text_range)
-        if probe.goRight(1, False):
-            return probe.getStart()
-    except Exception as e:
-        _handle_exc(err=e)
-        pass
-    return None
 
 
 def _extend_selection_after_empty_block(text_cursor, cursor):

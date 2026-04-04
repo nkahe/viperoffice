@@ -12,7 +12,6 @@ if TYPE_CHECKING:
         _get_controller,
         _goto_mode,
         _handle_exc,
-        _is_forward_selection,
         _reset_count,
         _reset_pending_keys,
         _set_mode,
@@ -27,9 +26,14 @@ if TYPE_CHECKING:
         _set_visual_selection,
     )
 
+    from utils import (  # type: ignore[reportMissingImports]
+        _is_forward_selection,
+    )
+
 # This module includes non-editing functionality: initialization, enabling and
 # disabling extension, handling controllers, listening events.
 
+# Resolve the on-disk path to this module even when __file__ is missing in LO.
 def _module_base_path():
     import inspect
     import pathlib
@@ -52,6 +56,8 @@ def _module_base_path():
     return pathlib.Path(base).resolve()
 
 
+# Load sibling modules from this extension folder so LO's script loader
+# doesn't depend on sys.path, and optionally inject shared globals.
 def _load_module_from_dir(module_name: str, filename: str,
                           required_attr: str | None = None,
                           inject_xscriptcontext: bool = False,
@@ -84,6 +90,14 @@ _core = _load_module_from_dir(
 )
 globals().update({k: v for k, v in _core.__dict__.items() if not k.startswith("__")})
 
+_utils = _load_module_from_dir(
+    "utils",
+    "utils.py",
+    required_attr="_is_forward_selection",
+    inject_core=True,
+)
+globals().update({k: v for k, v in _utils.__dict__.items() if not k.startswith("__")})
+
 _editor = _load_module_from_dir(
     "editor",
     "editor.py",
@@ -94,6 +108,7 @@ globals().update({k: v for k, v in _editor.__dict__.items() if not k.startswith(
 
 # Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
 MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 3
+
 
 def enable_viper_office():
     """Enable ViperOffice"""

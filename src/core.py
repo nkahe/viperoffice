@@ -1,15 +1,17 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple
 import builtins
 import datetime
 import inspect
 import os
 import tempfile
 import traceback
-from com.sun.star.awt import Rectangle
 
 if TYPE_CHECKING:
     from com.sun.star.text import XViewCursor, XTextCursor
+
+# Core module holds shared state, UNO context access, and common helpers used
+# across modules.
 
 class KeyEvent(NamedTuple):
     char: str
@@ -27,6 +29,9 @@ Mode = Literal["normal", "insert", "pending", "visual"]
 # Provided by LibreOffice's Python macro runtime.
 if "XSCRIPTCONTEXT" not in globals():
     XSCRIPTCONTEXT: Any = None
+
+# Guard for paragraph scans to avoid malformed cursor loops freezing the UI.
+PARAGRAPH_SCAN_LIMIT: Final[int] = 10000
 
 _StateDict = dict[str, Any]
 def _state() -> _StateDict:
@@ -128,9 +133,9 @@ def _get_position() -> dict | None:
     return _state()["cursor_position"]
 
 
-# ------------------
-# UI and input modes
-# ------------------
+def _paragraph_scan_steps(limit: int = PARAGRAPH_SCAN_LIMIT):
+    # Guard against malformed cursor loops freezing the UI.
+    return range(limit)
 
 
 def _get_pending_keys() -> None | str:
@@ -157,7 +162,7 @@ def _reset_pending_keys():
     return True
 
 
-def _get_count(raw: bool = False) -> int:
+def _get_count() -> int:
     """Return effective count: prefer active KeyHandler's count if available."""
     handler = _state().get("key_handler")
     try:
@@ -262,9 +267,29 @@ def _handle_exc(err: Exception | None = None) -> None:
         pass
 
 
-# -----------------
-# Utility functions
-# -----------------
+def _get_visual_caret_range(text_cursor):
+    """Return the caret (active/moving) end of the visual selection as an XTextRange.
+
+    LibreOffice's getStart()/getEnd() always return left/right ends regardless of
+    direction, so we compare against the saved anchor to determine which end is fixed.
+    - If anchor == getStart(): forward selection, caret is at getEnd().
+    - Otherwise: backward selection, caret is at getStart().
+    """
+    anchor = _state().get("visual_anchor")
+    if anchor is None:
+        return text_cursor.getEnd()
+    try:
+        text = text_cursor.getText()
+        probe = text.createTextCursorByRange(text_cursor.getStart())
+        probe.gotoRange(anchor, True)
+        if len(probe.getString()) == 0:
+            return text_cursor.getEnd()   # forward selection
+        else:
+            return text_cursor.getStart() # backward selection
+    except Exception as e:
+        _handle_exc(err=e)
+        return text_cursor.getEnd()
+
 
 def _current_doc():
     try:
@@ -306,70 +331,6 @@ def _get_frame():
     except Exception as e:
         _handle_exc(err=e)
         return None
-
-
-# For debugging
-
-def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnusedFunction]
-    """Show [text] in a pop-up window."""
-    try:
-        controller = _get_controller()
-        if controller is None:
-            return
-        parent = controller.getFrame().getContainerWindow()
-        toolkit = parent.getToolkit()
-        try:
-            # Legacy UNO signature used by some versions.
-            box = toolkit.createMessageBox(
-                parent, Rectangle(), "infobox", 1, title, str(text),
-            )
-        except Exception as e:
-            _handle_exc(err=e)
-            # Newer UNO signature used by some versions.
-            box = toolkit.createMessageBox(
-                parent, 1, 1, title, str(text),
-            )
-        box.execute()
-    except Exception as e:
-        _handle_exc(err=e)
-        pass
-
-
-def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportUnusedFunction]
-    """Return a human-readable description of an XTextRange-like object.
-
-    Output includes the range text (trimmed) and start/end offsets measured from
-    the start of the containing paragraph (end is exclusive). Returns a short
-    placeholder if the range is None or unprintable.
-    """
-    try:
-        if range is None:
-            return "None"
-        text = range.getString()
-        para = range.getText()
-        # Compute start offset relative to paragraph start
-        start_range = range.getStart()
-        start_cursor = para.createTextCursorByRange(start_range)
-        start_cursor.gotoStartOfParagraph(False)
-        start_cursor.gotoRange(start_range, True)
-        start_offset = len(start_cursor.getString())
-        # Compute end offset relative to paragraph start (exclusive)
-        end_range = range.getEnd()
-        end_cursor = para.createTextCursorByRange(end_range)
-        end_cursor.gotoStartOfParagraph(False)
-        end_cursor.gotoRange(end_range, True)
-        end_offset = len(end_cursor.getString())
-        snippet = text.replace("\n", "\\n")
-        if len(snippet) > 120:
-            snippet = snippet[:117] + "..."
-        return f"'{snippet}' (start_offset={start_offset}, end_excl={end_offset})"
-    except Exception as e:
-        _handle_exc(err=e)
-        try:
-            return f"<unprintable range: {range}>"
-        except Exception as e:
-            _handle_exc(err=e)
-            return "<unprintable range>"
 
 
 def _goto_mode(new_mode: Mode) -> bool:
@@ -428,30 +389,6 @@ def _goto_mode(new_mode: Mode) -> bool:
     return True
 
 
-def _get_visual_caret_range(text_cursor):
-    """Return the caret (active/moving) end of the visual selection as an XTextRange.
-
-    LibreOffice's getStart()/getEnd() always return left/right ends regardless of
-    direction, so we compare against the saved anchor to determine which end is fixed.
-    - If anchor == getStart(): forward selection, caret is at getEnd().
-    - Otherwise: backward selection, caret is at getStart().
-    """
-    anchor = _state().get("visual_anchor")
-    if anchor is None:
-        return text_cursor.getEnd()
-    try:
-        text = text_cursor.getText()
-        probe = text.createTextCursorByRange(text_cursor.getStart())
-        probe.gotoRange(anchor, True)
-        if len(probe.getString()) == 0:
-            return text_cursor.getEnd()   # forward selection
-        else:
-            return text_cursor.getStart() # backward selection
-    except Exception as e:
-        _handle_exc(err=e)
-        return text_cursor.getEnd()
-
-
 def _show_cursor(mode: Mode):
     """Sets cursor style and saves cursor position info. """
     text_cursor = _get_text_cursor()
@@ -481,22 +418,3 @@ def _show_cursor(mode: Mode):
     except Exception as e:
         _handle_exc(err=e)
         return False
-
-
-# UNO doesn't offer call to get caret position when there's selection. Usually
-# state.visual_anchor is set and tracked but for situations it's not available
-# this can be used.
-def _is_forward_selection(cursor) -> bool:
-    """Return True if caret is at right end of selection, False if at left end."""
-    try:
-        original_len = len(cursor.getString())
-        moved = cursor.goRight(1, True)
-        if moved:
-            new_len = len(cursor.getString())
-            cursor.goLeft(1, True)
-            return new_len > original_len
-        return True
-    except Exception as e:
-        _handle_exc(err=e)
-        return True
-
