@@ -10,6 +10,8 @@ from utils import (   # type: ignore[reportMissingImports]
     _is_cursor_at_whitespace,
     _is_forward_selection,
     _range_after_paragraph_break,
+    _set_visual_selection,
+    _sync_view_cursor_to_text_cursor,
     msg
 )
 
@@ -40,10 +42,6 @@ if TYPE_CHECKING:
         _state,
         _update_statusline,
     )
-
-# Current vi input mode. "pending" is short for Operator-pending mode. Happens
-# after operator command "d", "c" or "y". ViperOffice is then waiting for motion.
-# Mode = Literal["normal", "insert", "pending", "visual"]
 
 # Global constants
 
@@ -77,120 +75,6 @@ def _get_scroll() -> int:
 # Cursor and selection
 # --------------------
 
-def _range_length_between(left_range, right_range) -> int:
-    if left_range is None or right_range is None:
-        return 0
-    try:
-        if _range_starts_before(right_range, left_range):
-            left_range, right_range = right_range, left_range
-        text = left_range.getText()
-        span = text.createTextCursorByRange(left_range)
-        span.gotoRange(right_range, True)
-        return len(span.getString())
-    except Exception as e:
-        _handle_exc(err=e)
-        return 0
-
-
-def _range_starts_before(range_a, range_b) -> bool:
-    if range_a is None or range_b is None:
-        return False
-    try:
-        text = range_a.getText()
-        # compareRegionStarts returns 1 when range_a starts before range_b.
-        return text.compareRegionStarts(range_a, range_b) == 1
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
-def _range_ends_before(range_a, range_b) -> bool:
-    if range_a is None or range_b is None:
-        return False
-    try:
-        text = range_a.getText()
-        return text.compareRegionEnds(range_a, range_b) == 1
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
-def _try_go_left(cursor, distance: int) -> bool:
-    """Move text cursor left by distance characters with selection,
-    temporarily hiding it to avoid visual flicker.
-
-    Returns True if the cursor moved successfully.
-    """
-    if cursor is None or distance <= 0:
-        return False
-    moved = False
-    hide_cursor = False
-    try:
-        visible_before = None
-        try:
-            visible_before = cursor.isVisible()
-        except Exception as e:
-            _handle_exc(err=e)
-            visible_before = None
-        if visible_before:
-            cursor.setVisible(False)
-            hide_cursor = True
-        moved = cursor.goLeft(distance, True)
-    except Exception as e:
-        _handle_exc(err=e)
-        moved = False
-    finally:
-        if hide_cursor:
-            cursor.setVisible(True)
-    return moved
-
-
-def _try_go_right(cursor, distance: int) -> bool:
-    """Move text cursor right by distance characters with selection,
-    temporarily hiding it to avoid visual flicker.
-
-    Returns True if the cursor moved successfully.
-    """
-    if cursor is None or distance <= 0:
-        return False
-    moved = False
-    hide_cursor = False
-    try:
-        visible_before = None
-        try:
-            visible_before = cursor.isVisible()
-        except Exception as e:
-            _handle_exc(err=e)
-            visible_before = None
-        if visible_before:
-            cursor.setVisible(False)
-            hide_cursor = True
-        moved = cursor.goRight(distance, True)
-    except Exception as e:
-        _handle_exc(err=e)
-        moved = False
-    finally:
-        if hide_cursor:
-            cursor.setVisible(True)
-    return moved
-
-
-def _ensure_visual_caret(cursor, at_end: bool) -> None:
-    """Ensure view cursor caret is on the requested selection end without
-    changing selection.
-    """
-    if cursor is None:
-        return
-    try:
-        if at_end:
-            cursor.gotoRange(cursor.getEnd(), True)
-        else:
-            cursor.gotoRange(cursor.getStart(), True)
-    except Exception as e:
-        _handle_exc(err=e)
-        pass
-
-
 def _pos_xy(pos: object) -> tuple[Any, Any]:
     """Extract (X, Y) coordinates from a UNO position object, handling both
     attribute and method forms."""
@@ -207,89 +91,6 @@ def _pos_xy(pos: object) -> tuple[Any, Any]:
 
 def _same_pos(a, b):
     return _pos_xy(a) == _pos_xy(b)
-
-
-def _sync_view_cursor_to_text_cursor(text_cursor, expand: bool, view_cursor, backward: bool = False):
-    if expand and backward:
-        edge = text_cursor.getStart()
-    elif expand:
-        edge = text_cursor.getEnd()
-    else:
-        edge = text_cursor.getStart()
-    anchor = _state().get("visual_anchor") if expand else None
-    if anchor is not None:
-        # Visual mode: use _set_visual_selection so direction changes work correctly.
-        _set_visual_selection(view_cursor, anchor, edge)
-    else:
-        view_cursor.gotoRange(edge, expand)
-
-
-def _set_visual_selection(cursor, anchor, new_caret, force_backward: bool = False):
-    """Rebuild visual selection between fixed anchor and new caret position.
-
-    gotoRange(pos, True) on a view cursor only moves the RIGHT end, so we always
-    expand rightward: collapse to the leftmost of (anchor, new_caret) first, then
-    expand right to the other. This handles direction changes (crossing the anchor).
-    """
-    try:
-        text = anchor.getText()
-        # Expand anchor → new_caret to cover both positions, then check which
-        # endpoint is the anchor. If anchor is the left end, new_caret is to the
-        # right (forward); otherwise new_caret is to the left (backward).
-        span = text.createTextCursorByRange(anchor.getStart())
-        span.gotoRange(new_caret, True)
-        left_check = text.createTextCursorByRange(span.getStart())
-        left_check.gotoRange(anchor.getStart(), True)
-        anchor_is_left = len(left_check.getString()) == 0
-
-        if anchor_is_left:
-            _ensure_visual_caret(cursor, True)
-            new_length = _range_length_between(anchor, new_caret)
-            try:
-                current_right = cursor.getEnd()
-            except Exception as e:
-                _handle_exc(err=e)
-                current_right = None
-            prev_length = _range_length_between(anchor, current_right) if current_right is not None else 0
-            # Only use incremental goRight when extending an existing forward selection
-            # (prev_length > 0). When prev_length == 0 the cursor's right end equals
-            # the anchor, meaning the current selection was backward (caret left of
-            # anchor); goRight from the caret would overshoot, so rebuild instead.
-            if prev_length > 0 and current_right is not None and _range_ends_before(current_right, new_caret):
-                delta = new_length - prev_length
-                if delta > 0 and _try_go_right(cursor, delta):
-                    return
-            # Rebuild selection for first expansion, direction change, or when
-            # incremental path fails.
-            cursor.gotoRange(anchor, False)
-            cursor.gotoRange(new_caret, True)
-            return
-
-        if _range_starts_before(new_caret, anchor):
-            _ensure_visual_caret(cursor, False)
-            try:
-                current_left = cursor.getStart()
-            except Exception as e:
-                _handle_exc(err=e)
-                current_left = None
-            prev_length = _range_length_between(current_left, anchor) if current_left is not None else 0
-            new_length = _range_length_between(new_caret, anchor)
-            if not force_backward and current_left is not None and \
-                _range_starts_before(new_caret, current_left):
-                delta = prev_length - new_length
-                if delta > 0 and _try_go_left(cursor, delta):
-                    return
-
-            cursor.gotoRange(anchor, False)
-            distance = _range_length_between(new_caret, anchor)
-            if _try_go_left(cursor, distance):
-                return
-
-        # Fallback: collapse directly to the requested caret range.
-        cursor.gotoRange(new_caret, True)
-    except Exception as e:
-        _handle_exc(err=e)
-        pass
 
 
 # Based on Commit f33d46f from fedorov-ao/vibreoffice
@@ -392,8 +193,6 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
             try:
                 paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
                 char = text_cursor.getString()[:40]
-                anchor = _state().get("visual_anchor")
-                caret_before_anchor = anchor is not None and _range_starts_before(cursor, anchor)
                 lines.append("-- text cursor LO API --")
                 lines.append(f"char: {char}")
                 lines.append(f"getString: {text_cursor.getString()}")
@@ -405,7 +204,7 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
                 lines.append(f"start of word: {text_cursor.isStartOfWord()}")
                 lines.append(f"end of word: {text_cursor.isEndOfWord()}")
                 lines.append("-- ViperOffice custom functions --")
-                lines.append(f"caret before anchor: {caret_before_anchor}")
+                lines.append(f"is forward selection: {_is_forward_selection(text_cursor)}")
                 lines.append(f"Is at whitespace: {_is_cursor_at_whitespace(text_cursor)}")
                 lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(text_cursor, "after_sentence")}")
                 lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(text_cursor, "before_paragraph")}")
@@ -2578,7 +2377,6 @@ def _paragraphs_backward(expand: bool, count: int, cursor) -> bool:
     except Exception as e:
         _handle_exc(err=e)
         return False
-
 
 
 def _select_paragraph_text_objects(count: int, key: KeyEvent, mode: Mode, cursor):

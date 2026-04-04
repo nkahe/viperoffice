@@ -66,6 +66,10 @@ def _state() -> _StateDict:
     return state
 
 
+def _get_visual_anchor() -> Any | None:
+    return _state()["visual_anchor"]
+
+
 def _get_cursor() -> XViewCursor | None:
     return _state()["view_cursor"]
 
