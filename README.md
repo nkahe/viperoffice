@@ -64,11 +64,11 @@ Aliases:
 - Navigation keys are mapped to equivalent motions.
 
 Mouse:
-- Mouse selection in Normal mode switch to Visual mode.
+- Mouse selection in Normal mode switches to Visual mode.
 
 Insert mode commands:
 - Switch to Normal mode: `Esc` or with alias `C-[`. 
-
+e
 Commands are described in more detail in the [user documentation](docs/user_documentation.md).
 
 

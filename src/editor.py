@@ -2037,38 +2037,6 @@ def _to_sentence_whitespace_start(text_cursor) -> bool:
         return False
 
 
-def _normalize_sentence_unit_start(text_cursor) -> bool:
-    """Normalize to the start of current sentence unit for 'is'."""
-    if text_cursor is None:
-        return False
-    try:
-        if _is_current_paragraph_empty(text_cursor):
-            text_cursor.gotoStartOfParagraph(False)
-            return True
-        if _is_cursor_at_whitespace(text_cursor, "after_sentence") or \
-                _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
-            return _to_sentence_whitespace_start(text_cursor)
-        if not _is_at_sentence_start(text_cursor):
-            text_cursor.gotoStartOfSentence(False)
-        return True
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
-def _move_probe_to_sentence_end(probe) -> bool:
-    """Move probe to the sentence-ending punctuation. Returns False if not found."""
-    ch = ""
-    for _ in _paragraph_scan_steps():
-        if not probe.goLeft(1, True):
-            break
-        ch = probe.getString()
-        probe.collapseToStart()
-        if ch not in (" ", "\t", "\n"):
-            break
-    return ch in (".", "!", "?")
-
-
 def _to_end_of_sentence(text_cursor) -> bool:
     """Move text cursor to end of current sentence for 'is'."""
     if text_cursor is None:
@@ -2085,6 +2053,19 @@ def _to_end_of_sentence(text_cursor) -> bool:
     except Exception as e:
         _handle_exc(e)
         return False
+
+
+def _move_probe_to_sentence_end(probe) -> bool:
+    """Move probe to the sentence-ending punctuation. Returns False if not found."""
+    ch = ""
+    for _ in _paragraph_scan_steps():
+        if not probe.goLeft(1, True):
+            break
+        ch = probe.getString()
+        probe.collapseToStart()
+        if ch not in (" ", "\t", "\n"):
+            break
+    return ch in (".", "!", "?")
 
 
 def _advance_empty_paragraph_unit_forward(text_cursor) -> bool:
@@ -2153,6 +2134,25 @@ def _inner_sentences_backward(text_cursor, count: int) -> bool:
                 break
             moved_any = True
         return moved_any
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
+def _normalize_sentence_unit_start(text_cursor) -> bool:
+    """Normalize to the start of current sentence unit for 'is'."""
+    if text_cursor is None:
+        return False
+    try:
+        if _is_current_paragraph_empty(text_cursor):
+            text_cursor.gotoStartOfParagraph(False)
+            return True
+        if _is_cursor_at_whitespace(text_cursor, "after_sentence") or \
+                _is_cursor_at_whitespace(text_cursor, "before_paragraph"):
+            return _to_sentence_whitespace_start(text_cursor)
+        if not _is_at_sentence_start(text_cursor):
+            text_cursor.gotoStartOfSentence(False)
+        return True
     except Exception as e:
         _handle_exc(err=e)
         return False
@@ -2273,9 +2273,9 @@ def _to_previous_sentence_start(text_cursor, expand:bool, cursor) -> bool:
     # Paragraph-boundary behavior matching logic.
     if text_cursor.isStartOfParagraph():
         if _is_current_paragraph_empty(text_cursor):
-          if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty=False):
-              _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
-              return True
+            if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty=False):
+                _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
+                return True
         else:
             if text_cursor.gotoPreviousParagraph(expand):
                 # Vi/Vim like behavior where we stop at first empty line.
