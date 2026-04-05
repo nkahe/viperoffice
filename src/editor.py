@@ -1,37 +1,37 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any, Callable, Final
+from typing import TYPE_CHECKING, Callable
 from functools import partial
 import threading
 import unohelper
 from com.sun.star.awt import KeyModifier, XKeyHandler, Key
-if TYPE_CHECKING:
-    from core import (  # noqa: F401
-        DEBUG,
-        KeyEvent,
-        Mode,
-        _current_doc,
-        _get_controller,
-        _get_cursor,
-        _get_dispatcher,
-        _get_frame,
-        _get_last_ft,
-        _get_mode,
-        _get_pending_keys,
-        _get_position,
-        _get_raw_count,
-        _get_scroll,
-        _get_text_cursor,
-        _get_visual_caret_range,
-        _goto_mode,
-        _handle_exc,
-        _reset_count,
-        _set_last_ft,
-        _set_position,
-        _set_visual_anchor,
-        _show_cursor,
-        _state,
-        _update_statusline,
-    )
+
+from core import (  # noqa: f401
+    DEBUG,
+    KeyEvent,
+    Mode,
+    _current_doc,
+    _get_controller,
+    _get_cursor,
+    _get_dispatcher,
+    _get_frame,
+    _get_last_ft,
+    _get_mode,
+    _get_pending_keys,
+    _get_position,
+    _get_raw_count,
+    _get_scroll,
+    _get_text_cursor,
+    _get_visual_caret_range,
+    _goto_mode,
+    _handle_exc,
+    _reset_count,
+    _set_last_ft,
+    _set_position,
+    _set_visual_anchor,
+    _show_cursor,
+    _state,
+    _update_statusline,
+)
 from utils import (   # type: ignore[reportMissingImports]
     _clone_text_range,
     _is_current_paragraph_empty,
@@ -1079,8 +1079,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         mode: Mode = _get_mode()
         mods: int = _event_modifiers(event)
         code = _key_code(event)
-        is_ctrl = _is_only_ctrl(mods)
-        is_escape = _is_escape(code, is_ctrl)
+        is_ctrl = self._is_only_ctrl(mods)
+        is_escape = self._is_escape(code, is_ctrl)
 
         # Insert mode matching. Do as little as possible.
         if mode == "insert":
@@ -1111,8 +1111,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # Pass other non-shift modified shortcuts through, except characters
         # made with AltGr.
-        if _has_non_shift_modifier(event):
-            if not bool(_is_altgr_char(event, key)):
+        if self._has_non_shift_modifier(event):
+            if not bool(self._is_altgr_char(event, key)):
                 return False
 
         # --- Keys without modifiers after this --------
@@ -1137,7 +1137,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # Count parsing. 1..9 always extend count. 0 extends count only after
         # count has started.
-        if _is_digit_char(key.char):
+        if self._is_digit_char(key.char):
             if key.char != "0" or _get_raw_count() > 0:
                 self._add_to_count(int(key.char))
                 return True
@@ -1174,7 +1174,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # ----- Non-character keys after this -----
 
-        if _is_function_key(event):
+        if self._is_function_key(event):
             return False
 
         # No suitable key matched so reset.
@@ -1186,11 +1186,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
         # Deliberately let possible Operator-pending mode get canceled before
         # match Del key so it can be used for that.
-        if _is_del_key(event):
+        if self._is_del_key(event):
             self._del_key(key, mode)
             return True
 
-        if _is_insert_key(event):
+        if self._is_insert_key(event):
             _goto_mode("insert")
 
         return True
@@ -1400,6 +1400,69 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _goto_mode("normal")
         return True
 
+    @staticmethod
+    def _has_non_shift_modifier(event):
+        mods = _event_modifiers(event)
+        return bool(mods & (KeyModifier.MOD1 | KeyModifier.MOD2 | KeyModifier.MOD3))
+
+    @staticmethod
+    def _is_altgr_char(event, key) -> bool:
+        if not (isinstance(key.char, str) and len(key.char) == 1 and ord(key.char) >= 32):
+            return False
+        mods = _event_modifiers(event)
+        mod2 = getattr(KeyModifier, "MOD2", 0)
+        mod3 = getattr(KeyModifier, "MOD3", 0)
+        # Treat AltGr as text-producing modified input. In this environment these
+        # events arrive with key_code == 0 (e.g. AltGr+4 -> "$"), while normal
+        # Ctrl/Alt shortcuts have concrete key codes.
+        return bool(mods & mod2) and not bool(mods & mod3) and key.code == 0
+
+    @staticmethod
+    def _is_digit_char(ch):
+        return isinstance(ch, str) and len(ch) == 1 and "0" <= ch <= "9"
+
+    @staticmethod
+    def _is_escape(key_code, is_ctrl):
+        # Ctrl+[ is interpreted as Esc like in terminal.
+        return (key_code == 1281) or (
+            key_code == 1315 and is_ctrl
+        )
+
+    @staticmethod
+    def _is_insert_key(event):
+        try:
+            return _key_code(event) == int(getattr(Key, "INSERT"))
+        except Exception as e:
+            _handle_exc(err=e)
+            return False
+
+    @staticmethod
+    def _is_del_key(event):
+        try:
+            return _key_code(event) == int(getattr(Key, "DELETE"))
+        except Exception as e:
+            _handle_exc(err=e)
+            return False
+
+    @staticmethod
+    def _is_function_key(event):
+        key_code = _key_code(event)
+        for i in range(1, 13):
+            try:
+                if key_code == int(getattr(Key, f"F{i}")):
+                    return True
+            except Exception as e:
+                _handle_exc(err=e)
+                continue
+        return False
+
+    @staticmethod
+    def _is_only_ctrl(mods):
+        ctrl = getattr(KeyModifier, "MOD1", 0)
+        alt = getattr(KeyModifier, "MOD2", 0)
+        meta = getattr(KeyModifier, "MOD3", 0)
+        return bool(mods & ctrl) and not bool(mods & (alt | meta))
+
     def _reset_prefix(self) -> bool:
         """Remove last pending command if it's a command prefix:
            g, a/i, or f/F/t/T.
@@ -1444,7 +1507,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
 
 # Normalize UNO key event payload into a single-character command key when possible.
 # Handles runtime-specific KeyChar/KeyCode representations used by LO/UNO.
-def _normalize_key_char(event):
+def _normalize_key_char(event) -> str:
     k = event.KeyChar
     key_code = _key_code(event)
 
@@ -1525,22 +1588,6 @@ def _event_modifiers(event):
         return 0
 
 
-def _has_non_shift_modifier(event):
-    mods = _event_modifiers(event)
-    return bool(mods & (KeyModifier.MOD1 | KeyModifier.MOD2 | KeyModifier.MOD3))
-
-
-def _is_digit_char(ch):
-    return isinstance(ch, str) and len(ch) == 1 and "0" <= ch <= "9"
-
-
-def _is_only_ctrl(mods):
-    ctrl = getattr(KeyModifier, "MOD1", 0)
-    alt = getattr(KeyModifier, "MOD2", 0)
-    meta = getattr(KeyModifier, "MOD3", 0)
-    return bool(mods & ctrl) and not bool(mods & (alt | meta))
-
-
 # NOTE: Not used currently.
 def _is_ctrl_shift(mods):
     shift = getattr(KeyModifier, "SHIFT", 1)
@@ -1554,18 +1601,6 @@ def _is_ctrl_shift(mods):
     )
 
 
-def _is_altgr_char(event, key) -> bool:
-    if not (isinstance(key.char, str) and len(key.char) == 1 and ord(key.char) >= 32):
-        return False
-    mods = _event_modifiers(event)
-    mod2 = getattr(KeyModifier, "MOD2", 0)
-    mod3 = getattr(KeyModifier, "MOD3", 0)
-    # Treat AltGr as text-producing modified input. In this environment these
-    # events arrive with key_code == 0 (e.g. AltGr+4 -> "$"), while normal
-    # Ctrl/Alt shortcuts have concrete key codes.
-    return bool(mods & mod2) and not bool(mods & mod3) and key.code == 0
-
-
 def _key_code(event):
     try:
         return int(event.KeyCode)
@@ -1573,37 +1608,3 @@ def _key_code(event):
         _handle_exc(err=e)
         return -1
 
-
-def _is_escape(key_code, is_ctrl):
-    # Ctrl+[ is interpreted as Esc like in terminal.
-    return (key_code == 1281) or (
-        key_code == 1315 and is_ctrl
-    )
-
-
-def _is_insert_key(event):
-    try:
-        return _key_code(event) == int(getattr(Key, "INSERT"))
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
-def _is_del_key(event):
-    try:
-        return _key_code(event) == int(getattr(Key, "DELETE"))
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
-def _is_function_key(event):
-    key_code = _key_code(event)
-    for i in range(1, 13):
-        try:
-            if key_code == int(getattr(Key, f"F{i}")):
-                return True
-        except Exception as e:
-            _handle_exc(err=e)
-            continue
-    return False
