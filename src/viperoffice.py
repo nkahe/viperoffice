@@ -107,6 +107,14 @@ _sentences = _load_module_from_dir(
 )
 globals().update({k: v for k, v in _sentences.__dict__.items() if not k.startswith("__")})
 
+_paragraphs = _load_module_from_dir(
+    "paragraphs",
+    "paragraphs.py",
+    required_attr="_paragraphs_forward",
+    inject_core=True,
+)
+globals().update({k: v for k, v in _paragraphs.__dict__.items() if not k.startswith("__")})
+
 _editor = _load_module_from_dir(
     "editor",
     "editor.py",

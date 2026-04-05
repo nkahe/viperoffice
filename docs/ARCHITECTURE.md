@@ -6,7 +6,10 @@ Extension source code consists of following modules:
 - **utils** - Utility functions which don't depend on global state and are commonly shared with other modules.
 - **viperoffice** - Enabling and disabling extension, exposes API for it, listens events, handles controllers and attachs editor's KeyHandler to them.
 - **editor** - Handles input and calls actions, which manipulate view and text document.
-- **sentences** - Sentence motions used by editor. Commands `()`, `is`, `as`.
+Motions used by editor:
+- **sentences** - Sentence motions. Commands `()`, `is`, `as`.
+- **paragraphs** - Paragraph motions. Commands `{}`, `ip`, `ap`.
+
 
 Modules have different sections which are described below.
 
@@ -42,11 +45,6 @@ Vi operators delete, change and yank, clipboard operations, undo/redo. Commands 
 #### Word motions
 
 Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
-
-#### Paragraph motions
-
-Commands `{}`, `ip`, `ap`
-
 
 ### Input handling
 
