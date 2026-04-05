@@ -13,7 +13,6 @@ Motions used by editor:
 
 Modules have different sections which are described below.
 
-
 ## Editor module
 
 File consists of different sections listed below. Order is same as in source code.

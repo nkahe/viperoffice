@@ -791,7 +791,7 @@ def _yank_and_delete_to_end_of_line(count: int, mode: Mode, yank: bool , delete:
     return _copy_and_delete(yank, delete)
 
 
-def _paste(count:int, mode, cursor, after_cursor:bool = True):
+def _paste(count:int, mode, after_cursor:bool = True):
     """Paste text from clipboard after or before cursor [count] times.
        Commands 'p' and 'P'.
     """
@@ -962,8 +962,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "I": lambda: _insert_before_first_non_blank(mode, cursor),
                 "o": lambda: _begin_new_paragraph(above = False, cursor = cursor),
                 "O": lambda: _begin_new_paragraph(above = True, cursor = cursor),
-                "p": lambda: _paste(count, mode, cursor),
-                "P": lambda: _paste(count, mode, cursor, after_cursor=False),
+                "p": lambda: _paste(count, mode),
+                "P": lambda: _paste(count, mode, after_cursor=False),
                 "r": lambda: self._r_command(count, key, cursor),
                 "s": lambda: _delete_characters(count),
                 "S": lambda: _copy_and_delete_linewise(yank = False, delete = True),

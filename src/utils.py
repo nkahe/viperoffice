@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from com.sun.star.awt import Rectangle
 
 if TYPE_CHECKING:
@@ -12,7 +12,9 @@ if TYPE_CHECKING:
         _paragraph_scan_steps,
 )
 
-# For debugging
+# -------------------
+# Utility functions
+# -------------------
 
 def _clone_text_range(text_cursor) -> XTextCursor | None:
     """Return a cloned TextCursor positioned at the start of text_cursor. """
@@ -23,6 +25,7 @@ def _clone_text_range(text_cursor) -> XTextCursor | None:
         return None
 
 
+# For debugging
 def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Return a human-readable description of an XTextRange-like object.
 
@@ -58,27 +61,6 @@ def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportU
         except Exception as e:
             _handle_exc(err=e)
             return "<unprintable range>"
-
-
-def _goto_previous_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
-    if not text_cursor.gotoPreviousParagraph(expand):
-        return False
-    if not cross_empty:
-        while _is_current_paragraph_empty(text_cursor):
-            if not text_cursor.gotoPreviousParagraph(expand):
-                break
-    return True
-
-
-def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
-    moved = False
-    for _ in _paragraph_scan_steps():
-        if not text_cursor.gotoNextParagraph(expand):
-            break
-        moved = True
-        if not _is_current_paragraph_empty(text_cursor):
-            break
-    return moved
 
 
 def _is_current_paragraph_empty(text_cursor) -> bool:

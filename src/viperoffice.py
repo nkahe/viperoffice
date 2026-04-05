@@ -80,8 +80,8 @@ def _load_module_from_dir(module_name: str, filename: str,
     return mod
 
 
-# Modules which are imported with "from [module] import ..." need to be before
-# module it's imported from. For example utils and sentences before editor.
+# LO's script loader doesn't search this folder for imports, so any module that
+# editor imports (sentences/paragraphs/words/utils) must be loaded first here.
 
 _core = _load_module_from_dir(
     "core",
@@ -99,13 +99,13 @@ _utils = _load_module_from_dir(
 )
 globals().update({k: v for k, v in _utils.__dict__.items() if not k.startswith("__")})
 
-_words = _load_module_from_dir(
-    "words",
-    "words.py",
-    required_attr="_word_motion",
+_paragraphs = _load_module_from_dir(
+    "paragraphs",
+    "paragraphs.py",
+    required_attr="_paragraphs_forward",
     inject_core=True,
 )
-globals().update({k: v for k, v in _words.__dict__.items() if not k.startswith("__")})
+globals().update({k: v for k, v in _paragraphs.__dict__.items() if not k.startswith("__")})
 
 _sentences = _load_module_from_dir(
     "sentences",
@@ -115,13 +115,13 @@ _sentences = _load_module_from_dir(
 )
 globals().update({k: v for k, v in _sentences.__dict__.items() if not k.startswith("__")})
 
-_paragraphs = _load_module_from_dir(
-    "paragraphs",
-    "paragraphs.py",
-    required_attr="_paragraphs_forward",
+_words = _load_module_from_dir(
+    "words",
+    "words.py",
+    required_attr="_word_motion",
     inject_core=True,
 )
-globals().update({k: v for k, v in _paragraphs.__dict__.items() if not k.startswith("__")})
+globals().update({k: v for k, v in _words.__dict__.items() if not k.startswith("__")})
 
 _editor = _load_module_from_dir(
     "editor",

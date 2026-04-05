@@ -1,4 +1,4 @@
-from __future__ import annotations  # flake8: noqa
+from __future__ import annotations  # flake9: noqa
 
 from core import (
     KeyEvent,
@@ -12,7 +12,6 @@ from core import (
 from utils import (   # type: ignore[reportMissingImports]
     _clone_text_range,
     _get_visual_caret_range,
-    _goto_previous_paragraph_with_policy,
     _is_current_paragraph_empty,
     _is_cursor_at_whitespace,
     _is_at_first_non_whitespace_after_leading_ws,
@@ -21,9 +20,16 @@ from utils import (   # type: ignore[reportMissingImports]
     _same_pos,
     _set_visual_selection,
     _sync_view_cursor_to_text_cursor,
+)
+
+from paragraphs import (
+    _to_previous_non_empty_paragraph,
     _to_next_non_empty_paragraph
 )
 
+# ------------------
+# Sentence motions
+# ------------------
 
 def _to_whitespace_start(text_cursor, expand: bool, cursor) -> bool:
     try:
@@ -283,7 +289,7 @@ def _to_previous_sentence_start(text_cursor, expand:bool, cursor) -> bool:
     # Paragraph-boundary behavior matching logic.
     if text_cursor.isStartOfParagraph():
         if _is_current_paragraph_empty(text_cursor):
-            if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty=False):
+            if not _to_previous_non_empty_paragraph(text_cursor, expand, cross_empty=False):
                 _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
                 return True
         else:

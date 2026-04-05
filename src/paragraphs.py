@@ -15,18 +15,45 @@ from utils import (   # type: ignore[reportMissingImports]
     _is_forward_selection,
     _range_after_paragraph_break,
     _sync_view_cursor_to_text_cursor,
-    _to_next_non_empty_paragraph,
 )
 
+# -------------------
 # Paragraph motions
+# -------------------
 
-def _to_previous_non_empty_paragraph(text_cursor, expand: bool) -> bool:
+def _to_previous_non_empty_paragraph(text_cursor, expand: bool, cross_empty: bool = False) -> bool:
+
+    """Move text_cursor backward one or more paragraphs.
+
+    When cross_empty is False (default) empty paragraphs are skipped until a
+    non-empty one is found. When cross_empty is True the cursor stops at the
+    first previous paragraph regardless of whether it is empty.
+    Uses _paragraph_scan_steps to guard against runaway loops.
+    """
     moved = False
     for _ in _paragraph_scan_steps():
         if not text_cursor.gotoPreviousParagraph(expand):
             break
         moved = True
-        if not _is_current_paragraph_empty(text_cursor):
+        if cross_empty or not _is_current_paragraph_empty(text_cursor):
+            break
+    return moved
+
+
+def _to_next_non_empty_paragraph(text_cursor, expand: bool, cross_empty: bool = False) -> bool:
+    """Move text_cursor forward one or more paragraphs.
+
+    When cross_empty is False (default) empty paragraphs are skipped until a
+    non-empty one is found. When cross_empty is True the cursor stops at the
+    first next paragraph regardless of whether it is empty.
+    Uses _paragraph_scan_steps to guard against runaway loops.
+    """
+    moved = False
+    for _ in _paragraph_scan_steps():
+        if not text_cursor.gotoNextParagraph(expand):
+            break
+        moved = True
+        if cross_empty or not _is_current_paragraph_empty(text_cursor):
             break
     return moved
 

@@ -15,16 +15,21 @@ from core import (
 from utils import (   # type: ignore[reportMissingImports]
     _clone_text_range,
     _get_visual_caret_range,
-    _goto_previous_paragraph_with_policy,
     _is_current_paragraph_empty,
     _is_forward_selection,
     _range_after_paragraph_break,
     _set_visual_selection,
 )
 
+from paragraphs import (
+    _to_previous_non_empty_paragraph,
+    _to_next_non_empty_paragraph,
+)
+
 # ------------------
 # Word motions
 # ------------------
+
 
 # Word motion specs.
 FORWARD = "forward"
@@ -300,10 +305,10 @@ def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
     length = len(paragraph_text)
 
     if length == 0:
-        return _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty)
+        return _to_next_non_empty_paragraph(text_cursor, expand, cross_empty)
 
     if offset >= length:
-        if _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty):
+        if _to_next_non_empty_paragraph(text_cursor, expand, cross_empty):
             return True
         # No next paragraph (EOF): move to end of current paragraph.
         if not text_cursor.isEndOfParagraph():
@@ -311,10 +316,9 @@ def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
             return True
         return False
 
-
     next_offset = _scan_forward_word_target(paragraph_text, offset, spec)
     if next_offset is None or next_offset >= length:
-        if _goto_next_paragraph_with_policy(text_cursor, expand, cross_empty):
+        if _to_next_non_empty_paragraph(text_cursor, expand, cross_empty):
             return True
         # No next paragraph (EOF): move to end of current paragraph.
         if not text_cursor.isEndOfParagraph():
@@ -340,7 +344,7 @@ def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
     length = len(paragraph_text)
 
     if length == 0 or offset <= 0:
-        if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty):
+        if not _to_previous_non_empty_paragraph(text_cursor, expand, cross_empty):
             return False
         paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
         length = len(paragraph_text)
@@ -357,7 +361,7 @@ def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
             text_cursor.goRight(prev_offset, expand)
         return True
 
-    if not _goto_previous_paragraph_with_policy(text_cursor, expand, cross_empty):
+    if not _to_previous_non_empty_paragraph(text_cursor, expand, cross_empty):
         return False
     paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
     length = len(paragraph_text)
@@ -369,16 +373,6 @@ def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
     text_cursor.gotoStartOfParagraph(False)
     if prev_offset > 0:
         text_cursor.goRight(prev_offset, expand)
-    return True
-
-
-def _goto_next_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
-    if not text_cursor.gotoNextParagraph(expand):
-        return False
-    if not cross_empty:
-        while _is_current_paragraph_empty(text_cursor):
-            if not text_cursor.gotoNextParagraph(expand):
-                break
     return True
 
 
