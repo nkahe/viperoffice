@@ -60,6 +60,27 @@ def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportU
             return "<unprintable range>"
 
 
+def _goto_previous_paragraph_with_policy(text_cursor, expand:bool, cross_empty:bool) -> bool:
+    if not text_cursor.gotoPreviousParagraph(expand):
+        return False
+    if not cross_empty:
+        while _is_current_paragraph_empty(text_cursor):
+            if not text_cursor.gotoPreviousParagraph(expand):
+                break
+    return True
+
+
+def _to_next_non_empty_paragraph(text_cursor, expand: bool) -> bool:
+    moved = False
+    for _ in _paragraph_scan_steps():
+        if not text_cursor.gotoNextParagraph(expand):
+            break
+        moved = True
+        if not _is_current_paragraph_empty(text_cursor):
+            break
+    return moved
+
+
 def _is_current_paragraph_empty(text_cursor) -> bool:
     if text_cursor is None:
         return False
@@ -141,6 +162,23 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
         return False
 
 
+def _is_at_first_non_whitespace_after_leading_ws(text_cursor) -> bool:
+    """Return True if cursor is at first non-whitespace after leading paragraph whitespace.
+    """
+    if text_cursor is None:
+        return False
+    try:
+        if text_cursor.isStartOfParagraph():
+            return False
+        para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        para_probe.gotoStartOfParagraph(False)
+        para_probe.gotoRange(text_cursor.getStart(), True)
+        return all(c in (" ", "\t") for c in para_probe.getString())
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
 # UNO doesn't offer call to get caret position when there's selection. Usually
 # state.visual_anchor is set and tracked but for situations it's not available
 # this can be used.
@@ -182,6 +220,10 @@ def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnused
     except Exception as e:
         _handle_exc(err=e)
         pass
+
+
+def _same_pos(a, b):
+    return _pos_xy(a) == _pos_xy(b)
 
 
 def _sync_view_cursor_to_text_cursor(text_cursor, expand: bool, view_cursor, backward: bool = False):

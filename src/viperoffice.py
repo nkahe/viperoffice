@@ -21,13 +21,11 @@ if TYPE_CHECKING:
         _update_statusline,
     )
 
-    from editor import (  # noqa: F401
-        KeyHandler,
-        _set_visual_selection,
-    )
+    from editor import KeyHandler, _debug_cursor_state
 
     from utils import (  # type: ignore[reportMissingImports]
         _is_forward_selection,
+        _set_visual_selection,
     )
 
 # This module includes non-editing functionality: initialization, enabling and
@@ -82,6 +80,9 @@ def _load_module_from_dir(module_name: str, filename: str,
     return mod
 
 
+# Modules which are imported with "from [module] import ..." need to be before
+# module it's imported from. For example utils and sentences before editor.
+
 _core = _load_module_from_dir(
     "core",
     "core.py",
@@ -98,6 +99,14 @@ _utils = _load_module_from_dir(
 )
 globals().update({k: v for k, v in _utils.__dict__.items() if not k.startswith("__")})
 
+_sentences = _load_module_from_dir(
+    "sentences",
+    "sentences.py",
+    required_attr="_to_start_of_next_sentence",
+    inject_core=True,
+)
+globals().update({k: v for k, v in _sentences.__dict__.items() if not k.startswith("__")})
+
 _editor = _load_module_from_dir(
     "editor",
     "editor.py",
@@ -105,6 +114,7 @@ _editor = _load_module_from_dir(
     inject_core=True,
 )
 globals().update({k: v for k, v in _editor.__dict__.items() if not k.startswith("__")})
+
 
 # Retry limit when detaching key handlers to avoid stale-UNO handler buildup.
 MAX_HANDLER_REMOVE_ATTEMPTS: Final[int] = 3

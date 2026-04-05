@@ -2,43 +2,19 @@
 
 Extension source code consists of following modules:
 
-- **core** - Some core functionality like share global state, UNO context access and common helpers used across modules.
-- **viperoffice** - Enabling and disabling extension, exposes API for it, listens events, handles controllers and attachs KeyHandler to them.
-- **editor** - Handles input and calls editor actions, which manipulate view and text document.
-- **utils** - Utility functions which don't depend on global state. 
+- **core** - ViperOffice helper functions which manipulate global state or UNO context access and are used by different modules.
+- **utils** - Utility functions which don't depend on global state and are commonly shared with other modules.
+- **viperoffice** - Enabling and disabling extension, exposes API for it, listens events, handles controllers and attachs editor's KeyHandler to them.
+- **editor** - Handles input and calls actions, which manipulate view and text document.
+- **sentences** - Sentence motions used by editor. Commands `()`, `is`, `as`.
 
 Modules have different sections which are described below.
-
-## Core module
-
-### Global state
-
-Global state of extension and helper functions to manage it.
-
-### UI and input modes
-
-Update statusline and cursor appearance and general Vi input mode changing which affects those. Used mainly made by KeyHandler.
-
-### Utility funtions
-
-Other general helper functions.
 
 
 ## Editor module
 
 File consists of different sections listed below. Order is same as in source code.
 Main class of extension is KeyHandler. 
-
-
-### Import modules
-
-Functions for importing other modules.
-
-
-### Cursor and selection
-
-Get information or make changes to cursor which includes selection and caret position.
-Used by actions.
 
 
 ### Actions
@@ -66,10 +42,6 @@ Vi operators delete, change and yank, clipboard operations, undo/redo. Commands 
 #### Word motions
 
 Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
-
-#### Sentence motions
-
-Commands `()`, `is`, `as`
 
 #### Paragraph motions
 
