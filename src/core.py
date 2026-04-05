@@ -26,12 +26,28 @@ Mode = Literal["normal", "insert", "pending", "visual"]
 # Global state
 # ------------
 
+# Constants
+
 # Provided by LibreOffice's Python macro runtime.
 if "XSCRIPTCONTEXT" not in globals():
     XSCRIPTCONTEXT: Any = None
 
+DEBUG = True
+
 # Guard for paragraph scans to avoid malformed cursor loops freezing the UI.
 PARAGRAPH_SCAN_LIMIT: Final[int] = 10000
+
+# Additional characters which are considered to be a part of word for word
+# motions w, b, e, ge. Alphabets are always included. "chars" are written
+# together like: "chars": "_,."
+ISWORD: Final[dict] = {
+    "digits": True,
+    "chars": "_",
+}
+
+# How many lines should C-d and C-u scroll.
+SCROLL: Final[int] = 21
+
 
 _StateDict = dict[str, Any]
 def _state() -> _StateDict:
@@ -135,6 +151,19 @@ def _set_position() -> bool:
 
 def _get_position() -> dict | None:
     return _state()["cursor_position"]
+
+
+def _get_scroll() -> int:
+    """Lines to scroll with C-b and C-u commands."""
+    default = 20
+    try:
+        lines_to_scroll = int(SCROLL)
+        if 1 <= lines_to_scroll <= 99:
+            return lines_to_scroll
+    except Exception as e:
+        _handle_exc(err=e)
+        pass
+    return default
 
 
 def _paragraph_scan_steps(limit: int = PARAGRAPH_SCAN_LIMIT):

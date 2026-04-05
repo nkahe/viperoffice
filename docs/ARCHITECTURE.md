@@ -9,7 +9,7 @@ Extension source code consists of following modules:
 Motions used by editor:
 - **sentences** - Sentence motions. Commands `()`, `is`, `as`.
 - **paragraphs** - Paragraph motions. Commands `{}`, `ip`, `ap`.
-
+- **words** -- Word motions. Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
 
 Modules have different sections which are described below.
 
@@ -42,9 +42,6 @@ Insert, delete and replace characters. Commands `i`, `I`, `a`, `A`, `o`, `O`, `x
 
 Vi operators delete, change and yank, clipboard operations, undo/redo. Commands `d`, `dd`, `D`, `c`, `cc`, `C`, `y`, `yy`, `Y`, `p`, `P`, `u`, `C-r`.
 
-#### Word motions
-
-Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
 
 ### Input handling
 

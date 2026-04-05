@@ -99,6 +99,14 @@ _utils = _load_module_from_dir(
 )
 globals().update({k: v for k, v in _utils.__dict__.items() if not k.startswith("__")})
 
+_words = _load_module_from_dir(
+    "words",
+    "words.py",
+    required_attr="_word_motion",
+    inject_core=True,
+)
+globals().update({k: v for k, v in _words.__dict__.items() if not k.startswith("__")})
+
 _sentences = _load_module_from_dir(
     "sentences",
     "sentences.py",

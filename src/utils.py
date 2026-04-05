@@ -222,6 +222,20 @@ def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnused
         pass
 
 
+def _pos_xy(pos: object) -> tuple[Any, Any]:
+    """Extract (X, Y) coordinates from a UNO position object, handling both
+    attribute and method forms."""
+    if pos is None:
+        return (None, None)
+    x = getattr(pos, "X", None)
+    y = getattr(pos, "Y", None)
+    if callable(x):
+        x = x()
+    if callable(y):
+        y = y()
+    return (x, y)
+
+
 def _same_pos(a, b):
     return _pos_xy(a) == _pos_xy(b)
 
