@@ -209,30 +209,7 @@ def _reset_count() -> bool:
     return True
 
 
-def _update_statusline(controller=None):
-    if controller is None:
-        controller = _get_controller()
-    if controller is None:
-        return
-    try:
-        mode = _get_mode()
-        padding = "   "
-        mode_name = "o-pending" if mode == "pending" else mode
-        text = ""
-        if _get_raw_count() != 0:
-            count_text = _get_count()
-            text += f"{padding}{count_text}"
-
-        pendings_keys = _get_pending_keys()
-        if pendings_keys:
-            text += padding + pendings_keys
-        text = mode_name.upper() + text
-        controller.StatusIndicator.start(text, 0)
-    except Exception as e:
-        _handle_exc(err=e)
-        # Non-fatal for status update.
-        pass
-
+# Error handling
 
 def _dbg(msg):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Log [msg] to log file."""
@@ -249,12 +226,16 @@ def _dbg(msg):  # noqa: F811  # pyright: ignore[reportUnusedFunction]
 
 def _handle_exc(err: Exception | None = None) -> None:
     """Log and print exception details for current caller."""
+    module_name = "<unknown>"
+    filename = "<unknown>"
+    func_name = "<unknown>"
     try:
         frame = inspect.currentframe()
         if frame is not None and frame.f_back is not None:
-            func_name = frame.f_back.f_code.co_name
-        else:
-            func_name = "<unknown>"
+            caller = frame.f_back
+            func_name = caller.f_code.co_name
+            module_name = caller.f_globals.get("__name__", "<unknown>")
+            filename = caller.f_code.co_filename
     except Exception:
         func_name = "<unknown>"
 
@@ -264,36 +245,13 @@ def _handle_exc(err: Exception | None = None) -> None:
         else:
             details = f"{type(err).__name__}: {err}"
 
-        msg = f"Exception in {func_name}: {details}"
+        msg = f"Exception in {module_name}.{func_name} ({filename}): {details}"
         _dbg(msg)
         print(msg)
     except Exception:
         pass
 
-
-def _get_visual_caret_range(text_cursor):
-    """Return the caret (active/moving) end of the visual selection as an XTextRange.
-
-    LibreOffice's getStart()/getEnd() always return left/right ends regardless of
-    direction, so we compare against the saved anchor to determine which end is fixed.
-    - If anchor == getStart(): forward selection, caret is at getEnd().
-    - Otherwise: backward selection, caret is at getStart().
-    """
-    anchor = _state().get("visual_anchor")
-    if anchor is None:
-        return text_cursor.getEnd()
-    try:
-        text = text_cursor.getText()
-        probe = text.createTextCursorByRange(text_cursor.getStart())
-        probe.gotoRange(anchor, True)
-        if len(probe.getString()) == 0:
-            return text_cursor.getEnd()   # forward selection
-        else:
-            return text_cursor.getStart() # backward selection
-    except Exception as e:
-        _handle_exc(err=e)
-        return text_cursor.getEnd()
-
+# UNO Helpers
 
 def _current_doc():
     try:
@@ -336,6 +294,8 @@ def _get_frame():
         _handle_exc(err=e)
         return None
 
+
+# Mode switching
 
 def _goto_mode(new_mode: Mode) -> bool:
     """Change Vi input mode to [new_mode]. Resets pending keys for other than
@@ -393,6 +353,30 @@ def _goto_mode(new_mode: Mode) -> bool:
     return True
 
 
+def _get_visual_caret_range(text_cursor):
+    """Return the caret (active/moving) end of the visual selection as an XTextRange.
+
+    LibreOffice's getStart()/getEnd() always return left/right ends regardless of
+    direction, so we compare against the saved anchor to determine which end is fixed.
+    - If anchor == getStart(): forward selection, caret is at getEnd().
+    - Otherwise: backward selection, caret is at getStart().
+    """
+    anchor = _get_visual_anchor()
+    if anchor is None:
+        return text_cursor.getEnd()
+    try:
+        text = text_cursor.getText()
+        probe = text.createTextCursorByRange(text_cursor.getStart())
+        probe.gotoRange(anchor, True)
+        if len(probe.getString()) == 0:
+            return text_cursor.getEnd()   # forward selection
+        else:
+            return text_cursor.getStart() # backward selection
+    except Exception as e:
+        _handle_exc(err=e)
+        return text_cursor.getEnd()
+
+
 def _show_cursor(mode: Mode):
     """Sets cursor style and saves cursor position info. """
     text_cursor = _get_text_cursor()
@@ -422,3 +406,29 @@ def _show_cursor(mode: Mode):
     except Exception as e:
         _handle_exc(err=e)
         return False
+
+
+def _update_statusline(controller=None):
+    if controller is None:
+        controller = _get_controller()
+    if controller is None:
+        return
+    try:
+        mode = _get_mode()
+        padding = "   "
+        mode_name = "o-pending" if mode == "pending" else mode
+        text = ""
+        if _get_raw_count() != 0:
+            count_text = _get_count()
+            text += f"{padding}{count_text}"
+
+        pendings_keys = _get_pending_keys()
+        if pendings_keys:
+            text += padding + pendings_keys
+        text = mode_name.upper() + text
+        controller.StatusIndicator.start(text, 0)
+    except Exception as e:
+        _handle_exc(err=e)
+        # Non-fatal for status update.
+        pass
+
