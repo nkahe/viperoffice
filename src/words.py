@@ -45,6 +45,35 @@ END = "end"
 # Word motions
 # ------------------
 
+
+def _to_start_of_word(expand: bool, count: int, mode: Mode, cursor, previous: bool ) -> bool:
+    dispatcher = _get_dispatcher()
+    frame = _get_frame()
+    if dispatcher is None or frame is None:
+        return False
+    try:
+        if mode == "pending":
+            tc = _get_text_cursor()
+            if tc:
+                _set_visual_anchor(tc.getStart())
+
+        anchor = _get_visual_anchor() if expand else None
+        cmd = ".uno:GoToPrevWord" if previous else ".uno:GoToNextWord"
+
+        for _ in range(count):
+            dispatcher.executeDispatch(frame, cmd, "", 0, ())
+
+        if expand and anchor is not None:
+            tc = _get_text_cursor()
+            if tc is not None:
+                _set_visual_selection(cursor, anchor, tc.getStart())
+        return True
+
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
 def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
     tc = _get_text_cursor()
     if tc is None:
