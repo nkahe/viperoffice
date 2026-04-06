@@ -1012,8 +1012,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "E": lambda: _word_motion(_WORD_MOTION_G_BIG_E, expand, count, mode)
             }
         else:
-            if mode == "pending":
-                cursor.collapseToStart()
             motions = {
                 "h": lambda: cursor.goLeft(count, expand),
                 "l": lambda: cursor.goRight(count, expand),
@@ -1199,7 +1197,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
     # -----------------------------------------
     # Match first letter for multi-part motions.
     def _match_motion_prefix(self, key, mode):
-
         motion_prefixes = 'fFtTgai'
         if key.pending and key.pending[-1] in motion_prefixes:
             return None
@@ -1228,7 +1225,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 return self._add_pending_key(key.char)
             else:
                 return self._cancel_two_part_motion(mode)
-
         return None
 
     def _match_motions(self, key, mode: Mode, cursor):
@@ -1262,6 +1258,11 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 self._cancel_two_part_motion(mode)
                 return False
             return None
+        else:
+            # Collapse Normal mode cursor so calculating ranges don't have to
+            # take that in account.
+            if mode in ("normal", "pending"):
+                cursor.collapseToStart()
 
         moved = motion()
         self._reset_prefix()
