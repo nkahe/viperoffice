@@ -5,6 +5,7 @@ from com.sun.star.awt import Rectangle
 if TYPE_CHECKING:
     from com.sun.star.text import XTextCursor
     from core import (  # noqa: F401
+        _get_text_cursor,
         _get_visual_anchor,
         _get_visual_caret_range,
         _get_controller,
@@ -16,13 +17,9 @@ if TYPE_CHECKING:
 # Utility functions
 # -------------------
 
-def _clone_text_range(text_cursor) -> XTextCursor | None:
+def _clone_text_range(text_cursor) -> XTextCursor:
     """Return a cloned TextCursor positioned at the start of text_cursor. """
-    try:
-        return text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-    except Exception as e:
-        _handle_exc(err=e)
-        return None
+    return text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
 
 
 # For debugging
@@ -164,14 +161,16 @@ def _is_at_first_non_whitespace_after_leading_ws(text_cursor) -> bool:
 # UNO doesn't offer call to get caret position when there's selection. Usually
 # state.visual_anchor is set and tracked but for situations it's not available
 # this can be used.
-def _is_forward_selection(cursor) -> bool:
+def _is_forward_selection(text_cursor) -> bool:
     """Return True if caret is at right end of selection, False if at left end."""
     try:
-        original_len = len(cursor.getString())
-        moved = cursor.goRight(1, True)
+        if not text_cursor:
+            return False
+        original_len = len(text_cursor.getString())
+        moved = text_cursor.goRight(1, True)
         if moved:
-            new_len = len(cursor.getString())
-            cursor.goLeft(1, True)
+            new_len = len(text_cursor.getString())
+            text_cursor.goLeft(1, True)
             return new_len > original_len
         return True
     except Exception as e:
