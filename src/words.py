@@ -5,19 +5,23 @@ from core import (
     KeyEvent,
     Mode,
     ISWORD,
+    _get_controller,
     _get_cursor,
+    _get_dispatcher,
+    _get_frame,
     _get_text_cursor,
     _get_visual_anchor,
     _handle_exc,
     _set_visual_anchor,
+    _get_visual_caret_range
 )
 
 from utils import (   # type: ignore[reportMissingImports]
     _clone_text_range,
-    _get_visual_caret_range,
     _is_forward_selection,
     _range_after_paragraph_break,
     _set_visual_selection,
+    _sync_view_cursor_to_text_cursor,
 )
 
 from paragraphs import (
@@ -41,18 +45,38 @@ END = "end"
 # Word motions
 # ------------------
 
-def _validate_word_motion_spec(spec) -> bool:
-    if not isinstance(spec, dict):
+def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
+    tc = _get_text_cursor()
+    if tc is None:
         return False
-    required = ("direction", "target", "big_word", "cross_empty", "inclusive")
-    for key in required:
-        if key not in spec:
-            return False
-    if spec["direction"] not in (FORWARD, BACKWARD):
+    try:
+        for _ in range(count):
+            tc.gotoNextWord(expand)   # type: ignore[reportMissingImports]
+
+        backward_selection = not _is_forward_selection(tc)
+        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+        return True
+
+    except Exception as e:
+        _handle_exc(err=e)
         return False
-    if spec["target"] not in (START, END):
+
+
+def _to_start_of_previous_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
+    tc = _get_text_cursor()
+    if tc is None:
         return False
-    return True
+    try:
+        for _ in range(count):
+            tc.gotoPreviousWord(expand)   # type: ignore[reportMissingImports]
+
+        backward_selection = not _is_forward_selection(tc)
+        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+        return True
+
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
 
 
 def _is_keyword_char(ch: str) -> bool:
