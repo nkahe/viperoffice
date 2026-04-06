@@ -97,13 +97,48 @@ def _word_char_class(ch, big_word: bool = False):
     return "other"
 
 
-def _normalize_motion_range(result, for_operator:bool = False):
-    if not isinstance(result, dict):
-        return {"moved": False}
-    normalized = dict(result)
-    normalized["operator_inclusive"] = bool(for_operator and normalized.get("inclusive", False))
-    normalized["operator_exclusive"] = bool(for_operator and not normalized.get("inclusive", False))
-    return normalized
+def _word_motion(spec, expand: bool, count: int, mode: Mode) -> bool:
+    """Run a word-motion command (e.g. 'w') and optionally apply an operator.
+
+    Args:
+        spec: Word motion specification (direction/target/big_word/etc.).
+        expand: If True, keeps selection expanded while moving.
+        count: Number of word motions to perform (minimum 1).
+        mode: Current Vi input mode.
+
+    Returns:
+        True if cursor moved at least once, otherwise False.
+    """
+    try:
+        if not _validate_word_motion_spec(spec):
+            return False
+        if expand:
+            if mode == "pending":
+                # Operator: query collapsed so start/end ranges are accurate.
+                result = _query_word_motion(spec, count, expand=False)
+                if not result.get("moved", False):
+                    return False
+                return _apply_motion_result(result, expand)
+            # Visual mode: step-by-step so selection updates incrementally.
+            steps = max(1, int(count))
+            moved_any = False
+            for _ in range(steps):
+                result = _query_word_motion(spec, 1, expand=True)
+                if not result.get("moved", False):
+                    break
+                if not _apply_motion_result(result, expand):
+                    break
+                moved_any = True
+            return moved_any
+
+        result = _query_word_motion(spec, count, expand=False)
+        if not result.get("moved", False):
+            return False
+
+        return _apply_motion_result(result, expand)
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
 
 
 def _query_word_motion(spec, count:int, expand:bool=False):
@@ -117,10 +152,7 @@ def _query_word_motion(spec, count:int, expand:bool=False):
     moved_any = False
 
     for _ in range(steps):
-        if not expand:
-            # Normal mode motions must operate on a collapsed caret.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-        else:
+        if expand:
             # Visual mode: scan from the caret (active/moving) end of the selection.
             # _get_visual_caret_range uses the saved anchor to determine which end
             # is fixed and which is the caret, regardless of selection direction.
@@ -144,6 +176,125 @@ def _query_word_motion(spec, count:int, expand:bool=False):
         "inclusive": bool(spec.get("inclusive", False)),
     }
     return _normalize_motion_range(result)
+
+
+def _validate_word_motion_spec(spec) -> bool:
+    if not isinstance(spec, dict):
+        return False
+    required = ("direction", "target", "big_word", "cross_empty", "inclusive")
+    for key in required:
+        if key not in spec:
+            return False
+    if spec["direction"] not in (FORWARD, BACKWARD):
+        return False
+    if spec["target"] not in (START, END):
+        return False
+    return True
+
+
+def _normalize_motion_range(result, for_operator:bool = False):
+    if not isinstance(result, dict):
+        return {"moved": False}
+    normalized = dict(result)
+    normalized["operator_inclusive"] = bool(for_operator and normalized.get("inclusive", False))
+    normalized["operator_exclusive"] = bool(for_operator and not normalized.get("inclusive", False))
+    return normalized
+
+
+def _word_motion_once(text_cursor, expand: bool, spec) -> bool:
+    """Execute one step for a configured word motion.
+
+    Args:
+        text_cursor: Model text cursor used for paragraph and offset operations.
+        expand: If True, keeps selection expanded while moving.
+        spec: Motion config (direction/target/big_word/empty-line policy).
+
+    Returns:
+        True if cursor advanced, otherwise False.
+    """
+    direction = spec.get("direction", FORWARD)
+    if direction == FORWARD:
+        return _word_motion_once_forward(text_cursor, expand, spec)
+    if direction == BACKWARD:
+        return _word_motion_once_backward(text_cursor, expand, spec)
+    return False
+
+
+def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
+    cross_empty = bool(spec.get("cross_empty", True))
+    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+    length = len(paragraph_text)
+
+    if length == 0:
+        return _to_next_non_empty_paragraph(text_cursor, expand, cross_empty)
+
+    if offset >= length:
+        if _to_next_non_empty_paragraph(text_cursor, expand, cross_empty):
+            return True
+        # No next paragraph (EOF): move to end of current paragraph.
+        if not text_cursor.isEndOfParagraph():
+            text_cursor.gotoEndOfParagraph(expand)
+            return True
+        return False
+
+    next_offset = _scan_forward_word_target(paragraph_text, offset, spec)
+    if next_offset is None or next_offset >= length:
+        if _to_next_non_empty_paragraph(text_cursor, expand, cross_empty):
+            return True
+        # No next paragraph (EOF): move to end of current paragraph.
+        if not text_cursor.isEndOfParagraph():
+            text_cursor.gotoEndOfParagraph(expand)
+            return True
+        return False
+
+    text_cursor.gotoStartOfParagraph(False)
+    move = next_offset
+    # In expand mode, include the character at next_offset in the selection:
+    # - e/E (target=END): include the last char of the word.
+    # - w/W (target=START): include the first char of the next word.
+    if expand and spec.get("target") in (END, START):
+        move = next_offset + 1
+    if move > 0:
+        text_cursor.goRight(move, expand)
+    return True
+
+
+def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
+    cross_empty = bool(spec.get("cross_empty", True))
+    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+    length = len(paragraph_text)
+
+    if length == 0 or offset <= 0:
+        if not _to_previous_non_empty_paragraph(text_cursor, expand, cross_empty):
+            return False
+        paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+        length = len(paragraph_text)
+
+        # Empty paragraph is a valid word-step stop when crossing is allowed.
+        if length == 0:
+            return True
+        offset = length
+
+    prev_offset = _scan_backward_word_target(paragraph_text, offset, spec)
+    if prev_offset is not None and 0 <= prev_offset < length:
+        text_cursor.gotoStartOfParagraph(False)
+        if prev_offset > 0:
+            text_cursor.goRight(prev_offset, expand)
+        return True
+
+    if not _to_previous_non_empty_paragraph(text_cursor, expand, cross_empty):
+        return False
+    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
+    length = len(paragraph_text)
+    if length == 0:
+        return True
+    prev_offset = _scan_backward_word_target(paragraph_text, length, spec)
+    if prev_offset is None:
+        return False
+    text_cursor.gotoStartOfParagraph(False)
+    if prev_offset > 0:
+        text_cursor.goRight(prev_offset, expand)
+    return True
 
 
 def _scan_forward_word_target(paragraph_text, offset, spec):
@@ -237,83 +388,6 @@ def _scan_backward_word_target(paragraph_text, offset, spec):
     return None
 
 
-def _word_motion_once_forward(text_cursor, expand: bool, spec) -> bool:
-    cross_empty = bool(spec.get("cross_empty", True))
-    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
-    length = len(paragraph_text)
-
-    if length == 0:
-        return _to_next_non_empty_paragraph(text_cursor, expand, cross_empty)
-
-    if offset >= length:
-        if _to_next_non_empty_paragraph(text_cursor, expand, cross_empty):
-            return True
-        # No next paragraph (EOF): move to end of current paragraph.
-        if not text_cursor.isEndOfParagraph():
-            text_cursor.gotoEndOfParagraph(expand)
-            return True
-        return False
-
-    next_offset = _scan_forward_word_target(paragraph_text, offset, spec)
-    if next_offset is None or next_offset >= length:
-        if _to_next_non_empty_paragraph(text_cursor, expand, cross_empty):
-            return True
-        # No next paragraph (EOF): move to end of current paragraph.
-        if not text_cursor.isEndOfParagraph():
-            text_cursor.gotoEndOfParagraph(expand)
-            return True
-        return False
-
-    text_cursor.gotoStartOfParagraph(False)
-    move = next_offset
-    # In expand mode, include the character at next_offset in the selection:
-    # - e/E (target=END): include the last char of the word.
-    # - w/W (target=START): include the first char of the next word.
-    if expand and spec.get("target") in (END, START):
-        move = next_offset + 1
-    if move > 0:
-        text_cursor.goRight(move, expand)
-    return True
-
-
-def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
-    cross_empty = bool(spec.get("cross_empty", True))
-    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
-    length = len(paragraph_text)
-
-    if length == 0 or offset <= 0:
-        if not _to_previous_non_empty_paragraph(text_cursor, expand, cross_empty):
-            return False
-        paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
-        length = len(paragraph_text)
-
-        # Empty paragraph is a valid word-step stop when crossing is allowed.
-        if length == 0:
-            return True
-        offset = length
-
-    prev_offset = _scan_backward_word_target(paragraph_text, offset, spec)
-    if prev_offset is not None and 0 <= prev_offset < length:
-        text_cursor.gotoStartOfParagraph(False)
-        if prev_offset > 0:
-            text_cursor.goRight(prev_offset, expand)
-        return True
-
-    if not _to_previous_non_empty_paragraph(text_cursor, expand, cross_empty):
-        return False
-    paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
-    length = len(paragraph_text)
-    if length == 0:
-        return True
-    prev_offset = _scan_backward_word_target(paragraph_text, length, spec)
-    if prev_offset is None:
-        return False
-    text_cursor.gotoStartOfParagraph(False)
-    if prev_offset > 0:
-        text_cursor.goRight(prev_offset, expand)
-    return True
-
-
 # Offset means cursor position relative to start of paragraph.
 def _current_paragraph_text_and_offset(text_cursor):
     text_obj = text_cursor.getText()
@@ -326,69 +400,6 @@ def _current_paragraph_text_and_offset(text_cursor):
     offset_cursor.gotoStartOfParagraph(True)
     offset = len(offset_cursor.getString())
     return paragraph_text, offset
-
-
-def _word_motion_once(text_cursor, expand: bool, spec) -> bool:
-    """Execute one step for a configured word motion.
-
-    Args:
-        text_cursor: Model text cursor used for paragraph and offset operations.
-        expand: If True, keeps selection expanded while moving.
-        spec: Motion config (direction/target/big_word/empty-line policy).
-
-    Returns:
-        True if cursor advanced, otherwise False.
-    """
-    direction = spec.get("direction", FORWARD)
-    if direction == FORWARD:
-        return _word_motion_once_forward(text_cursor, expand, spec)
-    if direction == BACKWARD:
-        return _word_motion_once_backward(text_cursor, expand, spec)
-    return False
-
-
-def _word_motion(spec, expand: bool, count: int, mode: Mode) -> bool:
-    """Run a word-motion command (e.g. 'w') and optionally apply an operator.
-
-    Args:
-        spec: Word motion specification (direction/target/big_word/etc.).
-        expand: If True, keeps selection expanded while moving.
-        count: Number of word motions to perform (minimum 1).
-        mode: Current Vi input mode.
-
-    Returns:
-        True if cursor moved at least once, otherwise False.
-    """
-    try:
-        if not _validate_word_motion_spec(spec):
-            return False
-        if expand:
-            if mode == "pending":
-                # Operator: query collapsed so start/end ranges are accurate.
-                result = _query_word_motion(spec, count, expand=False)
-                if not result.get("moved", False):
-                    return False
-                return _apply_motion_result(result, expand)
-            # Visual mode: step-by-step so selection updates incrementally.
-            steps = max(1, int(count))
-            moved_any = False
-            for _ in range(steps):
-                result = _query_word_motion(spec, 1, expand=True)
-                if not result.get("moved", False):
-                    break
-                if not _apply_motion_result(result, expand):
-                    break
-                moved_any = True
-            return moved_any
-
-        result = _query_word_motion(spec, count, expand=False)
-        if not result.get("moved", False):
-            return False
-
-        return _apply_motion_result(result, expand)
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
 
 
 def _apply_motion_result(result, expand:bool) -> bool:
@@ -428,76 +439,41 @@ def _apply_motion_result(result, expand:bool) -> bool:
     return True
 
 
-def _word_unit_bounds_core(paragraph_text: str, offset: int, backward: bool, \
-                           big_word: bool = False) -> tuple[int, int] | None:
-    """Core logic for finding word unit in paragraph_text.
+# ------------------
+# Word text-objects
+# ------------------
 
-    If backward is False, returns the (start, end) indices (start inclusive,
-    end exclusive) of the unit containing `offset`.
-    If backward is True, returns the (start, end) indices of the unit
-    immediately preceding `offset`, or None when offset <= 0.
-    For empty paragraph_text, (0, 0) is returned.
+def _select_word_objects_forward(count: int, key: KeyEvent, mode: Mode, cursor) -> bool:
+    """Select [count] words forward starting from beginning of current word unit.
+    Commands 'iw', 'iW, 'aw', 'aW', in Operator-pending mode or Visual without
+    extended selection.
     """
-    length = len(paragraph_text)
-    if length == 0:
-        return 0, 0
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
 
-    classify = _word_char_class
-    if backward:
-        if offset <= 0:
-            return None
-        i = min(offset - 1, length - 1)
+    big_word = True if key.char == "W" else False
+    is_around = True if key.pending and key.pending[-1] == "a" else False
+
+    steps = max(1, int(count))
+    if is_around:
+        probe = _clone_text_range(text_cursor)
+        start_range, end_range = _around_word_ranges_forward(probe, steps, big_word)
     else:
-        i = min(max(0, offset), length - 1)
-
-    cls = classify(paragraph_text[i], big_word)
-    start = i
-    end = i
-
-    for _ in range(length):
-        if start <= 0:
-            break
-        if classify(paragraph_text[start - 1], big_word) != cls:
-            break
-        start -= 1
-
-    for _ in range(length):
-        if end + 1 >= length:
-            break
-        if classify(paragraph_text[end + 1], big_word) != cls:
-            break
-        end += 1
-
-    return start, end + 1
-
-
-def _word_unit_bounds(paragraph_text: str, offset: int, big_word: bool = False) -> tuple[int, int]:
-    """Return the (start, end) indices of the word-like unit containing offset.
-    Preserves the original behaviour and signature.
-    """
-    res = _word_unit_bounds_core(paragraph_text, offset, backward=False, big_word=big_word)
-    # Core never returns None for backward=False, but keep a fallback just in case
-    return res if res is not None else (0, 0)
-
-
-def _word_unit_bounds_backward(paragraph_text: str, offset: int, big_word: bool = False) -> \
-                               tuple[int, int] | None:
-    """Return the (start, end) indices of the word-like unit immediately
-    preceding offset (searching backward). May return None when offset <= 0.
-    """
-    return _word_unit_bounds_core(paragraph_text, offset, backward=True, big_word=big_word)
-
-
-def _range_at_paragraph_offset(paragraph_cursor, offset: int):
-    try:
-        probe = paragraph_cursor.getText().createTextCursorByRange(paragraph_cursor.getStart())
-        probe.gotoStartOfParagraph(False)
-        if offset > 0:
-            probe.goRight(offset, False)
-        return probe.getStart()
-    except Exception as e:
-        _handle_exc(err=e)
-        return None
+        start_range = _word_object_start_range(text_cursor, big_word)
+        if start_range is None:
+            return False
+        end_range = _advance_word_object_caret(text_cursor, start_range, steps, \
+                                               FORWARD, big_word)
+    if end_range is None:
+        return False
+    if mode.startswith("visual"):
+        _set_visual_anchor(start_range)
+        _set_visual_selection(cursor, start_range, end_range)
+        return True
+    cursor.gotoRange(start_range, False)
+    cursor.gotoRange(end_range, True)
+    return True
 
 
 def _word_object_start_range(text_cursor, big_word: bool = False):
@@ -508,6 +484,20 @@ def _word_object_start_range(text_cursor, big_word: bool = False):
             return _range_at_paragraph_offset(text_cursor, 0)
         start_offset, _ = _word_unit_bounds(paragraph_text, offset, big_word)
         return _range_at_paragraph_offset(text_cursor, start_offset)
+    except Exception as e:
+        _handle_exc(err=e)
+        return None
+
+
+def _range_at_paragraph_offset(paragraph_cursor, offset: int):
+    try:
+        probe = _clone_text_range(paragraph_cursor)
+        if not probe:
+            return None
+        probe.gotoStartOfParagraph(False)
+        if offset > 0:
+            probe.goRight(offset, False)
+        return probe.getStart()
     except Exception as e:
         _handle_exc(err=e)
         return None
@@ -532,6 +522,106 @@ def _advance_word_object_caret(text_cursor, caret_range, steps: int, direction: 
             if not _word_motion_once(probe, expand, spec):
                 return None
         return probe.getEnd() if direction == FORWARD else probe.getStart()
+    except Exception as e:
+        _handle_exc(err=e)
+        return None
+
+
+def _expand_with_word_text_objects(count, key, mode, cursor) -> bool:
+    """Expand selection with [count] word text-objects 'iw' in Visual mode to
+    direction of selection. Command 'iw' in Visual mode with extended selection.
+    """
+    text_cursor = _get_text_cursor()
+    if text_cursor is None:
+        return False
+
+    is_around = True if key.pending and key.pending[-1] == "a" else False
+
+    # Start from beginning of current word if haven't expanded selection.
+    if len(cursor.getString()) == 0:
+        big_word = True if key.char == "W" else False
+        start_range = _word_object_start_range(text_cursor, big_word)
+        if start_range is None:
+            return False
+        cursor.gotoRange(start_range, False)
+        return _select_word_objects_forward(count, key, mode, cursor)
+
+    big_word = True if key.char == "W" else False
+
+    is_forward = _is_forward_selection(cursor)
+    anchor = cursor.getStart() if is_forward else cursor.getEnd()
+    _set_visual_anchor(anchor)
+    caret = cursor.getEnd() if is_forward else cursor.getStart()
+    select_backwards = not is_forward
+
+    if caret is None or anchor is None:
+        return False
+
+    try:
+        steps = max(1, int(count))
+        direction = BACKWARD if select_backwards else FORWARD
+        if is_around:
+            if direction == BACKWARD:
+                new_caret = _around_word_caret_backward(text_cursor, caret, steps, \
+                                                        big_word)
+            else:
+                probe = text_cursor.getText().createTextCursorByRange(caret)
+                _, end_range = _around_word_ranges_forward(probe, steps, big_word)
+                new_caret = end_range
+        else:
+            new_caret = _advance_word_object_caret(text_cursor, caret, steps, \
+                                                   direction, big_word)
+        if new_caret is None:
+            return False
+
+        if is_around and direction == BACKWARD:
+            _set_visual_selection(cursor, anchor, new_caret, force_backward=True)
+        else:
+            _set_visual_selection(cursor, anchor, new_caret)
+        return True
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
+def _around_word_caret_backward(text_cursor, caret_range, steps: int, big_word: bool = False):
+    """Return new caret range by moving backward by 'aw/W' units."""
+    if caret_range is None or steps <= 0:
+        return None
+    try:
+        text_obj = text_cursor.getText()
+        probe = text_obj.createTextCursorByRange(caret_range)
+
+        for i in range(steps):
+            paragraph_text, offset = _current_paragraph_text_and_offset(probe)
+            if offset == 0:
+                if not probe.gotoPreviousParagraph(False):
+                    return None
+                probe.gotoEndOfParagraph(False)
+                paragraph_text, offset = _current_paragraph_text_and_offset(probe)
+            scan_offset = max(0, offset - 1)
+            bounds = _around_word_unit_bounds(paragraph_text, scan_offset, BACKWARD, big_word)
+
+            if bounds is None:
+                if not probe.gotoPreviousParagraph(False):
+                    return None
+                probe.gotoEndOfParagraph(False)
+                continue
+
+            start_offset, _ = bounds
+            probe.gotoStartOfParagraph(False)
+            if start_offset > 0:
+                probe.goRight(start_offset, False)
+
+            if i < steps - 1:
+                if start_offset > 0:
+                    probe.goLeft(1, False)
+                elif not probe.gotoPreviousParagraph(False):
+                    return probe.getStart()
+                else:
+                    probe.gotoEndOfParagraph(False)
+
+        return probe.getStart()
     except Exception as e:
         _handle_exc(err=e)
         return None
@@ -576,6 +666,66 @@ def _around_word_unit_bounds(paragraph_text: str, offset: int, direction: str, \
         if _word_char_class(paragraph_text[prev_start], big_word) == "blank":
             start = prev_start
     return (start, end_excl)
+
+
+def _word_unit_bounds(paragraph_text: str, offset: int, big_word: bool = False) -> tuple[int, int]:
+    """Return the (start, end) indices of the word-like unit containing offset.
+    Preserves the original behaviour and signature.
+    """
+    res = _word_unit_bounds_core(paragraph_text, offset, backward=False, big_word=big_word)
+    # Core never returns None for backward=False, but keep a fallback just in case
+    return res if res is not None else (0, 0)
+
+
+def _word_unit_bounds_backward(paragraph_text: str, offset: int, big_word: bool = False) -> \
+                               tuple[int, int] | None:
+    """Return the (start, end) indices of the word-like unit immediately
+    preceding offset (searching backward). May return None when offset <= 0.
+    """
+    return _word_unit_bounds_core(paragraph_text, offset, backward=True, big_word=big_word)
+
+
+def _word_unit_bounds_core(paragraph_text: str, offset: int, backward: bool, \
+                           big_word: bool = False) -> tuple[int, int] | None:
+    """Core logic for finding word unit in paragraph_text.
+
+    If backward is False, returns the (start, end) indices (start inclusive,
+    end exclusive) of the unit containing `offset`.
+    If backward is True, returns the (start, end) indices of the unit
+    immediately preceding `offset`, or None when offset <= 0.
+    For empty paragraph_text, (0, 0) is returned.
+    """
+    length = len(paragraph_text)
+    if length == 0:
+        return 0, 0
+
+    classify = _word_char_class
+    if backward:
+        if offset <= 0:
+            return None
+        i = min(offset - 1, length - 1)
+    else:
+        i = min(max(0, offset), length - 1)
+
+    cls = classify(paragraph_text[i], big_word)
+    start = i
+    end = i
+
+    for _ in range(length):
+        if start <= 0:
+            break
+        if classify(paragraph_text[start - 1], big_word) != cls:
+            break
+        start -= 1
+
+    for _ in range(length):
+        if end + 1 >= length:
+            break
+        if classify(paragraph_text[end + 1], big_word) != cls:
+            break
+        end += 1
+
+    return start, end + 1
 
 
 def _around_word_ranges_forward(text_cursor, steps: int, big_word: bool = False) -> \
@@ -644,136 +794,3 @@ def _around_word_ranges_forward(text_cursor, steps: int, big_word: bool = False)
     except Exception as e:
         _handle_exc(err=e)
         return None, None
-
-
-def _around_word_caret_backward(text_cursor, caret_range, steps: int, big_word: bool = False):
-    """Return new caret range by moving backward by 'aw/W' units."""
-    if caret_range is None or steps <= 0:
-        return None
-    try:
-        text_obj = text_cursor.getText()
-        probe = text_obj.createTextCursorByRange(caret_range)
-
-        for i in range(steps):
-            paragraph_text, offset = _current_paragraph_text_and_offset(probe)
-            if offset == 0:
-                if not probe.gotoPreviousParagraph(False):
-                    return None
-                probe.gotoEndOfParagraph(False)
-                paragraph_text, offset = _current_paragraph_text_and_offset(probe)
-            scan_offset = max(0, offset - 1)
-            bounds = _around_word_unit_bounds(paragraph_text, scan_offset, BACKWARD, big_word)
-
-            if bounds is None:
-                if not probe.gotoPreviousParagraph(False):
-                    return None
-                probe.gotoEndOfParagraph(False)
-                continue
-
-            start_offset, _ = bounds
-            probe.gotoStartOfParagraph(False)
-            if start_offset > 0:
-                probe.goRight(start_offset, False)
-
-            if i < steps - 1:
-                if start_offset > 0:
-                    probe.goLeft(1, False)
-                elif not probe.gotoPreviousParagraph(False):
-                    return probe.getStart()
-                else:
-                    probe.gotoEndOfParagraph(False)
-
-        return probe.getStart()
-    except Exception as e:
-        _handle_exc(err=e)
-        return None
-
-
-def _select_word_objects_forward(count: int, key: KeyEvent, mode: Mode, cursor) -> bool:
-    """Select [count] words forward starting from beginning of current word unit.
-    Commands 'iw', 'iW, 'aw', 'aW', in Operator-pending mode or Visual without
-    extended selection.
-    """
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
-        return False
-
-    big_word = True if key.char == "W" else False
-    is_around = True if key.pending and key.pending[-1] == "a" else False
-
-    steps = max(1, int(count))
-    if is_around:
-        probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
-        start_range, end_range = _around_word_ranges_forward(probe, steps, big_word)
-    else:
-        start_range = _word_object_start_range(text_cursor, big_word)
-        if start_range is None:
-            return False
-        end_range = _advance_word_object_caret(text_cursor, start_range, steps, \
-                                               FORWARD, big_word)
-    if end_range is None:
-        return False
-    if mode.startswith("visual"):
-        _set_visual_anchor(start_range)
-        _set_visual_selection(cursor, start_range, end_range)
-        return True
-    cursor.gotoRange(start_range, False)
-    cursor.gotoRange(end_range, True)
-    return True
-
-
-def _expand_with_word_text_objects(count, key, mode, cursor) -> bool:
-    """Expand selection with [count] word text-objects 'iw' in Visual mode to
-    direction of selection. Command 'iw' in Visual mode with extended selection.
-    """
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
-        return False
-
-    is_around = True if key.pending and key.pending[-1] == "a" else False
-
-    # Start from beginning of current word if haven't expanded selection.
-    if len(cursor.getString()) == 0:
-        big_word = True if key.char == "W" else False
-        start_range = _word_object_start_range(text_cursor, big_word)
-        if start_range is None:
-            return False
-        cursor.gotoRange(start_range, False)
-        return _select_word_objects_forward(count, key, mode, cursor)
-
-    big_word = True if key.char == "W" else False
-
-    is_forward = _is_forward_selection(cursor)
-    anchor = cursor.getStart() if is_forward else cursor.getEnd()
-    _set_visual_anchor(anchor)
-    caret = cursor.getEnd() if is_forward else cursor.getStart()
-    select_backwards = not is_forward
-
-    if caret is None or anchor is None:
-        return False
-
-    try:
-        steps = max(1, int(count))
-        direction = BACKWARD if select_backwards else FORWARD
-        if is_around:
-            if direction == BACKWARD:
-                new_caret = _around_word_caret_backward(text_cursor, caret, steps, \
-                                                        big_word)
-            else:
-                probe = text_cursor.getText().createTextCursorByRange(caret)
-                _, end_range = _around_word_ranges_forward(probe, steps, big_word)
-                new_caret = end_range
-        else:
-            new_caret = _advance_word_object_caret(text_cursor, caret, steps, \
-                                                   direction, big_word)
-        if new_caret is None:
-            return False
-
-        if is_around and direction == BACKWARD:
-            _set_visual_selection(cursor, anchor, new_caret, force_backward=True)
-        else:
-            _set_visual_selection(cursor, anchor, new_caret)
-        return True
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
