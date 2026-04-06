@@ -61,12 +61,67 @@ def _to_start_of_word(expand: bool, count: int, mode: Mode, cursor, previous: bo
         cmd = ".uno:GoToPrevWord" if previous else ".uno:GoToNextWord"
 
         for _ in range(count):
+
             dispatcher.executeDispatch(frame, cmd, "", 0, ())
 
         if expand and anchor is not None:
             tc = _get_text_cursor()
             if tc is not None:
                 _set_visual_selection(cursor, anchor, tc.getStart())
+        return True
+
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
+# Based on Commit b56b17e from jmagers/vibreoffice
+def _to_end_of_next_word(expand: bool, count: int, mode: Mode, cursor) -> bool:
+    """Motion to end of current or next [count] words. Command 'e'."""
+    tc = _get_text_cursor()
+    if not tc:
+        return False
+    try:
+        if mode == "pending":
+            _set_visual_anchor(tc.getStart())
+        anchor = _get_visual_anchor() if expand else None
+
+        for _ in range(count):
+            # Move cursor to right by two in case cursor is already at vim's
+            # definition of endOfWord.
+            tc.goRight(2, expand)
+
+            cursor.gotoRange(tc.getEnd(), False)
+            cursor.goLeft(1, True)
+            if cursor.getString() == ".":
+                tc.goRight(1, expand)
+
+            # gotoEndOfWord gets stuck sometimes so manually moving the cursor
+            # right is necessary in these cases.
+            while not tc.gotoEndOfWord(expand):   # type: ignore[reportMissingImports]
+                if not tc.goRight(1, expand):
+                    break
+
+            if tc.isEndOfWord():
+                # LibreOffice defines a "." directly following a word to be the
+                # endOfWord and vim does not. So in this case we need to move the
+                # the cursor to the left.
+                cursor.gotoRange(tc.getEnd(), False)
+                cursor.goLeft(1, True)
+                if cursor.getString() == ".":
+                    tc.goLeft(1, expand)
+
+        # gotoEndOfWord moves the cursor one character further than vim
+        # does so move it back one if end of word is reached and not
+        # expanding selection.
+        if not expand:
+            tc.goLeft(1, expand)
+
+        if expand and anchor is not None:
+            _set_visual_selection(cursor, anchor, tc.getStart())
+
+        backward_selection = not _is_forward_selection(tc)
+        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
         return True
 
     except Exception as e:
