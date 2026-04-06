@@ -32,7 +32,7 @@ from core import (  # noqa: f401
     _state,
     _update_statusline,
 )
-from utils import (   # type: ignore[reportMissingImports]
+from utils import ( # type: ignore[reportMissingImports]
     _clone_text_range,
     _is_current_paragraph_empty,
     _is_cursor_at_whitespace,
@@ -49,13 +49,13 @@ from sentences import (
     _expand_with_sentences_objects,
     _is_at_sentence_start
 )
-from paragraphs import ( # type: ignore[reportMissingImports]
+from paragraphs import (  # type: ignore[reportMissingImports]
     _paragraphs_forward,
     _paragraphs_backward,
     _select_paragraph_text_objects,
     _expand_with_paragraph_objects,
 )
-from words import ( # type: ignore[reportMissingImports]
+from word_specs import (  # type: ignore[reportMissingImports]
     _WORD_MOTION_B,
     _WORD_MOTION_BIG_B,
     _WORD_MOTION_BIG_E,
@@ -64,6 +64,8 @@ from words import ( # type: ignore[reportMissingImports]
     _WORD_MOTION_G_BIG_E,
     _WORD_MOTION_GE,
     _WORD_MOTION_W,
+)
+from words import ( # type: ignore[reportMissingImports]
     _current_paragraph_text_and_offset,
     _expand_with_word_text_objects,
     _select_word_objects_forward,

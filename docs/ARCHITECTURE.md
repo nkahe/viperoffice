@@ -9,7 +9,8 @@ Extension source code consists of following modules:
 Motions used by editor:
 - **sentences** - Sentence motions. Commands `()`, `is`, `as`.
 - **paragraphs** - Paragraph motions. Commands `{}`, `ip`, `ap`.
-- **words** -- Word motions. Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
+- **words** - Word motions. Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
+- **word_specs** - Words specs used by editor and words.py.
 
 Modules have different sections which are described below.
 

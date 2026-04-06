@@ -48,7 +48,6 @@ ISWORD: Final[dict] = {
 # How many lines should C-d and C-u scroll.
 SCROLL: Final[int] = 21
 
-
 _StateDict = dict[str, Any]
 def _state() -> _StateDict:
 
