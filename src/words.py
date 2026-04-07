@@ -5,6 +5,7 @@ from core import (
     KeyEvent,
     Mode,
     ISWORD,
+    _dbg,
     _get_controller,
     _get_cursor,
     _get_dispatcher,
@@ -18,10 +19,13 @@ from core import (
 
 from utils import (   # type: ignore[reportMissingImports]
     _clone_text_range,
+    _is_at_first_non_whitespace_after_leading_ws,
     _is_forward_selection,
+    _is_cursor_at_whitespace,
     _range_after_paragraph_break,
     _set_visual_selection,
     _sync_view_cursor_to_text_cursor,
+    _is_current_paragraph_empty
 )
 
 from paragraphs import (
@@ -45,29 +49,108 @@ END = "end"
 # Word motions
 # ------------------
 
-
 def _to_start_of_word(expand: bool, count: int, mode: Mode, cursor, previous: bool ) -> bool:
+    """To start of previous or next words. 'w' and 'b'."""
     dispatcher = _get_dispatcher()
     frame = _get_frame()
-    if dispatcher is None or frame is None:
+    tc = _get_text_cursor()
+    if dispatcher is None or frame is None or tc is None:
         return False
     try:
         if mode == "pending":
-            tc = _get_text_cursor()
-            if tc:
-                _set_visual_anchor(tc.getStart())
-
+            _set_visual_anchor(tc.getStart())
         anchor = _get_visual_anchor() if expand else None
-        cmd = ".uno:GoToPrevWord" if previous else ".uno:GoToNextWord"
 
+        used_edge_case = False
         for _ in range(count):
+            if previous:
+                if not _previous_word_edge_case(expand, tc):
+                    dispatcher.executeDispatch(frame, ".uno:GoToPrevWord", "", 0, ())
+                else:
+                    used_edge_case = True
+            else:
+                if not _next_word_edge_case(expand, tc):
+                    dispatcher.executeDispatch(frame, ".uno:GoToNextWord", "", 0, ())
+                else:
+                    used_edge_case = True
 
-            dispatcher.executeDispatch(frame, cmd, "", 0, ())
-
-        if expand and anchor is not None:
+        # When the edge case moved `tc` directly, sync the view cursor since
+        # the dispatcher was not used (it only updates the view cursor).
+        if used_edge_case:
+            backward_selection = not _is_forward_selection(tc)
+            _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+        elif expand and anchor is not None:
             tc = _get_text_cursor()
             if tc is not None:
                 _set_visual_selection(cursor, anchor, tc.getStart())
+        return True
+
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
+def _next_word_edge_case(expand, tc):
+    if _is_current_paragraph_empty(tc) or tc.isEndOfParagraph():
+        tc.gotoNextParagraph(expand)
+        return True
+    else:
+        return False
+
+
+def _previous_word_edge_case(expand, tc):
+    if _is_current_paragraph_empty(tc) or tc.isStartOfParagraph():
+        tc.goLeft(1, expand)
+        return True
+    elif tc.isStartOfParagraph():
+        tc.gotoPreviousParagraph(expand)
+        tc.goLeft(1, expand)
+        return True
+    elif _is_cursor_at_whitespace(tc, condition="before_paragraph") or \
+    _is_at_first_non_whitespace_after_leading_ws(tc):
+        # Moves cursor to previous line.
+        tc.gotoStartOfParagraph(expand)
+        tc.goLeft(1, expand)
+        return True
+    else:
+        return False
+
+
+def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor, key) -> bool:
+    """Command 'W'."""
+    tc = _get_text_cursor()
+    if tc is None:
+        return False
+    try:
+        for _ in range(count):
+            # Count empty lines as WORDS.
+            if tc.isEndOfParagraph() or _is_current_paragraph_empty(tc):
+                tc.goRight(1, expand)
+            else:
+                tc.gotoNextWord(expand)   # type: ignore[reportMissingImports]
+
+        backward_selection = not _is_forward_selection(tc)
+        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+        return True
+
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
+def _to_start_of_previous_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
+    """Command 'B'."""
+    tc = _get_text_cursor()
+    if tc is None:
+        return False
+    try:
+        for _ in range(count):
+            # Count empty lines as WORDS.
+            if not _previous_word_edge_case(expand, tc):
+                tc.gotoPreviousWord(expand)   # type: ignore[reportMissingImports]
+
+        backward_selection = not _is_forward_selection(tc)
+        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
         return True
 
     except Exception as e:
@@ -113,9 +196,12 @@ def _to_end_of_next_word(expand: bool, count: int, mode: Mode, cursor) -> bool:
 
         # gotoEndOfWord moves the cursor one character further than vim
         # does so move it back one if end of word is reached and not
-        # expanding selection.
+        # expanding selection. Skip adjustment if at end of document.
+        _dbg(f"e: before final adj tc='{tc.getString()}' collapsed={tc.isCollapsed()}")
         if not expand:
-            tc.goLeft(1, expand)
+            if tc.goRight(1, False):
+                tc.goLeft(2, expand)
+        _dbg(f"e: final tc='{tc.getString()}' collapsed={tc.isCollapsed()}")
 
         if expand and anchor is not None:
             _set_visual_selection(cursor, anchor, tc.getStart())
@@ -128,39 +214,6 @@ def _to_end_of_next_word(expand: bool, count: int, mode: Mode, cursor) -> bool:
         _handle_exc(err=e)
         return False
 
-
-def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
-    tc = _get_text_cursor()
-    if tc is None:
-        return False
-    try:
-        for _ in range(count):
-            tc.gotoNextWord(expand)   # type: ignore[reportMissingImports]
-
-        backward_selection = not _is_forward_selection(tc)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
-        return True
-
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
-
-
-def _to_start_of_previous_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
-    tc = _get_text_cursor()
-    if tc is None:
-        return False
-    try:
-        for _ in range(count):
-            tc.gotoPreviousWord(expand)   # type: ignore[reportMissingImports]
-
-        backward_selection = not _is_forward_selection(tc)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
-        return True
-
-    except Exception as e:
-        _handle_exc(err=e)
-        return False
 
 
 def _is_keyword_char(ch: str) -> bool:

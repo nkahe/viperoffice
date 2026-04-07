@@ -1027,7 +1027,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "w": lambda: _to_start_of_word(expand, count, mode, cursor, previous = False),
                 "b": lambda: _to_start_of_word(expand, count, mode, cursor, previous = True),
                 "e": lambda: _to_end_of_next_word(expand, count, mode, cursor),
-                "W": lambda: _to_start_of_next_WORD(expand, count, mode, cursor),
+                "W": lambda: _to_start_of_next_WORD(expand, count, mode, cursor, key),
                 "B": lambda: _to_start_of_previous_WORD(expand, count, mode, cursor),
                 # "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
                 "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
