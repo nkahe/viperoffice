@@ -1320,6 +1320,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         action = normal_actions.get(key.char)
         if action is None:
             return None
+        if mode in ("normal", "pending"):
+            cursor.collapseToStart()
+
         did_action = action()
         # After doing action:
         if key.char.lower() in ("aios"):
