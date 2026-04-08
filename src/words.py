@@ -47,7 +47,7 @@ END = "end"
 # Word motions
 # ------------------
 
-def _to_start_of_word(expand: bool, count: int, mode: Mode, cursor, previous: bool ) -> bool:
+def _to_start_of_words(expand: bool, count: int, mode: Mode, cursor, previous: bool ) -> bool:
     """To start of previous or next [count] words. Commands 'w' and 'b'."""
     tc = _get_text_cursor()
     if tc is None:
@@ -196,53 +196,22 @@ def _to_start_of_previous_WORD(expand: bool, count: int, mode: Mode, cursor) -> 
         return False
 
 
-# Based on Commit b56b17e from jmagers/vibreoffice
-def _to_end_of_next_word(expand: bool, count: int, mode: Mode, cursor) -> bool:
+def _to_end_of_words(expand: bool, count: int, mode: Mode, cursor) -> bool:
     """Motion to end of current or next [count] words. Command 'e'."""
     tc = _get_text_cursor()
     if not tc:
         return False
     try:
         if mode == "pending":
-            _set_visual_anchor(tc.getStart())
-        anchor = _get_visual_anchor() if expand else None
-
+            _set_visual_anchor(cursor.getStart())
+        moved_any = False
         for _ in range(count):
-            # Move cursor to right by two in case cursor is already at vim's
-            # definition of endOfWord.
-            tc.goRight(2, expand)
+            if not _to_next_word_end(expand, cursor, tc):
+                break
+            moved_any = True
 
-            cursor.gotoRange(tc.getEnd(), False)
-            cursor.goLeft(1, True)
-            if cursor.getString() == ".":
-                tc.goRight(1, expand)
-
-            # gotoEndOfWord gets stuck sometimes so manually moving the cursor
-            # right is necessary in these cases.
-            while not tc.gotoEndOfWord(expand):   # type: ignore[reportMissingImports]
-                if not tc.goRight(1, expand):
-                    break
-
-            if tc.isEndOfWord():
-                # LibreOffice defines a "." directly following a word to be the
-                # endOfWord and vim does not. So in this case we need to move the
-                # the cursor to the left.
-                cursor.gotoRange(tc.getEnd(), False)
-                cursor.goLeft(1, True)
-                if cursor.getString() == ".":
-                    tc.goLeft(1, expand)
-
-        # gotoEndOfWord moves the cursor one character further than vim
-        # does so move it back one if end of word is reached and not
-        # expanding selection. Skip adjustment if at end of document.
-        _dbg(f"e: before final adj tc='{tc.getString()}' collapsed={tc.isCollapsed()}")
-        if not expand:
-            if tc.goRight(1, False):
-                tc.goLeft(2, expand)
-        _dbg(f"e: final tc='{tc.getString()}' collapsed={tc.isCollapsed()}")
-
-        if expand and anchor is not None:
-            _set_visual_selection(cursor, anchor, tc.getStart())
+        if not moved_any:
+            return False
 
         backward_selection = not _is_forward_selection(tc)
         _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
@@ -253,6 +222,104 @@ def _to_end_of_next_word(expand: bool, count: int, mode: Mode, cursor) -> bool:
         return False
 
 
+# LO's definition of end of word doesn't match with Vi/Vim or with dispatch
+# command used with to start of words motion so this parser is used instead.
+def _to_next_word_end(expand: bool, cursor, tc) -> bool:
+    """Motion forward to next end of word. For command 'e'."""
+    if expand:
+        caret = _get_visual_caret_range(tc)
+        if caret is not None:
+            tc.gotoRange(caret, False)
+    paragraph_text, offset = _current_paragraph_text_and_offset(tc)
+    view_offset = None
+    if not expand:
+        try:
+            view_tc = _clone_text_range(cursor)
+            _, view_offset = _current_paragraph_text_and_offset(view_tc)
+        except Exception as e:
+            _handle_exc(err=e)
+
+    original_offset = offset
+    original_char_at = paragraph_text[offset] if 0 <= offset < len(paragraph_text) else ""
+    original_char_prev = paragraph_text[offset - 1] if offset - 1 >= 0 else ""
+    if not expand and 0 < offset < len(paragraph_text):
+        # Block caret sits on the previous char, but the text cursor
+        # can be positioned between word and punctuation.
+        if _word_unit_class(paragraph_text[offset]) == "punct" \
+                and _word_unit_class(paragraph_text[offset - 1]) == "alnum" \
+                and view_offset == offset - 1:
+            offset -= 1
+
+    allow_last = True
+    if expand and paragraph_text and offset >= len(paragraph_text):
+        # In Visual mode, allow selecting a trailing word unit (e.g. ".")
+        # before jumping to the next paragraph.
+        offset = len(paragraph_text) - 1
+        allow_last = False
+
+    next_offset = _scan_forward_word_unit_end(paragraph_text, offset, allow_last)
+    if next_offset is None:
+        if not _to_next_non_empty_paragraph(tc, False, False):
+            return False
+        paragraph_text, offset = _current_paragraph_text_and_offset(tc)
+        next_offset = _scan_forward_word_unit_end(paragraph_text, offset)
+        if next_offset is None:
+            return False
+
+    if not expand and next_offset == offset:
+        next_offset = min(len(paragraph_text), next_offset + 1)
+
+    tc.gotoStartOfParagraph(False)
+    move = next_offset + 1 if expand else next_offset
+    if not expand and original_offset == next_offset \
+            and _word_unit_class(original_char_at) == "punct" \
+            and _word_unit_class(original_char_prev) == "alnum" \
+            and view_offset == original_offset:
+        alt_offset = min(len(paragraph_text) - 1, original_offset + 1)
+        alt_next = _scan_forward_word_unit_end(paragraph_text, alt_offset)
+        if alt_next is not None:
+            next_offset = alt_next
+            move = next_offset
+
+    if move > 0:
+        tc.goRight(move, False)
+        return True
+    return False
+
+
+def _word_unit_class(ch: str) -> str:
+    if ch == " " or ch == "\t" or ch == "\n":
+        return "blank"
+    if ch.isalnum():
+        return "alnum"
+    return "punct"
+
+
+def _scan_forward_word_unit_end(paragraph_text: str, offset: int, allow_last: bool = True) \
+                                -> int | None:
+    length = len(paragraph_text)
+    if offset >= length:
+        return None
+
+    i = offset
+    # If on a word unit already, advance one to ensure repeated 'e' progresses,
+    # unless we are already at the last character in the paragraph and allowed.
+    if _word_unit_class(paragraph_text[i]) != "blank":
+        if i == length - 1:
+            return i if allow_last else None
+        i += 1
+    while i < length and _word_unit_class(paragraph_text[i]) == "blank":
+        i += 1
+    if i >= length:
+        return None
+
+    cls = _word_unit_class(paragraph_text[i])
+    while i + 1 < length and _word_unit_class(paragraph_text[i + 1]) == cls:
+        i += 1
+    return i
+
+
+# ----------------------------------------
 
 def _is_keyword_char(ch: str) -> bool:
     if ch.isalpha():

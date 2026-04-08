@@ -71,12 +71,11 @@ from words import ( # type: ignore[reportMissingImports]
     _select_word_objects_forward,
     _word_char_class,
     _word_motion,
-    _to_start_of_word,
+    _to_start_of_words,
     _to_start_of_next_WORD,
     _to_start_of_previous_WORD,
-    _to_end_of_next_word
+    _to_end_of_words
 )
-
 
 # --------------------
 # Cursor and selection
@@ -1024,9 +1023,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 # "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
                 # "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
                 # "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
-                "w": lambda: _to_start_of_word(expand, count, mode, cursor, previous = False),
-                "b": lambda: _to_start_of_word(expand, count, mode, cursor, previous = True),
-                "e": lambda: _to_end_of_next_word(expand, count, mode, cursor),
+                "w": lambda: _to_start_of_words(expand, count, mode, cursor, previous = False),
+                "b": lambda: _to_start_of_words(expand, count, mode, cursor, previous = True),
+                "e": lambda: _to_end_of_words(expand, count, mode, cursor),
                 "W": lambda: _to_start_of_next_WORD(expand, count, mode, cursor, key),
                 "B": lambda: _to_start_of_previous_WORD(expand, count, mode, cursor),
                 # "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
