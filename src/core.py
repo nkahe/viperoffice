@@ -311,7 +311,23 @@ def _get_dispatcher():
         return None
 
 
+def _execute_dispatch(command: str, args: tuple = ()) -> bool | None:
+    """Execute UNO dispatch command on current frame."""
+    try:
+        dispatcher = _get_dispatcher()
+        frame = _get_frame()
+        if dispatcher is None or frame is None:
+            return False
+        command = ".uno:" + command
+        dispatcher.executeDispatch(frame, command, "", 0, args)
+        return True
+    except Exception as e:
+        _handle_exc(err=e)
+        return None
+
+
 def _get_frame():
+    """Get current frame."""
     try:
         controller = _get_controller()
         if controller is None:

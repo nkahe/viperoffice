@@ -6,10 +6,8 @@ from core import (
     Mode,
     ISWORD,
     _dbg,
-    _get_controller,
     _get_cursor,
-    _get_dispatcher,
-    _get_frame,
+    _execute_dispatch,
     _get_text_cursor,
     _get_visual_anchor,
     _handle_exc,
@@ -50,38 +48,48 @@ END = "end"
 # ------------------
 
 def _to_start_of_word(expand: bool, count: int, mode: Mode, cursor, previous: bool ) -> bool:
-    """To start of previous or next words. 'w' and 'b'."""
-    dispatcher = _get_dispatcher()
-    frame = _get_frame()
+    """To start of previous or next [count] words. Commands 'w' and 'b'."""
     tc = _get_text_cursor()
-    if dispatcher is None or frame is None or tc is None:
+    if tc is None:
         return False
+
     try:
         if mode == "pending":
             _set_visual_anchor(tc.getStart())
         anchor = _get_visual_anchor() if expand else None
+        # Dispatch commands move view cursor directly but if text cursor has been
+        # moved it needs to be synced for last.
+        sync_cursor = False
 
-        used_edge_case = False
-        for _ in range(count):
-            if previous:
-                if not _previous_word_edge_case(expand, tc):
-                    dispatcher.executeDispatch(frame, ".uno:GoToPrevWord", "", 0, ())
-                else:
-                    used_edge_case = True
-            else:
+        if previous:
+            for _ in range(count):
+                sync_cursor, new_anchor = _to_start_of_previous_word(
+                    expand, mode, cursor, tc
+                )
+                if new_anchor is not None:
+                    anchor = new_anchor
+                if not sync_cursor:
+                    # Dispatcher moved the view cursor; refresh tc so the next
+                    # iteration sees the updated position.
+                    tc = _get_text_cursor()
+
+        else:
+            for _ in range(count):
                 if not _next_word_edge_case(expand, tc):
-                    dispatcher.executeDispatch(frame, ".uno:GoToNextWord", "", 0, ())
+                    _execute_dispatch("GoToNextWord")
+                    tc = _get_text_cursor()
+                    sync_cursor = False
                 else:
-                    used_edge_case = True
+                    sync_cursor = True
 
         # When the edge case moved `tc` directly, sync the view cursor since
         # the dispatcher was not used (it only updates the view cursor).
-        if used_edge_case:
+        if sync_cursor:
             backward_selection = not _is_forward_selection(tc)
             _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
-        elif expand and anchor is not None:
+        elif expand and anchor:
             tc = _get_text_cursor()
-            if tc is not None:
+            if tc:
                 _set_visual_selection(cursor, anchor, tc.getStart())
         return True
 
@@ -90,7 +98,42 @@ def _to_start_of_word(expand: bool, count: int, mode: Mode, cursor, previous: bo
         return False
 
 
+def _to_start_of_previous_word(expand: bool, mode: Mode, cursor, tc):
+    """Returns (sync_cursor, new_anchor). new_anchor is set when pending mode
+    repositions the anchor after moving 1 left across an empty paragraph."""
+    sync_cursor = False
+    new_anchor = None
+
+    if _is_current_paragraph_empty(tc):
+        # Do operator command for paragraph next to empty line is without
+        # including the empty line.
+        probe = _clone_text_range(tc)
+        probe.goLeft(1, False)
+        if not _is_current_paragraph_empty(probe):
+            if mode == "pending":
+                cursor.collapseToStart()
+                cursor.goLeft(1, False)
+                new_anchor = _get_text_cursor()
+                _set_visual_anchor(new_anchor)
+            else:
+                # Move to paragraph next to empty line.
+                cursor.goLeft(1, expand)
+            _execute_dispatch("GoToPrevWord")
+        else:
+            tc.goLeft(1, expand)
+            sync_cursor = True
+
+    else:
+        if not _previous_word_edge_case(expand, tc):
+            _execute_dispatch("GoToPrevWord")
+        else:
+            sync_cursor = True
+
+    return sync_cursor, new_anchor
+
+
 def _next_word_edge_case(expand, tc):
+    """Handle some edge cases for 'w' and 'W' motions."""
     if _is_current_paragraph_empty(tc) or tc.isEndOfParagraph():
         tc.gotoNextParagraph(expand)
         return True
@@ -99,21 +142,17 @@ def _next_word_edge_case(expand, tc):
 
 
 def _previous_word_edge_case(expand, tc):
-    if _is_current_paragraph_empty(tc) or tc.isStartOfParagraph():
+    """Handle some common edge cases for 'b' and 'B' motions."""
+    if tc.isStartOfParagraph():
         tc.goLeft(1, expand)
-        return True
-    elif tc.isStartOfParagraph():
-        tc.gotoPreviousParagraph(expand)
-        tc.goLeft(1, expand)
-        return True
     elif _is_cursor_at_whitespace(tc, condition="before_paragraph") or \
     _is_at_first_non_whitespace_after_leading_ws(tc):
         # Moves cursor to previous line.
         tc.gotoStartOfParagraph(expand)
         tc.goLeft(1, expand)
-        return True
     else:
         return False
+    return True
 
 
 def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor, key) -> bool:
@@ -136,7 +175,6 @@ def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor, key) ->
     except Exception as e:
         _handle_exc(err=e)
         return False
-
 
 def _to_start_of_previous_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
     """Command 'B'."""
