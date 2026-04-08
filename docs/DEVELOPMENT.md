@@ -31,6 +31,22 @@ covered by those stubs — missing ones are added in `typings/com/sun/star/`.
 Lines where Pyright cannot resolve a known-good attribute at runtime use
 `# type: ignore[attr-defined]`.
 
+
+## Coding Style
+
+- Follow standard PEP 8 formatting (no enforced formatter).
+- Prefer clear, small functions over long blocks; extract helpers when it
+  improves readability.
+- Add type hints to public or complex functions.
+- Fix errors Pyright gives.
+- Add short comments only when intent is not obvious from the code.
+- Use docstrings for user-facing behavior and non-obvious helpers. If function
+  implements a user command(s) those should be mentioned in single quotes
+  (for searchability).
+- All commands should be mentioned in `README.md` and `user_documentation.md`.
+- Modules should be listed in `ARCHITECTURE.md`.
+- Use existing helper functions if they exist for the functionality.
+
 ## Building the Extension
 
 ```shell
