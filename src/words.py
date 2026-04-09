@@ -76,7 +76,7 @@ def _to_start_of_words(expand: bool, count: int, mode: Mode, cursor, previous: b
         else:
             for _ in range(count):
                 if not _next_word_edge_case(expand, tc):
-                    _execute_dispatch("GoToNextWord")
+                    _execute_dispatch(".uno:GoToNextWord")
                     tc = _get_text_cursor()
                     sync_cursor = False
                 else:
@@ -118,14 +118,14 @@ def _to_start_of_previous_word(expand: bool, mode: Mode, cursor, tc):
             else:
                 # Move to paragraph next to empty line.
                 cursor.goLeft(1, expand)
-            _execute_dispatch("GoToPrevWord")
+            _execute_dispatch(".uno:GoToPrevWord")
         else:
             tc.goLeft(1, expand)
             sync_cursor = True
 
     else:
         if not _previous_word_edge_case(expand, tc):
-            _execute_dispatch("GoToPrevWord")
+            _execute_dispatch(".uno:GoToPrevWord")
         else:
             sync_cursor = True
 

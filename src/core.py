@@ -318,7 +318,6 @@ def _execute_dispatch(command: str, args: tuple = ()) -> bool | None:
         frame = _get_frame()
         if dispatcher is None or frame is None:
             return False
-        command = ".uno:" + command
         dispatcher.executeDispatch(frame, command, "", 0, args)
         return True
     except Exception as e:
@@ -475,4 +474,3 @@ def _update_statusline(controller=None):
         _handle_exc(err=e)
         # Non-fatal for status update.
         pass
-

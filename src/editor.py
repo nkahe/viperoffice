@@ -10,10 +10,9 @@ from core import (  # noqa: f401
     KeyEvent,
     Mode,
     _current_doc,
+    _execute_dispatch,
     _get_controller,
     _get_cursor,
-    _get_dispatcher,
-    _get_frame,
     _get_last_ft,
     _get_mode,
     _get_pending_keys,
@@ -296,11 +295,7 @@ def _jump_to_page(expand: bool, count, cursor, target: str = "start") -> bool:
 def _focus_findbar() -> bool:
     """Show default LibreOffice find bar. Command '/'. """
     try:
-        dispatcher = _get_dispatcher()
-        frame = _get_frame()
-        if dispatcher is None or frame is None:
-            return False
-        dispatcher.executeDispatch(frame, "vnd.sun.star.findbar:FocusToFindbar", "", 0, ())
+        _execute_dispatch("vnd.sun.star.findbar:FocusToFindbar")
         return True
     except Exception as e:
         _handle_exc(err=e)
@@ -311,14 +306,10 @@ def _focus_findbar() -> bool:
 def _repeat_search(count, backward: bool = False) -> bool:
     """Repeat last LibreOffice search count times. Commands 'n' and 'N'."""
     try:
-        dispatcher = _get_dispatcher()
-        frame = _get_frame()
-        if dispatcher is None or frame is None:
-            return False
         # FindbarFindNext / FindbarFindPrev repeat the last findbar search.
         cmd = "vnd.sun.star.findbar:FindPrev" if backward else "vnd.sun.star.findbar:FindNext"
         for _ in range(max(1, count)):
-            dispatcher.executeDispatch(frame, cmd, "", 0, ())
+            _execute_dispatch(cmd)
         return True
     except Exception as e:
         _handle_exc(err=e)
@@ -771,11 +762,7 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
             return False
         text_cursor = _get_text_cursor()
         if yank:
-            dispatcher = _get_dispatcher()
-            frame = _get_frame()
-            if dispatcher is None or frame is None:
-                return False
-            dispatcher.executeDispatch(frame, ".uno:Copy", "", 0, ())
+            _execute_dispatch(".uno:Copy")
         if delete:
             if text_cursor is not None:
                 text_cursor.setString("")
@@ -796,7 +783,7 @@ def _yank_and_delete_to_end_of_line(count: int, mode: Mode, yank: bool , delete:
     return _copy_and_delete(yank, delete)
 
 
-def _paste(count:int, mode, after_cursor:bool = True):
+def _paste(count:int, mode, after_cursor:bool):
     """Paste text from clipboard after or before cursor [count] times.
        Commands 'p' and 'P'.
     """
@@ -809,19 +796,13 @@ def _paste(count:int, mode, after_cursor:bool = True):
             text_cursor.goRight(1, False)
 
         if mode == "normal":
-            text_cursor.gotoRange(text_cursor.getStart(), False)
             controller = _get_controller()
             if controller is None:
                 return False
             controller.select(text_cursor)
 
-        dispatcher = _get_dispatcher()
-        frame = _get_frame()
-        if dispatcher is None or frame is None:
-            return False
-
         for _ in range(count):
-            dispatcher.executeDispatch(frame, ".uno:Paste", "", 0, ())
+            _execute_dispatch(".uno:Paste")
 
     except Exception as e:
         _handle_exc(err=e)
