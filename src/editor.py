@@ -72,7 +72,8 @@ from words import ( # type: ignore[reportMissingImports]
     _word_motion,
     _to_start_of_words,
     _to_start_of_WORDs,
-    _to_end_of_words
+    _to_end_of_words,
+    _to_end_of_WORDs_forward
 )
 
 # --------------------
@@ -1012,7 +1013,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 # "B": lambda: _to_start_of_previous_WORD(expand, count, mode, cursor),
                 # "B": lambda: _to_start_of_previous_WORD(expand, count, mode, cursor),
                 # "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
-                "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
+                "E": lambda: _to_end_of_WORDs_forward(expand, count, cursor),
+                # "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
                 # "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
                 "^": lambda: _to_first_non_blank(expand, 0, cursor),
                 "$": lambda: _to_end_of_line(expand, count, cursor),
