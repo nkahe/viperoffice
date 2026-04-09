@@ -270,8 +270,9 @@ def _to_end_of_words(expand: bool, count: int, mode: Mode, cursor) -> bool:
         return False
 
 
-# LO's definition of end of word doesn't match with Vi/Vim or with dispatch
+# Text cursor's isEndOfWord() doesn't match with Vi/Vim or with dispatch
 # command used with to start of words motion so this parser is used instead.
+# Correct placement for cursor is calculated as offset from start of paragraph.
 def _to_next_word_end(expand: bool, cursor, tc) -> bool:
     """Motion forward to next end of word. For command 'e'."""
     if expand:
@@ -288,8 +289,12 @@ def _to_next_word_end(expand: bool, cursor, tc) -> bool:
             _handle_exc(err=e)
 
     original_offset = offset
-    original_char_at = paragraph_text[offset] if 0 <= offset < len(paragraph_text) else ""
-    original_char_prev = paragraph_text[offset - 1] if offset - 1 >= 0 else ""
+    if expand and 0 < offset < len(paragraph_text):
+        # In Visual mode, avoid skipping a single punctuation unit after a word.
+        if _word_unit_class(paragraph_text[offset]) == "punct" \
+                and _word_unit_class(paragraph_text[offset - 1]) == "alnum":
+            offset -= 1
+
     if not expand and 0 < offset < len(paragraph_text):
         # Block caret sits on the previous char, but the text cursor
         # can be positioned between word and punctuation.
@@ -306,6 +311,7 @@ def _to_next_word_end(expand: bool, cursor, tc) -> bool:
         allow_last = False
 
     next_offset = _scan_forward_word_unit_end(paragraph_text, offset, allow_last)
+
     if next_offset is None:
         if not _to_next_non_empty_paragraph(tc, False, False):
             return False
@@ -316,19 +322,8 @@ def _to_next_word_end(expand: bool, cursor, tc) -> bool:
 
     if not expand and next_offset == offset:
         next_offset = min(len(paragraph_text), next_offset + 1)
-
     tc.gotoStartOfParagraph(False)
     move = next_offset + 1 if expand else next_offset
-    if not expand and original_offset == next_offset \
-            and _word_unit_class(original_char_at) == "punct" \
-            and _word_unit_class(original_char_prev) == "alnum" \
-            and view_offset == original_offset:
-        alt_offset = min(len(paragraph_text) - 1, original_offset + 1)
-        alt_next = _scan_forward_word_unit_end(paragraph_text, alt_offset)
-        if alt_next is not None:
-            next_offset = alt_next
-            move = next_offset
-
     if move > 0:
         tc.goRight(move, False)
         return True
@@ -343,6 +338,7 @@ def _word_unit_class(ch: str) -> str:
     return "punct"
 
 
+# Scan to the end index of the next non-blank word unit. Used by 'e' motion.
 def _scan_forward_word_unit_end(paragraph_text: str, offset: int, allow_last: bool = True) \
                                 -> int | None:
     length = len(paragraph_text)
