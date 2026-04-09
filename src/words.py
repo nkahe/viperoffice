@@ -11,6 +11,7 @@ from core import (
     _get_text_cursor,
     _get_visual_anchor,
     _handle_exc,
+    _paragraph_scan_steps,
     _set_visual_anchor,
     _get_visual_caret_range
 )
@@ -133,16 +134,20 @@ def _to_start_of_previous_word(expand: bool, mode: Mode, cursor, tc):
 
 
 def _next_word_edge_case(expand, tc):
-    """Handle some edge cases for 'w' and 'W' motions."""
+    """Handle some edge cases for 'w' and 'W' motions. Return True if handled
+    edge case.
+    """
     if _is_current_paragraph_empty(tc) or tc.isEndOfParagraph():
         tc.gotoNextParagraph(expand)
-        return True
     else:
         return False
+    return True
 
 
 def _previous_word_edge_case(expand, tc):
-    """Handle some common edge cases for 'b' and 'B' motions."""
+    """Handle some common edge cases for 'b' and 'B' motions. Return True
+    if handled edge case.
+    """
     if tc.isStartOfParagraph():
         tc.goLeft(1, expand)
     elif _is_cursor_at_whitespace(tc, condition="before_paragraph") or \
@@ -155,18 +160,27 @@ def _previous_word_edge_case(expand, tc):
     return True
 
 
-def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor, key) -> bool:
-    """Command 'W'."""
+# A WORD consists of a sequence of non-blank characters, separated with white
+# space. An empty line is also considered to be a WORD.
+def _to_start_of_WORDS(expand: bool, count: int, cursor, direction: str) -> bool:
+    """Motion to start of next WORD. Command 'W'."""
     tc = _get_text_cursor()
     if tc is None:
         return False
     try:
         for _ in range(count):
-            # Count empty lines as WORDS.
-            if tc.isEndOfParagraph() or _is_current_paragraph_empty(tc):
-                tc.goRight(1, expand)
-            else:
-                tc.gotoNextWord(expand)   # type: ignore[reportMissingImports]
+            if expand:
+                caret = _get_visual_caret_range(tc)
+                if caret is not None:
+                    tc.gotoRange(caret, False)
+
+            if direction == "forward":
+                moved = _to_end_of_WORD(tc, expand, before_end=False)
+                if not moved:
+                    break
+                moved = _to_end_of_whitespace(tc, expand)
+                if not moved:
+                    break
 
         backward_selection = not _is_forward_selection(tc)
         _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
@@ -175,6 +189,40 @@ def _to_start_of_next_WORD(expand: bool, count: int, mode: Mode, cursor, key) ->
     except Exception as e:
         _handle_exc(err=e)
         return False
+
+
+def _to_end_of_WORD(tc, expand: bool, before_end: bool = False) -> bool:
+    """before_end : Stop cursor 1 char before word end. Returns if cursor moved or not.
+    """
+    # Phase 1: move right until we are on whitespace (end of current WORD).
+    for _ in _paragraph_scan_steps():
+        probe = _clone_text_range(tc)
+        if not probe.goRight(1, True):
+            return False
+        if probe.getString().isspace():
+            if before_end:
+                tc.goLeft(1, False)
+            break
+        if not tc.goRight(1, False):
+            return False
+    return True
+
+
+def _to_end_of_whitespace(tc, expand: bool) -> bool:
+    """Move to end of whitespace in current paragraph. Returns if cursor moved or not."
+    """
+    for _ in _paragraph_scan_steps():
+        probe = _clone_text_range(tc)
+        if not probe.goRight(1, True):
+            return False
+        if not probe.getString().isspace():
+            break
+        if not tc.goRight(1, False):
+            return False
+        if _is_current_paragraph_empty(tc):
+            break
+    return True
+
 
 def _to_start_of_previous_WORD(expand: bool, count: int, mode: Mode, cursor) -> bool:
     """Command 'B'."""

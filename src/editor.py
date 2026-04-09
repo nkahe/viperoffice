@@ -71,7 +71,7 @@ from words import ( # type: ignore[reportMissingImports]
     _word_char_class,
     _word_motion,
     _to_start_of_words,
-    _to_start_of_next_WORD,
+    _to_start_of_WORDS,
     _to_start_of_previous_WORD,
     _to_end_of_words
 )
@@ -948,7 +948,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "I": lambda: _insert_before_first_non_blank(mode, cursor),
                 "o": lambda: _begin_new_paragraph(above = False, cursor = cursor),
                 "O": lambda: _begin_new_paragraph(above = True, cursor = cursor),
-                "p": lambda: _paste(count, mode),
+                "p": lambda: _paste(count, mode, after_cursor=True),
                 "P": lambda: _paste(count, mode, after_cursor=False),
                 "r": lambda: self._r_command(count, key, cursor),
                 "s": lambda: _delete_characters(count),
@@ -1007,7 +1007,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "w": lambda: _to_start_of_words(expand, count, mode, cursor, previous = False),
                 "b": lambda: _to_start_of_words(expand, count, mode, cursor, previous = True),
                 "e": lambda: _to_end_of_words(expand, count, mode, cursor),
-                "W": lambda: _to_start_of_next_WORD(expand, count, mode, cursor, key),
+                "W": lambda: _to_start_of_WORDS(expand, count, cursor, direction = "forward"),
+                # "W": lambda: _to_start_of_next_WORD(expand, count, mode, cursor, key),
                 "B": lambda: _to_start_of_previous_WORD(expand, count, mode, cursor),
                 # "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
                 "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
@@ -1602,4 +1603,3 @@ def _key_code(event):
     except Exception as e:
         _handle_exc(err=e)
         return -1
-
