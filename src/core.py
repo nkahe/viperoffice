@@ -44,7 +44,7 @@ ISWORD: Final[dict] = {
 # Current Vi input mode. "pending" is short for Operator-pending mode. Happens
 # after operator command "d", "c" or "y". ViperOffice is then waiting for motion.
 MODES: Final[tuple] = ("normal", "insert", "pending", "visual")
-Mode = Literal[*MODES]
+Mode = Literal["normal", "insert", "pending", "visual"]
 
 # How many lines should C-d and C-u scroll.
 SCROLL: Final[int] = 21
