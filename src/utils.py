@@ -17,11 +17,11 @@ if TYPE_CHECKING:
 # Utility functions
 # -------------------
 
-def _clone_text_range(text_cursor, end: bool = False) -> XTextCursor:
-    """Return a cloned TextCursor positioned at the start of text_cursor by
+def _clone_text_range(tc, end: bool = False) -> XTextCursor:
+    """Return a cloned text cursor positioned at the start of text_cursor by
     default. end=True : use end of range."""
-    range = text_cursor.getEnd() if end else text_cursor.getStart()
-    return text_cursor.getText().createTextCursorByRange(range)
+    range = tc.getEnd() if end else tc.getStart()
+    return tc.getText().createTextCursorByRange(range)
 
 
 # For debugging
@@ -61,11 +61,11 @@ def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportU
             return "<unprintable range>"
 
 
-def _is_current_paragraph_empty(text_cursor) -> bool:
-    if text_cursor is None:
+def _is_current_paragraph_empty(tc) -> bool:
+    if tc is None:
         return False
     try:
-        probe = _clone_text_range(text_cursor)
+        probe = _clone_text_range(tc)
         if probe is None:
             return False
         probe.gotoStartOfParagraph(False)
@@ -88,7 +88,7 @@ def _range_after_paragraph_break(text_range):
     return None
 
 
-def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
+def _is_cursor_at_whitespace(tc, condition:str|None=None) -> bool:
     """Return True if cursor is on a whitespace character.
 
     condition: optional qualifier for additional check:
@@ -98,11 +98,11 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
         "before_paragraph" – whitespace at the start of a paragraph (paragraph
                              begins with whitespace characters).
     """
-    if text_cursor is None:
+    if tc is None:
         return False
     try:
-        caret = _get_visual_caret_range(text_cursor)
-        probe = text_cursor.getText().createTextCursorByRange(caret)
+        caret = _get_visual_caret_range(tc)
+        probe = tc.getText().createTextCursorByRange(caret)
         if not probe.goRight(1, True):
             return False
         if probe.getString() not in (" ", "\t", "\n"):
@@ -129,8 +129,8 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
 
         elif condition == "before_paragraph":
             # Check that the caret is within leading whitespace of the paragraph.
-            caret = _get_visual_caret_range(text_cursor)
-            para_probe = text_cursor.getText().createTextCursorByRange(caret)
+            caret = _get_visual_caret_range(tc)
+            para_probe = tc.getText().createTextCursorByRange(caret)
             para_probe.gotoStartOfParagraph(False)
             para_probe.gotoRange(caret, True)
             leading = para_probe.getString()
@@ -142,17 +142,17 @@ def _is_cursor_at_whitespace(text_cursor, condition:str|None=None) -> bool:
         return False
 
 
-def _is_at_first_non_whitespace_after_leading_ws(text_cursor) -> bool:
+def _is_at_first_non_whitespace_after_leading_ws(tc) -> bool:
     """Return True if cursor is at first non-whitespace after leading paragraph whitespace.
     """
-    if text_cursor is None:
+    if tc is None:
         return False
     try:
-        if text_cursor.isStartOfParagraph():
+        if tc.isStartOfParagraph():
             return False
-        para_probe = _clone_text_range(text_cursor)
+        para_probe = _clone_text_range(tc)
         para_probe.gotoStartOfParagraph(False)
-        para_probe.gotoRange(text_cursor.getStart(), True)
+        para_probe.gotoRange(tc.getStart(), True)
         return all(c in (" ", "\t") for c in para_probe.getString())
     except Exception as e:
         _handle_exc(err=e)
@@ -162,16 +162,16 @@ def _is_at_first_non_whitespace_after_leading_ws(text_cursor) -> bool:
 # UNO doesn't offer call to get caret position when there's selection. Usually
 # state.visual_anchor is set and tracked but for situations it's not available
 # this can be used.
-def _is_forward_selection(text_cursor) -> bool:
+def _is_forward_selection(tc) -> bool:
     """Return True if caret is at right end of selection, False if at left end."""
     try:
-        if not text_cursor:
+        if not tc:
             return False
-        original_len = len(text_cursor.getString())
-        moved = text_cursor.goRight(1, True)
+        original_len = len(tc.getString())
+        moved = tc.goRight(1, True)
         if moved:
-            new_len = len(text_cursor.getString())
-            text_cursor.goLeft(1, True)
+            new_len = len(tc.getString())
+            tc.goLeft(1, True)
             return new_len > original_len
         return True
     except Exception as e:

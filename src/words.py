@@ -247,7 +247,7 @@ def _to_next_word_end(expand: bool, cursor, tc) -> bool:
 
 
 def _word_unit_class(ch: str) -> str:
-    if ch == " " or ch == "\t" or ch == "\n":
+    if ch.isspace():
         return "blank"
     if ch.isalnum():
         return "alnum"

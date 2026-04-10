@@ -31,23 +31,23 @@ from paragraphs import (
 # Sentence motions
 # ------------------
 
-def _to_whitespace_start(text_cursor, expand: bool, cursor) -> bool:
+def _to_whitespace_start(tc, expand: bool, cursor) -> bool:
     try:
-        if not _to_sentence_whitespace_start(text_cursor):
+        if not _to_sentence_whitespace_start(tc):
             return False
-        _sync_view_cursor(text_cursor, expand, cursor, backward=True)
+        _sync_view_cursor(tc, expand, cursor, backward=True)
         return True
     except Exception as e:
         _handle_exc(err=e)
         return False
 
 
-def _to_sentence_whitespace_start(text_cursor) -> bool:
+def _to_sentence_whitespace_start(tc) -> bool:
     """Move text cursor to the start of the current whitespace unit."""
-    if text_cursor is None:
+    if tc is None:
         return False
     try:
-        probe = _clone_text_range(text_cursor)
+        probe = _clone_text_range(tc)
         for _ in _paragraph_scan_steps():
             if probe.isStartOfParagraph():
                 break
@@ -57,7 +57,7 @@ def _to_sentence_whitespace_start(text_cursor) -> bool:
                 probe.collapseToEnd()
                 break
             probe.collapseToStart()
-        text_cursor.gotoRange(probe.getStart(), False)
+        tc.gotoRange(probe.getStart(), False)
         return True
     except Exception as e:
         _handle_exc(err=e)
@@ -147,17 +147,17 @@ def _advance_empty_paragraph_unit_forward(tc) -> bool:
         return False
 
 
-def _inner_sentences_backward(text_cursor, count: int) -> bool:
+def _inner_sentences_backward(tc, count: int) -> bool:
     """Advance backward over [count] inner sentence units for 'is'."""
-    if text_cursor is None:
+    if tc is None:
         return False
     try:
         steps = max(1, int(count))
         moved_any = False
         for _ in range(steps):
-            if not text_cursor.goLeft(1, False):
+            if not tc.goLeft(1, False):
                 break
-            if not _normalize_sentence_unit_start(text_cursor):
+            if not _normalize_sentence_unit_start(tc):
                 break
             moved_any = True
         return moved_any
@@ -309,6 +309,7 @@ def _to_previous_sentence_start(tc, expand:bool, cursor) -> bool:
     tc.gotoPreviousSentence(expand)
     _sync_view_cursor(tc, expand, cursor, backward=True)
 
+    # Push cursor forward if it's stuck.
     if _same_pos(old_pos, cursor.getPosition()):
         if tc.goLeft(1, expand):
             tc.gotoPreviousSentence(expand)
