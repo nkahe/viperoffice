@@ -14,7 +14,7 @@ from utils import (   # type: ignore[reportMissingImports]
     _is_current_paragraph_empty,
     _is_forward_selection,
     _range_after_paragraph_break,
-    _sync_view_cursor_to_text_cursor,
+    _sync_view_cursor,
 )
 
 # -------------------
@@ -218,12 +218,12 @@ def _paragraphs_forward(expand: bool, count: int, cursor) -> bool:
                 # Last paragraph with no following empty line: move to end of it.
                 if not tc.isEndOfParagraph():
                     tc.gotoEndOfParagraph(expand)
-                    _sync_view_cursor_to_text_cursor(tc, expand, cursor)
+                    _sync_view_cursor(tc, expand, cursor)
                     moved_any = True
                 break
             moved_any = True
         if moved_any:
-            _sync_view_cursor_to_text_cursor(tc, expand, cursor)
+            _sync_view_cursor(tc, expand, cursor)
         return moved_any
     except Exception as e:
         _handle_exc(err=e)
@@ -260,7 +260,7 @@ def _paragraphs_backward(expand: bool, count: int, cursor) -> bool:
                 break
             moved_any = True
         if moved_any:
-            _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+            _sync_view_cursor(tc, expand, cursor, backward=True)
         return moved_any
     except Exception as e:
         _handle_exc(err=e)

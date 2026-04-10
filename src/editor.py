@@ -38,7 +38,7 @@ from utils import ( # type: ignore[reportMissingImports]
     _is_forward_selection,
     _pos_xy,
     _set_visual_selection,
-    _sync_view_cursor_to_text_cursor,
+    _sync_view_cursor,
     msg
 )
 from sentences import (
@@ -378,7 +378,7 @@ def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bo
             else:
                 tc.gotoRange(tc.getStart(), False)
 
-            start_cursor = text.createTextCursorByRange(tc.getStart())
+            start_cursor = _clone_text_range(tc)
             if backward:
                 if not start_cursor.goLeft(1, False):
                     break
@@ -409,7 +409,7 @@ def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bo
                 moved_any = True
 
             probe = text.createTextCursorByRange(target_range)
-            _sync_view_cursor_to_text_cursor(probe, expand, cursor, backward=backward)
+            _sync_view_cursor(probe, expand, cursor, backward=backward)
 
         return moved_any
     except Exception as e:

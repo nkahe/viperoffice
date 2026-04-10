@@ -23,7 +23,7 @@ from utils import (   # type: ignore[reportMissingImports]
     _is_cursor_at_whitespace,
     _range_after_paragraph_break,
     _set_visual_selection,
-    _sync_view_cursor_to_text_cursor,
+    _sync_view_cursor,
     _is_current_paragraph_empty
 )
 
@@ -87,7 +87,7 @@ def _to_start_of_words(expand: bool, count: int, mode: Mode, cursor, previous: b
         # the dispatcher was not used (it only updates the view cursor).
         if sync_cursor:
             backward_selection = not _is_forward_selection(tc)
-            _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+            _sync_view_cursor(tc, expand, cursor, backward_selection)
         elif expand and anchor:
             tc = _get_text_cursor()
             if tc:
@@ -178,7 +178,7 @@ def _to_end_of_words(expand: bool, count: int, mode: Mode, cursor) -> bool:
             return False
 
         backward_selection = not _is_forward_selection(tc)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+        _sync_view_cursor(tc, expand, cursor, backward_selection)
         return True
 
     except Exception as e:
@@ -318,7 +318,7 @@ def _to_start_of_WORDs(expand: bool, count: int, cursor, direction: str) -> bool
             return False
 
         backward_selection = not _is_forward_selection(tc)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+        _sync_view_cursor(tc, expand, cursor, backward_selection)
         return True
 
     except Exception as e:
@@ -436,7 +436,7 @@ def _to_end_of_WORDs_forward(expand: bool, count: int, cursor) -> bool:
 
         probe = _clone_text_range(tc)
         backward_selection = not _is_forward_selection(probe)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward_selection)
+        _sync_view_cursor(tc, expand, cursor, backward_selection)
         return True
 
     except Exception as e:

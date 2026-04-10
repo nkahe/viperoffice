@@ -19,7 +19,7 @@ from utils import (   # type: ignore[reportMissingImports]
     _range_after_paragraph_break,
     _same_pos,
     _set_visual_selection,
-    _sync_view_cursor_to_text_cursor,
+    _sync_view_cursor,
 )
 
 from paragraphs import (
@@ -35,7 +35,7 @@ def _to_whitespace_start(text_cursor, expand: bool, cursor) -> bool:
     try:
         if not _to_sentence_whitespace_start(text_cursor):
             return False
-        _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
+        _sync_view_cursor(text_cursor, expand, cursor, backward=True)
         return True
     except Exception as e:
         _handle_exc(err=e)
@@ -204,13 +204,13 @@ def _to_start_of_next_sentence(tc, expand: bool, cursor) -> bool:
         moved = True
 
     if moved is not None:
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor)
+        _sync_view_cursor(tc, expand, cursor)
         return moved
 
     tc.gotoNextSentence(expand)
 
     # If checks below won't work if fresh text_cursor isn't get.
-    _sync_view_cursor_to_text_cursor(tc, expand, cursor)
+    _sync_view_cursor(tc, expand, cursor)
     tc = _get_text_cursor()
     if tc is None:
         return False
@@ -218,11 +218,11 @@ def _to_start_of_next_sentence(tc, expand: bool, cursor) -> bool:
     # Some backends land on the paragraph end marker first, skip that stop.
     if tc.isEndOfParagraph() and not _is_current_paragraph_empty(tc):
         tc.gotoNextParagraph(expand)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor)
+        _sync_view_cursor(tc, expand, cursor)
 
     if _is_cursor_at_whitespace(tc, "before_paragraph"):
         tc.gotoNextWord(expand)  # type: ignore[reportAttributeAccessIssue]
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor)
+        _sync_view_cursor(tc, expand, cursor)
     return True
 
 
@@ -275,7 +275,7 @@ def _to_previous_sentence_start(tc, expand:bool, cursor) -> bool:
     if _is_cursor_at_whitespace(tc, "before_paragraph") or \
     _is_at_first_non_whitespace_after_leading_ws(tc):
         tc.gotoStartOfParagraph(False)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+        _sync_view_cursor(tc, expand, cursor, backward=True)
         # Fall through — cursor is now at isStartOfParagraph(), handled below.
 
     # From inside a sentence, first motion should go to current sentence start.
@@ -283,36 +283,36 @@ def _to_previous_sentence_start(tc, expand:bool, cursor) -> bool:
     elif not _is_at_sentence_start(tc) and \
     not _is_current_paragraph_empty(tc):
         tc.gotoStartOfSentence(expand)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+        _sync_view_cursor(tc, expand, cursor, backward=True)
         return True
 
     # Paragraph-boundary behavior matching logic.
     if tc.isStartOfParagraph():
         if _is_current_paragraph_empty(tc):
             if not _to_previous_non_empty_paragraph(tc, expand, cross_empty=False):
-                _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+                _sync_view_cursor(tc, expand, cursor, backward=True)
                 return True
         else:
             if tc.gotoPreviousParagraph(expand):
                 # Vi/Vim like behavior where we stop at first empty line.
                 if _is_current_paragraph_empty(tc):
-                    _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+                    _sync_view_cursor(tc, expand, cursor, backward=True)
                     return True
 
         tc.gotoEndOfParagraph(expand)
         if not tc.isStartOfParagraph():
             tc.goLeft(1, expand)
         tc.gotoStartOfSentence(expand)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+        _sync_view_cursor(tc, expand, cursor, backward=True)
         return True
 
     tc.gotoPreviousSentence(expand)
-    _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+    _sync_view_cursor(tc, expand, cursor, backward=True)
 
     if _same_pos(old_pos, cursor.getPosition()):
         if tc.goLeft(1, expand):
             tc.gotoPreviousSentence(expand)
-        _sync_view_cursor_to_text_cursor(tc, expand, cursor, backward=True)
+        _sync_view_cursor(tc, expand, cursor, backward=True)
     return True
 
 
@@ -330,7 +330,7 @@ def _to_start_of_sentences_backwards(expand: bool, count, cursor) -> bool:
         moved_any = False
         for _ in range(steps):
             moved = _to_previous_sentence_start(text_cursor, expand, cursor)
-            _sync_view_cursor_to_text_cursor(text_cursor, expand, cursor, backward=True)
+            _sync_view_cursor(text_cursor, expand, cursor, backward=True)
             if not moved:
                 break
             moved_any = True

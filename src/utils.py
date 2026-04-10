@@ -178,9 +178,8 @@ def _is_forward_selection(text_cursor) -> bool:
         _handle_exc(err=e)
         return True
 
-
 def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnusedFunction]
-    """Show [text] in a pop-up window."""
+    """Show [text] in a pop-up window for debug."""
     try:
         controller = _get_controller()
         if controller is None:
@@ -222,7 +221,14 @@ def _same_pos(a, b):
     return _pos_xy(a) == _pos_xy(b)
 
 
-def _sync_view_cursor_to_text_cursor(text_cursor, expand: bool, view_cursor, backward: bool = False):
+def _sync_view_cursor(text_cursor, expand: bool, view_cursor, backward: bool = False):
+    """Sync the visible cursor to a text cursor position.
+
+    When `expand` is False, the view cursor is collapsed to the text cursor's
+    start. When `expand` is True, the selection edge comes from either the start
+    or end of `text_cursor` depending on `backward`, and existing visual-anchor
+    state is preserved when available.
+    """
     if expand and backward:
         edge = text_cursor.getStart()
     elif expand:
@@ -417,5 +423,4 @@ def _ensure_visual_caret(cursor, at_end: bool) -> None:
     except Exception as e:
         _handle_exc(err=e)
         pass
-
 
