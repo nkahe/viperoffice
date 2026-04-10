@@ -18,10 +18,6 @@ class KeyEvent(NamedTuple):
     code: int
     pending: str | None
 
-# Current vi input mode. "pending" is short for Operator-pending mode. Happens
-# after operator command "d", "c" or "y". ViperOffice is then waiting for motion.
-Mode = Literal["normal", "insert", "pending", "visual"]
-
 # ------------
 # Global state
 # ------------
@@ -44,6 +40,11 @@ ISWORD: Final[dict] = {
     "digits": True,
     "chars": "_",
 }
+
+# Current Vi input mode. "pending" is short for Operator-pending mode. Happens
+# after operator command "d", "c" or "y". ViperOffice is then waiting for motion.
+MODES: Final[tuple] = ("normal", "insert", "pending", "visual")
+Mode = Literal[*MODES]
 
 # How many lines should C-d and C-u scroll.
 SCROLL: Final[int] = 21
@@ -110,7 +111,7 @@ def _clear_visual_anchor() -> None:
 
 
 def _set_mode(new_mode: Mode) -> bool:
-    if new_mode not in ("normal", "insert", "pending", "visual"):
+    if new_mode not in MODES:
         return False
     _state()["mode"] = new_mode
     _update_statusline()
