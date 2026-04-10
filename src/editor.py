@@ -136,7 +136,7 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
         print("ViperOffice cursor debug: No view cursor available.")
         return
     try:
-        text_cursor = _get_text_cursor()
+        tc = _get_text_cursor()
         lines = [f"Mode: {_get_mode()}  pending: {_get_pending_keys()}"]
 
         try:
@@ -156,31 +156,31 @@ def _debug_cursor_state(pop_up: bool = False):  # noqa: F811  # pyright: ignore[
             lines.append("Range: unavailable")
 
         # Text cursor info
-        if text_cursor is None:
+        if tc is None:
             lines.append("TextCursor: unavailable")
         else:
             try:
-                paragraph_text, offset = _current_paragraph_text_and_offset(text_cursor)
-                char = text_cursor.getString()[:40]
+                paragraph_text, offset = _current_paragraph_text_and_offset(tc)
+                char = tc.getString()[:40]
                 lines.append("-- text cursor LO API --")
                 lines.append(f"char: {char}")
-                lines.append(f"getString: {text_cursor.getString()}")
-                lines.append(f"collapsed: {text_cursor.isCollapsed()}")
-                lines.append(f"start of paragraph: {text_cursor.isStartOfParagraph()}")
-                lines.append(f"end of paragraph: {text_cursor.isEndOfParagraph()}")
+                lines.append(f"getString: {tc.getString()}")
+                lines.append(f"collapsed: {tc.isCollapsed()}")
+                lines.append(f"start of paragraph: {tc.isStartOfParagraph()}")
+                lines.append(f"end of paragraph: {tc.isEndOfParagraph()}")
                 # Cursor needs to be collapsed for this to give True.
-                lines.append(f"start of sentence: {text_cursor.isStartOfSentence()}")  # type: ignore[reportAttributeAccessIssue]
-                lines.append(f"start of word: {text_cursor.isStartOfWord()}")
-                lines.append(f"end of word: {text_cursor.isEndOfWord()}")
+                lines.append(f"start of sentence: {tc.isStartOfSentence()}")  # type: ignore[reportAttributeAccessIssue]
+                lines.append(f"start of word: {tc.isStartOfWord()}")
+                lines.append(f"end of word: {tc.isEndOfWord()}")
                 lines.append("-- ViperOffice custom functions --")
-                lines.append(f"is forward selection: {_is_forward_selection(text_cursor)}")
-                lines.append(f"Is at whitespace: {_is_cursor_at_whitespace(text_cursor)}")
-                lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(text_cursor, "after_sentence")}")
-                lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(text_cursor, "before_paragraph")}")
-                lines.append(f"Is at empty paragraph: {_is_current_paragraph_empty(text_cursor)}")
+                lines.append(f"is forward selection: {_is_forward_selection(tc)}")
+                lines.append(f"Is at whitespace: {_is_cursor_at_whitespace(tc)}")
+                lines.append(f"at whitespace after sentence: {_is_cursor_at_whitespace(tc, "after_sentence")}")
+                lines.append(f"at whitespace before paragraph: {_is_cursor_at_whitespace(tc, "before_paragraph")}")
+                lines.append(f"Is at empty paragraph: {_is_current_paragraph_empty(tc)}")
                 lines.append(f"Paragraph length: {len(paragraph_text)}")
                 lines.append(f"Paragraph offset: {offset}")
-                lines.append(f"start of sentence: {_is_at_sentence_start(text_cursor)}")
+                lines.append(f"start of sentence: {_is_at_sentence_start(tc)}")
                 lines.append(f"Word character class: {_word_char_class(char)}")
                 lines.append("")
             except Exception as e:
@@ -364,21 +364,21 @@ def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bo
                 return None
 
         for _ in range(steps):
-            text_cursor = _get_text_cursor()
-            if text_cursor is None:
+            tc = _get_text_cursor()
+            if tc is None:
                 return moved_any
 
-            text = text_cursor.getText()
+            text = tc.getText()
             if text is None:
                 return moved_any
 
             if expand:
-                caret = _get_visual_caret_range(text_cursor)
-                text_cursor.gotoRange(caret, False)
+                caret = _get_visual_caret_range(tc)
+                tc.gotoRange(caret, False)
             else:
-                text_cursor.gotoRange(text_cursor.getStart(), False)
+                tc.gotoRange(tc.getStart(), False)
 
-            start_cursor = text.createTextCursorByRange(text_cursor.getStart())
+            start_cursor = text.createTextCursorByRange(tc.getStart())
             if backward:
                 if not start_cursor.goLeft(1, False):
                     break
@@ -405,7 +405,7 @@ def _to_character(expand:bool, count:int, cursor, command: str, char: str) -> bo
             if target_range is None:
                 break
 
-            if not _range_same_start(text_cursor.getStart(), target_range):
+            if not _range_same_start(tc.getStart(), target_range):
                 moved_any = True
 
             probe = text.createTextCursorByRange(target_range)
@@ -444,15 +444,15 @@ def _repeat_last_to_character(count: int, expand: bool, key: KeyEvent, cursor) -
             case _:
                 return False
 
-        text_cursor = _get_text_cursor()
-        if text_cursor is None:
+        tc = _get_text_cursor()
+        if tc is None:
             return False
 
         match search_type:
             case "t":
-                text_cursor.goRight(1, expand)
+                tc.goRight(1, expand)
             case "T", "F":
-                text_cursor.goLeft(1, expand)
+                tc.goLeft(1, expand)
             case _:
                 pass
 
@@ -621,9 +621,9 @@ def _select_linewise(cursor) -> bool:
 
 def _append_text(cursor):
     """Command 'a'."""
-    textCursor = _get_text_cursor()
+    tc = _get_text_cursor()
     try:
-        if textCursor is not None and not textCursor.isEndOfParagraph():
+        if tc is not None and not tc.isEndOfParagraph():
             cursor.goRight(1, False)
     except Exception as e:
         _handle_exc(err=e)
@@ -690,20 +690,20 @@ def _copy_and_delete_linewise(yank: bool, delete: bool) -> bool:
 def _delete_characters(count:int, backward: bool = False) -> bool:
     """Delete single characters. Normal mode commands 'x','X' and 's'."""
     try:
-        text_cursor = _get_text_cursor()
-        if text_cursor is None:
+        tc = _get_text_cursor()
+        if tc is None:
             return False
         # Collapse to start of normal-mode block cursor position
-        text_cursor.gotoRange(text_cursor.getStart(), False)
+        tc.gotoRange(tc.getStart(), False)
         if backward:
             # Delete count chars to the left; bail if already at start of line
-            if not text_cursor.goLeft(count, True):
+            if not tc.goLeft(count, True):
                 return False
         else:
             # Delete count chars from cursor position rightward
-            if not text_cursor.goRight(count, True):
+            if not tc.goRight(count, True):
                 return False
-        text_cursor.setString("")
+        tc.setString("")
         return True
     except Exception as e:
         _handle_exc(err=e)
@@ -760,12 +760,12 @@ def _copy_and_delete(yank:bool, delete:bool) -> bool:
     try:
         if not yank and not delete:
             return False
-        text_cursor = _get_text_cursor()
+        tc = _get_text_cursor()
         if yank:
             _execute_dispatch(".uno:Copy")
         if delete:
-            if text_cursor is not None:
-                text_cursor.setString("")
+            if tc is not None:
+                tc.setString("")
         return True
     except Exception as e:
         _handle_exc(err=e)
@@ -787,19 +787,19 @@ def _paste(count:int, mode, after_cursor:bool):
     """Paste text from clipboard after or before cursor [count] times.
        Commands 'p' and 'P'.
     """
-    text_cursor = _get_text_cursor()
-    if text_cursor is None:
+    tc = _get_text_cursor()
+    if tc is None:
         return False
 
     try:
-        if after_cursor and not text_cursor.isEndOfParagraph():
-            text_cursor.goRight(1, False)
+        if after_cursor and not tc.isEndOfParagraph():
+            tc.goRight(1, False)
 
         if mode == "normal":
             controller = _get_controller()
             if controller is None:
                 return False
-            controller.select(text_cursor)
+            controller.select(tc)
 
         for _ in range(count):
             _execute_dispatch(".uno:Paste")

@@ -17,9 +17,11 @@ if TYPE_CHECKING:
 # Utility functions
 # -------------------
 
-def _clone_text_range(text_cursor) -> XTextCursor:
-    """Return a cloned TextCursor positioned at the start of text_cursor. """
-    return text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+def _clone_text_range(text_cursor, end: bool = False) -> XTextCursor:
+    """Return a cloned TextCursor positioned at the start of text_cursor by
+    default. end=True : use end of range."""
+    range = text_cursor.getEnd() if end else text_cursor.getStart()
+    return text_cursor.getText().createTextCursorByRange(range)
 
 
 # For debugging
@@ -34,16 +36,15 @@ def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportU
         if range is None:
             return "None"
         text = range.getString()
-        para = range.getText()
         # Compute start offset relative to paragraph start
         start_range = range.getStart()
-        start_cursor = para.createTextCursorByRange(start_range)
+        start_cursor = _clone_text_range(range)
         start_cursor.gotoStartOfParagraph(False)
         start_cursor.gotoRange(start_range, True)
         start_offset = len(start_cursor.getString())
         # Compute end offset relative to paragraph start (exclusive)
         end_range = range.getEnd()
-        end_cursor = para.createTextCursorByRange(end_range)
+        end_cursor = _clone_text_range(range, end=True)
         end_cursor.gotoStartOfParagraph(False)
         end_cursor.gotoRange(end_range, True)
         end_offset = len(end_cursor.getString())
@@ -149,7 +150,7 @@ def _is_at_first_non_whitespace_after_leading_ws(text_cursor) -> bool:
     try:
         if text_cursor.isStartOfParagraph():
             return False
-        para_probe = text_cursor.getText().createTextCursorByRange(text_cursor.getStart())
+        para_probe = _clone_text_range(text_cursor)
         para_probe.gotoStartOfParagraph(False)
         para_probe.gotoRange(text_cursor.getStart(), True)
         return all(c in (" ", "\t") for c in para_probe.getString())

@@ -361,18 +361,18 @@ def _goto_mode(new_mode: Mode) -> bool:
             # Place caret to correct end of selection.
             cursor = _get_cursor()
             controller = _get_controller()
-            text_cursor = _get_text_cursor()
+            tc = _get_text_cursor()
             try:
                 if controller is not None and \
-                    text_cursor is not None and  \
+                    tc is not None and  \
                     cursor is not None:
                     # Use the saved anchor to find the caret end before
                     # clearing it.
-                    caret = _get_visual_caret_range(text_cursor)
-                    text_cursor.gotoRange(caret, False)
+                    caret = _get_visual_caret_range(tc)
+                    tc.gotoRange(caret, False)
                     if not cursor.isAtStartOfLine():
-                        text_cursor.goLeft(1, False)
-                    controller.select(text_cursor)
+                        tc.goLeft(1, False)
+                    controller.select(tc)
             finally:
                 _clear_visual_anchor()
                 _show_cursor("normal")
@@ -396,7 +396,7 @@ def _goto_mode(new_mode: Mode) -> bool:
     return True
 
 
-def _get_visual_caret_range(text_cursor):
+def _get_visual_caret_range(tc):
     """Return the caret (active/moving) end of the visual selection as an XTextRange.
 
     LibreOffice's getStart()/getEnd() always return left/right ends regardless of
@@ -406,46 +406,46 @@ def _get_visual_caret_range(text_cursor):
     """
     anchor = _get_visual_anchor()
     if anchor is None:
-        return text_cursor.getEnd()
+        return tc.getEnd()
     try:
-        text = text_cursor.getText()
-        probe = text.createTextCursorByRange(text_cursor.getStart())
+        text = tc.getText()
+        probe = text.createTextCursorByRange(tc.getStart())
         probe.gotoRange(anchor, True)
         if len(probe.getString()) == 0:
-            return text_cursor.getEnd()   # forward selection
+            return tc.getEnd()   # forward selection
         else:
-            return text_cursor.getStart() # backward selection
+            return tc.getStart() # backward selection
     except Exception as e:
         _handle_exc(err=e)
-        return text_cursor.getEnd()
+        return tc.getEnd()
 
 
 def _show_cursor(mode: Mode):
     """Sets cursor style and saves cursor position info. """
-    text_cursor = _get_text_cursor()
+    tc = _get_text_cursor()
     cursor = _get_cursor()
     controller = _get_controller()
-    if text_cursor is None or controller is None or cursor is None:
+    if tc is None or controller is None or cursor is None:
         return False
     try:
         if mode in ("normal", "pending"):
             # Select 1 character right side of caret as Normal mode cursor.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            moved = text_cursor.goRight(1, False)
+            tc.gotoRange(tc.getStart(), False)
+            moved = tc.goRight(1, False)
             if moved:
-                text_cursor.goLeft(1, True)
+                tc.goLeft(1, True)
 
         elif mode.startswith("visual"):
             # Collapse cursor since caret is the anchor point in LibreOffice.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
-            _set_visual_anchor(text_cursor.getStart())
+            tc.gotoRange(tc.getStart(), False)
+            _set_visual_anchor(tc.getStart())
         elif mode == "insert":
             # Use collapsed cursor.
-            text_cursor.gotoRange(text_cursor.getStart(), False)
+            tc.gotoRange(tc.getStart(), False)
         else:
             raise ValueError("Unknown mode: " + str(mode))
 
-        controller.select(text_cursor)
+        controller.select(tc)
     except Exception as e:
         _handle_exc(err=e)
         return False
