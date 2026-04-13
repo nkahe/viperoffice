@@ -305,7 +305,8 @@ def _get_dispatcher():
     try:
         ctx = XSCRIPTCONTEXT.getComponentContext()
         smgr = ctx.getServiceManager()
-        dispatcher = smgr.createInstanceWithContext("com.sun.star.frame.DispatchHelper", ctx)
+        dispatcher = smgr.createInstanceWithContext(
+            "com.sun.star.frame.DispatchHelper", ctx)
         return dispatcher
     except Exception as e:
         _handle_exc(err=e)

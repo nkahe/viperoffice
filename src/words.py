@@ -186,6 +186,20 @@ def _to_end_of_words(expand: bool, count: int, mode: Mode, cursor) -> bool:
         return False
 
 
+# Offset means cursor position relative to start of paragraph.
+def _current_paragraph_text_and_offset(tc):
+    text_obj = tc.getText()
+    para = text_obj.createTextCursorByRange(tc.getStart())
+    para.gotoStartOfParagraph(False)
+    para.gotoEndOfParagraph(True)
+    paragraph_text = para.getString()
+
+    offset_cursor = text_obj.createTextCursorByRange(tc.getStart())
+    offset_cursor.gotoStartOfParagraph(True)
+    offset = len(offset_cursor.getString())
+    return paragraph_text, offset
+
+
 # Text cursor's isEndOfWord() doesn't match with Vi/Vim or with dispatch
 # command used with to start of words motion so this parser is used instead.
 # Correct placement for cursor is calculated as offset from start of paragraph.
@@ -433,6 +447,76 @@ def _to_end_of_WORDs_forward(expand: bool, count: int, cursor) -> bool:
                 can_move = _to_end_of_WORD(tc, expand, before_end=True)
                 if not can_move:
                     break
+
+        probe = _clone_text_range(tc)
+        backward_selection = not _is_forward_selection(probe)
+        _sync_view_cursor(tc, expand, cursor, backward_selection)
+        return True
+
+    except Exception as e:
+        _handle_exc(err=e)
+        return False
+
+
+def _scan_backward_word_unit_end(paragraph_text: str, offset: int) -> int | None:
+    """Return the end index of the previous WORD unit before offset."""
+    length = len(paragraph_text)
+    if length == 0 or offset <= 0:
+        return None
+
+    i = min(offset - 1, length - 1)
+
+    # If the caret is inside a WORD, first walk back to the unit boundary.
+    if not paragraph_text[i].isspace():
+        while i >= 0 and not paragraph_text[i].isspace():
+            i -= 1
+
+    # Then skip whitespace and land on the last character of the previous WORD.
+    while i >= 0 and paragraph_text[i].isspace():
+        i -= 1
+
+    return i if i >= 0 else None
+
+
+def _to_end_of_WORDs_backward(expand: bool, count: int, cursor) -> bool:
+    """Motion to end of [count] WORDs backward. Command 'gE'."""
+    tc = _get_text_cursor()
+    if tc is None:
+        return False
+
+    try:
+        steps = max(1, int(count))
+        moved_any = False
+
+        for _ in range(steps):
+            if expand:
+                _update_cursor(tc)
+
+            if _is_current_paragraph_empty(tc):
+                if not tc.gotoPreviousParagraph(False):
+                    break
+                tc.gotoEndOfParagraph(False)
+                moved_any = True
+                continue
+
+            paragraph_text, offset = _current_paragraph_text_and_offset(tc)
+            prev_end = _scan_backward_word_unit_end(paragraph_text, offset)
+            if prev_end is None:
+                if not tc.gotoPreviousParagraph(False):
+                    break
+                tc.gotoEndOfParagraph(False)
+                moved_any = True
+                continue
+
+            tc.gotoStartOfParagraph(False)
+            if prev_end > 0:
+                tc.goRight(prev_end, False)
+            if expand:
+                tc.goRight(1, False)
+            moved_any = True
+
+        if not moved_any:
+            return False
 
         probe = _clone_text_range(tc)
         backward_selection = not _is_forward_selection(probe)
@@ -755,20 +839,6 @@ def _scan_backward_word_target(paragraph_text, offset, spec):
         return i
 
     return None
-
-
-# Offset means cursor position relative to start of paragraph.
-def _current_paragraph_text_and_offset(text_cursor):
-    text_obj = text_cursor.getText()
-    para = text_obj.createTextCursorByRange(text_cursor.getStart())
-    para.gotoStartOfParagraph(False)
-    para.gotoEndOfParagraph(True)
-    paragraph_text = para.getString()
-
-    offset_cursor = text_obj.createTextCursorByRange(text_cursor.getStart())
-    offset_cursor.gotoStartOfParagraph(True)
-    offset = len(offset_cursor.getString())
-    return paragraph_text, offset
 
 
 def _apply_motion_result(result, expand:bool) -> bool:
