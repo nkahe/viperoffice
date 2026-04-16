@@ -193,8 +193,10 @@ def _to_start_of_next_sentence(tc, expand: bool, cursor) -> bool:
     """
     moved = None
     # From an empty line, jump directly to the next non-empty paragraph.
+    # Keep the text cursor collapsed here so expand=True does not select across
+    # the skipped paragraphs before the view cursor is synced.
     if _is_current_paragraph_empty(tc):
-        moved = _to_next_non_empty_paragraph(tc, expand)
+        moved = _to_next_non_empty_paragraph(tc, False)
 
     # From leading whitespace of a paragraph, gotoNextSentence would skip the
     # first sentence entirely. Jump to the next word instead, which lands at
