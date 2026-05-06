@@ -61,6 +61,7 @@ def _describe_text_range(range) -> str:  # noqa: F811  # pyright: ignore[reportU
             return "<unprintable range>"
 
 
+# Every empty visual line is also empty paragraph.
 def _is_current_paragraph_empty(tc) -> bool:
     if tc is None:
         return False
@@ -177,6 +178,7 @@ def _is_forward_selection(tc) -> bool:
     except Exception as e:
         _handle_exc(err=e)
         return True
+
 
 def msg(text, title="ViperOffice"): # noqa: F811  # pyright: ignore[reportUnusedFunction]
     """Show [text] in a pop-up window for debug."""

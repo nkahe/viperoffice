@@ -9,16 +9,18 @@ Extension source code consists of following modules:
 Motions used by editor:
 - **sentences** - Sentence motions. Commands `()`, `is`, `as`.
 - **paragraphs** - Paragraph motions. Commands `{}`, `ip`, `ap`.
-- **words** - Word motions. Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
+- **words** - Word motions including text-objects. Commands `w`, `W`, `b`, `B`, `e`, `E`, `ge`, `gE`,  `iw`, `iW`, `aw`, `aW`
 - **word_specs** - Words specs used by editor and words.py.
+- **words-decentralized** - Alternative implementation of Words motions. Uses more
+  independent functions. Easier to follow but bigger. Doesn't include text-objects.
 
 Modules have different sections which are described below.
 
 ## Editor module
 
 File consists of different sections listed below. Order is same as in source code.
-Main class of extension is KeyHandler. 
-
+Main class of extension is KeyHandler which is in same module with different actions
+for convenience.
 
 ### Actions
 
@@ -47,5 +49,4 @@ Vi operators delete, change and yank, clipboard operations, undo/redo. Commands 
 
 Contains KeyHandler class which is backbone of extension. It interprets and processes user
 input, manages (global) state and calls actions based on them.
-
 

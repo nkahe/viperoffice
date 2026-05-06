@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 from functools import partial
 import threading
 import unohelper
@@ -921,6 +921,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         _update_statusline()
         return
 
+    # Actions which are run with Ctrl + [key].
     def _normal_ctrl_actions(self, expand: bool, mode: Mode) -> dict:
         count = self.count
         a_code = int(getattr(Key, "A", 512))
@@ -943,8 +944,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         }
         return actions
 
-    # Keymap for Normal/Pending mode commands and Visual mode commands which
-    # aren't included in Visual mode keymap.
+    # Keymap for Normal/Pending mode commands (and Visual mode commands which
+    # aren't included in Visual mode keymap).
     def _normal_commands_keymap(self, key, mode, cursor) -> dict:
         # Available commands after "g" command.
         count = self.count
@@ -1260,7 +1261,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if key.pending:
             if key.pending[-1] in "fFtT":
                 motion = partial(self._ft_commands, expand, key, mode)
-            # For dd, cc, yy, S do motion lines down from current line.
+            # For dd, cc, yy, S do linewise motion down.
             elif mode == "pending" and (key.pending[0] == key.char or key.char == "S"):
                 motion = partial(_lines_down, count -1, True, mode, cursor)
             else:
@@ -1284,6 +1285,7 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         self._reset_count()
         return moved
 
+    # Commands which start with keys f, F, t, T.
     def _ft_commands(self, expand, key, mode) -> bool:
         if key.pending[-1].lower() not in ("ft"):
             return False
@@ -1304,7 +1306,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         if action is None:
             return None
         did_action = action()
-        # After doing action:
         self._reset_count()
         if key.char.lower() in ("cs"):
             _goto_mode("insert")
@@ -1341,6 +1342,8 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             _goto_mode("normal")
         return did_action
 
+    # Navigation keys are mapped to motions so they can take count, be used
+    # with operators and for pageup/pagedown handle selection.
     def _navigation_keys(self, expand, mode: Mode, cursor):
         count = self.count
         backspace = int(Key.BACKSPACE)
@@ -1354,8 +1357,6 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         pageup    = int(Key.PAGEUP)   # type: ignore[attr-defined]
         pagedown  = int(Key.PAGEDOWN)  # type: ignore[attr-defined]
 
-        # Navigation keys are mapped to motions so they can take count, be used
-        # with operators and for pageup/pagedown handle selection.
         return {
             backspace: "h",
             enter:     lambda: _to_first_non_blank(expand, count, cursor),
@@ -1517,11 +1518,13 @@ class KeyHandler(unohelper.Base, XKeyHandler):
         state = _state()
         if not state["enabled"]:
             return False
+        # Make Normal mode block cursor by selecting 1 char.
         if state["mode"] == "normal":
             _show_cursor("normal")
             return True
         return False
 
+    # Needed by interface.
     def disposing(self, event):
         return None
 
