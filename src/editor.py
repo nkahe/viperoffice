@@ -70,12 +70,15 @@ from words import ( # type: ignore[reportMissingImports]
     _expand_with_word_text_objects,
     _select_word_objects_forward,
     _word_char_class,
-    _to_start_of_words,
-    _to_start_of_WORDs,
-    _to_end_of_words,
-    _to_end_of_WORDs_forward,
-    _to_end_of_WORDs_backward,
 )
+
+# from words_decentralized import ( # type: ignore[reportMissingImports]
+#     _to_start_of_words,
+#     _to_start_of_WORDs,
+#     _to_end_of_words,
+#     _to_end_of_WORDs_forward,
+#     _to_end_of_WORDs_backward,
+# )
 
 # --------------------
 # Cursor and selection
@@ -994,7 +997,9 @@ class KeyHandler(unohelper.Base, XKeyHandler):
             motions = {
                 "g": lambda: _to_line(expand, self.get_raw_count(), False, mode, cursor),
                 "e": lambda: _word_motion(_WORD_MOTION_GE, expand, count, mode),
-                "E": lambda: _to_end_of_WORDs_backward(expand, count, cursor),
+                "E": lambda: _word_motion(_WORD_MOTION_G_BIG_E, expand, count, mode),
+                # "e": lambda: _to_end_of_words(expand, count, mode, cursor, backward=True),
+                # "E": lambda: _to_end_of_WORDs_backward(expand, count, cursor),
             }
         else:
             motions = {
@@ -1002,21 +1007,23 @@ class KeyHandler(unohelper.Base, XKeyHandler):
                 "l": lambda: cursor.goRight(count, expand),
                 "j": lambda: _lines_down(count, expand, mode, cursor),
                 "k": lambda: _lines_up(count, expand, mode, cursor),
-                # "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
-                # "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
-                # "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
-                "w": lambda: _to_start_of_words(expand, count, mode, cursor, previous = False),
-                "b": lambda: _to_start_of_words(expand, count, mode, cursor, previous = True),
-                "e": lambda: _to_end_of_words(expand, count, mode, cursor),
-                "W": lambda: _to_start_of_WORDs(expand, count, cursor, direction = "forward"),
-                # "W": lambda: _to_start_of_next_WORD(expand, count, mode, cursor, key),
-                "B": lambda: _to_start_of_WORDs(expand, count, cursor, direction = "backward"),
-                # "B": lambda: _to_start_of_previous_WORD(expand, count, mode, cursor),
-                # "B": lambda: _to_start_of_previous_WORD(expand, count, mode, cursor),
-                # "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
-                "E": lambda: _to_end_of_WORDs_forward(expand, count, cursor),
-                # "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
-                # "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
+
+                # Older implementation
+                "b": lambda: _word_motion(_WORD_MOTION_B, expand, count, mode),
+                "e": lambda: _word_motion(_WORD_MOTION_E, expand, count, mode),
+                "w": lambda: _word_motion(_WORD_MOTION_W, expand, count, mode),
+                "B": lambda: _word_motion(_WORD_MOTION_BIG_B, expand, count, mode),
+                "E": lambda: _word_motion(_WORD_MOTION_BIG_E, expand, count, mode),
+                "W": lambda: _word_motion(_WORD_MOTION_BIG_W, expand, count, mode),
+
+                # Newer rewrite
+                # "b": lambda: _to_start_of_words(expand, count, mode, cursor, previous = True),
+                # "e": lambda: _to_end_of_words(expand, count, mode, cursor),
+                # "w": lambda: _to_start_of_words(expand, count, mode, cursor, previous = False),
+                # "B": lambda: _to_start_of_WORDs(expand, count, cursor, direction = "backward"),
+                # "E": lambda: _to_end_of_WORDs_forward(expand, count, cursor),
+                # "W": lambda: _to_start_of_WORDs(expand, count, cursor, direction = "forward"),
+
                 "^": lambda: _to_first_non_blank(expand, 0, cursor),
                 "$": lambda: _to_end_of_line(expand, count, cursor),
                 "H": lambda: _jump_to_page(expand, count, cursor, "start"),

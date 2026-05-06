@@ -1,4 +1,3 @@
-
 # -------------------
 # Word motion specs
 # -------------------
@@ -64,6 +63,8 @@ _WORD_MOTION_BIG_W = {
     "cross_empty": True,
     "inclusive": False,
 }
+
+# For text-object
 
 _WORD_OBJECT_UNIT_FORWARD = {
     "direction": FORWARD,
