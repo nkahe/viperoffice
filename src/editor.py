@@ -65,11 +65,11 @@ from word_specs import (  # type: ignore[reportMissingImports]
     _WORD_MOTION_W,
 )
 from words import ( # type: ignore[reportMissingImports]
+    _word_motion,
     _current_paragraph_text_and_offset,
     _expand_with_word_text_objects,
     _select_word_objects_forward,
     _word_char_class,
-    _word_motion,
     _to_start_of_words,
     _to_start_of_WORDs,
     _to_end_of_words,

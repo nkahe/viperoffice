@@ -44,16 +44,15 @@ BACKWARD = "backward"
 START = "start"
 END = "end"
 
-# ------------------
-# Word motions
-# ------------------
+# ------------------------
+# Word motions (non-WORDs)
+# ------------------------
 
-def _to_start_of_words(expand: bool, count: int, mode: Mode, cursor, previous: bool ) -> bool:
+def _to_start_of_words(expand: bool, count: int, mode: Mode, cursor, previous: bool) -> bool:
     """To start of previous or next [count] words. Commands 'w' and 'b'."""
     tc = _get_text_cursor()
     if tc is None:
         return False
-
     try:
         if mode == "pending":
             _set_visual_anchor(tc.getStart())
@@ -101,7 +100,8 @@ def _to_start_of_words(expand: bool, count: int, mode: Mode, cursor, previous: b
 
 def _to_start_of_previous_word(expand: bool, mode: Mode, cursor, tc):
     """Returns (sync_cursor, new_anchor). new_anchor is set when pending mode
-    repositions the anchor after moving 1 left across an empty paragraph."""
+    repositions the anchor after moving 1 left across an empty paragraph.
+    """
     sync_cursor = False
     new_anchor = None
 
@@ -134,8 +134,7 @@ def _to_start_of_previous_word(expand: bool, mode: Mode, cursor, tc):
 
 
 def _next_word_edge_case(expand, tc):
-    """Handle some edge cases for 'w' and 'W' motions. Return True if handled
-    edge case.
+    """Handle some edge cases for 'w' and 'W' motions. Return True if handled edge case.
     """
     if _is_current_paragraph_empty(tc) or tc.isEndOfParagraph():
         tc.gotoNextParagraph(expand)
@@ -306,7 +305,6 @@ def _to_start_of_WORDs(expand: bool, count: int, cursor, direction: str) -> bool
     if tc is None:
         return False
     try:
-
         if direction == "forward":
             for _ in range(count):
                 if expand:
@@ -459,19 +457,19 @@ def _to_end_of_WORDs_forward(expand: bool, count: int, cursor) -> bool:
 
 
 def _scan_backward_word_unit_end(paragraph_text: str, offset: int) -> int | None:
-    """Return the end index of the previous WORD unit before offset."""
+    """Return the end index of the previous word unit before offset."""
     length = len(paragraph_text)
     if length == 0 or offset <= 0:
         return None
 
     i = min(offset - 1, length - 1)
 
-    # If the caret is inside a WORD, first walk back to the unit boundary.
+    # If the caret is inside a word unit, first walk back to the boundary.
     if not paragraph_text[i].isspace():
         while i >= 0 and not paragraph_text[i].isspace():
             i -= 1
 
-    # Then skip whitespace and land on the last character of the previous WORD.
+    # Then skip whitespace and land on the last character of the previous word.
     while i >= 0 and paragraph_text[i].isspace():
         i -= 1
 
@@ -749,7 +747,8 @@ def _word_motion_once_backward(text_cursor, expand: bool, spec) -> bool:
     return True
 
 
-def _scan_forward_word_target(paragraph_text, offset, spec):
+def _scan_forward_word_target(paragraph_text, offset, spec) -> int | None:
+    """Scan forward next word target and if found return it's offset."""
     length = len(paragraph_text)
     if offset >= length:
         return None
@@ -796,7 +795,8 @@ def _scan_forward_word_target(paragraph_text, offset, spec):
     return None
 
 
-def _scan_backward_word_target(paragraph_text, offset, spec):
+def _scan_backward_word_target(paragraph_text, offset, spec) -> int | None:
+    """Scan backward next word target and if found return it's offset."""
     length = len(paragraph_text)
     if length == 0 or offset <= 0:
         return None
