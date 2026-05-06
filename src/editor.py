@@ -720,12 +720,26 @@ def _replace_characters(count:int, key:KeyEvent, cursor) -> bool:
        Command 'r'.
     """
     try:
-        length = len(cursor.getString())
+        selected_length = len(cursor.getString())
+        if selected_length > 1:
+            cursor.setString(key.char * selected_length)
+            return True
 
-        if length > 1:
-            cursor.setString(key.char * length)
-        else:
-            cursor.setString(key.char * count)
+        # In Normal mode, don't rely on already selected cursor block because
+        # it's re-applied on keyReleased causing race condition.
+        # Build replacement range directly from text cursor.
+        tc = _get_text_cursor()
+        if tc is None:
+            return False
+        tc.gotoRange(tc.getStart(), False)
+
+        replace_count = max(1, count)
+        tc.goRight(replace_count, True)
+
+        selected_length = len(tc.getString())
+        if selected_length == 0:
+            return False
+        tc.setString(key.char * selected_length)
 
         return True
     except Exception as e:
