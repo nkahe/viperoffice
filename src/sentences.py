@@ -191,6 +191,7 @@ def _to_start_of_next_sentence(tc, expand: bool, cursor) -> bool:
     Handles edge cases: empty paragraphs (jumps to next non-empty), leading paragraph
     whitespace, and backends that stall on paragraph-end markers.
     """
+    old_pos = cursor.getPosition()
     moved = None
     # From an empty line, jump directly to the next non-empty paragraph.
     # Keep the text cursor collapsed here so expand=True does not select across
@@ -202,14 +203,22 @@ def _to_start_of_next_sentence(tc, expand: bool, cursor) -> bool:
     # first sentence entirely. Jump to the next word instead, which lands at
     # the start of that sentence.
     if _is_cursor_at_whitespace(tc, "before_paragraph"):
-        tc.gotoNextWord(expand)
-        moved = True
+        moved = tc.gotoNextWord(expand)
 
-    if moved is not None:
+    if moved:
         _sync_view_cursor(tc, expand, cursor)
-        return moved
+        return bool(moved and not _same_pos(old_pos, cursor.getPosition()))
 
-    tc.gotoNextSentence(expand)
+    # When caret is already at end of a non-empty paragraph, some backends
+    # don't advance with gotoNextSentence(). Cross paragraph boundary first.
+    if tc.isEndOfParagraph() and not _is_current_paragraph_empty(tc):
+        moved = bool(tc.gotoNextParagraph(False))
+        if moved and _is_cursor_at_whitespace(tc, "before_paragraph"):
+            moved = bool(tc.gotoNextWord(False))
+        _sync_view_cursor(tc, expand, cursor)
+        return bool(moved and not _same_pos(old_pos, cursor.getPosition()))
+
+    moved = tc.gotoNextSentence(expand)
 
     # If checks below won't work if fresh text_cursor isn't get.
     _sync_view_cursor(tc, expand, cursor)
@@ -223,9 +232,9 @@ def _to_start_of_next_sentence(tc, expand: bool, cursor) -> bool:
         _sync_view_cursor(tc, expand, cursor)
 
     if _is_cursor_at_whitespace(tc, "before_paragraph"):
-        tc.gotoNextWord(expand)  # type: ignore[reportAttributeAccessIssue]
+        moved = bool(tc.gotoNextWord(expand)) or bool(moved)  # type: ignore[reportAttributeAccessIssue]
         _sync_view_cursor(tc, expand, cursor)
-    return True
+    return bool(moved and not _same_pos(old_pos, cursor.getPosition()))
 
 
 def _start_of_sentences_forward(expand: bool, count: int, cursor) -> bool:
